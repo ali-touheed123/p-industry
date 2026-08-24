@@ -1,0 +1,189 @@
+/* -------------------------------------------------------------
+   PaintERP CEO Executive Panel Theme (Obsidian & Warm Gold)
+   ------------------------------------------------------------- */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --ceo-bg-canvas: #12151B;
+  --ceo-bg-surface: #10141B;
+  --ceo-bg-card: #1C2128;
+  --ceo-bg-card-hover: #222831;
+  --ceo-border: #2A2F38;
+  --ceo-gold: #C6A15B;
+  --ceo-gold-muted: rgba(198, 161, 91, 0.15);
+  --ceo-text-primary: #E5E7EB;
+  --ceo-text-muted: #8B93A1;
+  --ceo-green: #34D399;
+  --ceo-red: #F87171;
+  --ceo-blue: #38BDF8;
+}
+
+.ceo-root {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: #12151B;
+  color: #E5E7EB;
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
+.ceo-root * {
+  box-sizing: border-box;
+}
+
+.ceo-font-heading {
+  font-family: 'Outfit', sans-serif;
+}
+
+.ceo-font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Card Styling */
+.ceo-card {
+  background-color: #1C2128;
+  border: 1px solid #2A2F38;
+  border-radius: 8px;
+  padding: 1.25rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  transition: all 0.2s ease-in-out;
+}
+
+.ceo-card-interactive {
+  background-color: #1C2128;
+  border: 1px solid #2A2F38;
+  border-radius: 8px;
+  padding: 1.25rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  transition: all 0.2s ease-in-out;
+  cursor: pointer;
+}
+
+.ceo-card-interactive:hover {
+  background-color: #222831;
+  border-color: rgba(198, 161, 91, 0.5);
+  box-shadow: 0 8px 24px rgba(198, 161, 91, 0.08);
+}
+
+/* Table styles */
+.ceo-table-container {
+  border: 1px solid #2A2F38;
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: #1C2128;
+  overflow-x: auto;
+}
+
+.ceo-table {
+  width: 100%;
+  text-align: left;
+  font-size: 12px;
+  border-collapse: collapse;
+}
+
+.ceo-table thead {
+  background-color: #10141B;
+  color: #8B93A1;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+  border-bottom: 1px solid #2A2F38;
+}
+
+.ceo-table th, .ceo-table td {
+  padding: 10px 14px;
+}
+
+.ceo-table tbody tr {
+  border-bottom: 1px solid #2A2F38;
+  transition: background-color 0.15s ease;
+}
+
+.ceo-table tbody tr:hover {
+  background-color: #12151B;
+}
+
+/* Buttons */
+.ceo-btn-gold {
+  background-color: #C6A15B;
+  color: #12151B;
+  font-weight: 700;
+  font-size: 12px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ceo-btn-gold:hover {
+  background-color: #d8b672;
+}
+
+.ceo-btn-secondary {
+  background-color: #1C2128;
+  border: 1px solid #2A2F38;
+  color: #8B93A1;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ceo-btn-secondary:hover {
+  color: #E5E7EB;
+  border-color: rgba(198, 161, 91, 0.4);
+}
+
+/* Modal overlay */
+.ceo-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background-color: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(4px);
+}
+
+.ceo-modal-box {
+  background-color: #12151B;
+  border: 1px solid #2A2F38;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 880px;
+  max-height: 92vh;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+  display: flex;
+  flex-direction: column;
+  color: #E5E7EB;
+}
+
+/* Scrollbar styling */
+.ceo-root ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.ceo-root ::-webkit-scrollbar-track {
+  background: #10141B;
+}
+
+.ceo-root ::-webkit-scrollbar-thumb {
+  background: #2A2F38;
+  border-radius: 3px;
+}
+
+.ceo-root ::-webkit-scrollbar-thumb:hover {
+  background: #C6A15B;
+}

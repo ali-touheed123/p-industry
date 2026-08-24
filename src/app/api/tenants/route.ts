@@ -18,7 +18,22 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ success: false, error: 'Branch not found' }, { status: 404 });
       }
 
-      return NextResponse.json({ success: true, tenant });
+      // Fetch counters/users belonging to this shop
+      const { data: tenantUsers } = await supabaseAdmin
+        .from('app_users')
+        .select('id, username, full_name, role')
+        .eq('tenant_id', tenant.id);
+
+      const staffCounters = (tenantUsers || []).filter(u => u.role === 'staff' || u.role === 'godown_staff');
+
+      return NextResponse.json({ 
+        success: true, 
+        tenant: {
+          ...tenant,
+          users: tenantUsers || [],
+          counters: staffCounters,
+        }
+      });
     }
 
     const { data: tenants, error: tenantErr } = await supabaseAdmin
@@ -63,6 +78,7 @@ export async function POST(req: NextRequest) {
       type = 'shop',
       owner_name,
       phone,
+      email,
       city,
       address,
       ceo_username,
@@ -87,6 +103,7 @@ export async function POST(req: NextRequest) {
         type,
         owner_name,
         phone,
+        email: email || null,
         city,
         address,
       })
@@ -108,6 +125,7 @@ export async function POST(req: NextRequest) {
           username: ceo_username.trim().toLowerCase(),
           password_hash: ceo_password,
           full_name: owner_name || `${name} Owner`,
+          email: email || `${ceo_username.trim().toLowerCase()}@pyntflow.com`,
           role: 'ceo',
           tenant_id: tenant.id,
         })
@@ -125,17 +143,34 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Create Staff user if credentials provided
+    // 3. Create Staff / Counter users if credentials provided
     if (staff_username && staff_password) {
       await supabaseAdmin
         .from('app_users')
         .insert({
           username: staff_username.trim().toLowerCase(),
           password_hash: staff_password,
-          full_name: `${name} Counter Staff`,
+          full_name: `${name} Counter 01`,
           role: type === 'godown' ? 'godown_staff' : 'staff',
           tenant_id: tenant.id,
         });
+    }
+
+    // 4. Create multiple custom counters if provided
+    if (Array.isArray(body.counters) && body.counters.length > 0) {
+      for (const c of body.counters) {
+        if (c.username && c.password && c.username.trim().toLowerCase() !== staff_username?.trim().toLowerCase()) {
+          await supabaseAdmin
+            .from('app_users')
+            .insert({
+              username: c.username.trim().toLowerCase(),
+              password_hash: c.password,
+              full_name: c.name || `${name} ${c.username.toUpperCase()}`,
+              role: type === 'godown' ? 'godown_staff' : 'staff',
+              tenant_id: tenant.id,
+            });
+        }
+      }
     }
 
     return NextResponse.json({ success: true, tenant });
@@ -161,9 +196,11 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Tenant ID required' }, { status: 400 });
     }
 
-    // Clean up dependent child records
+    // Clean up all dependent child records & users of this shop
     await supabaseAdmin.from('ceo_tenants').delete().eq('tenant_id', id);
     await supabaseAdmin.from('app_users').delete().eq('tenant_id', id);
+    await supabaseAdmin.from('invoices').delete().eq('tenant_id', id);
+    await supabaseAdmin.from('held_invoices').delete().eq('tenant_id', id);
     await supabaseAdmin.from('items').delete().eq('tenant_id', id);
     await supabaseAdmin.from('shifts').delete().eq('tenant_id', id);
     await supabaseAdmin.from('petty_expenses').delete().eq('tenant_id', id);
@@ -186,7 +223,7 @@ export async function DELETE(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { id, is_active, name, phone, city, address, type } = body;
+    const { id, is_active, name, phone, email, city, address, type } = body;
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Tenant ID required' }, { status: 400 });
@@ -196,6 +233,7 @@ export async function PATCH(req: NextRequest) {
     if (is_active !== undefined) updateData.is_active = is_active;
     if (name) updateData.name = name;
     if (phone !== undefined) updateData.phone = phone;
+    if (email !== undefined) updateData.email = email;
     if (city !== undefined) updateData.city = city;
     if (address !== undefined) updateData.address = address;
     if (type) updateData.type = type;

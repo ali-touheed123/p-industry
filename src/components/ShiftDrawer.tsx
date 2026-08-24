@@ -41,35 +41,27 @@ export default function ShiftDrawer({
   const [closedShiftData, setClosedShiftData] = useState<any | null>(null);
 
   // Dynamic Sales breakdown from live invoices
-  const openingCash = shift?.opening_cash || 15000;
+  const openingCash = shift?.opening_cash || 0;
   
   const cashSales = invoices.length > 0
     ? invoices.filter(i => !i.payment_type || i.payment_type === 'cash').reduce((s, i) => s + (i.grandTotal || i.net_total || 0), 0)
-    : (totalSales > 0 ? totalSales : 125450);
+    : (totalSales > 0 ? totalSales : 0);
 
   const creditSales = invoices.length > 0
     ? invoices.filter(i => i.payment_type === 'credit').reduce((s, i) => s + (i.grandTotal || i.net_total || 0), 0)
-    : 45000;
+    : 0;
 
   const bankSales = invoices.length > 0
     ? invoices.filter(i => i.payment_type === 'bank' || i.payment_type === 'cheque').reduce((s, i) => s + (i.grandTotal || i.net_total || 0), 0)
-    : 20000;
+    : 0;
 
   const totalSalesAggregate = cashSales + creditSales + bankSales;
-
-  const currentExpenses = expenses.length > 0 
-    ? expenses 
-    : [
-        { id: '1', tenant_id: '', category: 'Staff', title: 'Tea & Snacks', amount: 450, created_at: '10:30 AM' },
-        { id: '2', tenant_id: '', category: 'Office', title: 'Stationery (Pens)', amount: 250, created_at: '01:15 PM' },
-        { id: '3', tenant_id: '', category: 'Operations', title: 'Labor (Unloading)', amount: 500, created_at: '03:00 PM' },
-      ];
-
+  const currentExpenses = expenses || [];
   const totalExpenses = currentExpenses.reduce((sum, exp) => sum + exp.amount, 0);
   const expectedCash = openingCash + cashSales - totalExpenses;
 
   // Actual Physical Cash & Variance
-  const actualPhysicalCash = actualCashInput !== '' ? parseFloat(actualCashInput) || 0 : (expectedCash - 250);
+  const actualPhysicalCash = actualCashInput !== '' ? (parseFloat(actualCashInput) || 0) : expectedCash;
   const variance = actualPhysicalCash - expectedCash;
   const isShort = variance < 0;
   const isBalanced = variance === 0;
@@ -313,7 +305,7 @@ export default function ShiftDrawer({
               </div>
               <span
                 style={{
-                  background: isBalanced ? '#16a34a' : isShort ? '#ba1a1a' : '#0051d5',
+                  background: isBalanced ? '#16a34a' : isShort ? '#ba1a1a' : '#f97316',
                   color: '#ffffff',
                   padding: '4px 12px',
                   borderRadius: 'var(--radius-sm)',
@@ -543,7 +535,7 @@ export default function ShiftDrawer({
             </div>
 
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={() => window.print()} style={{ flex: 1, padding: '9px', background: '#0051d5', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: '700', cursor: 'pointer', fontSize: '13px' }}>
+              <button onClick={() => window.print()} style={{ flex: 1, padding: '9px', background: '#f97316', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: '700', cursor: 'pointer', fontSize: '13px' }}>
                 Print Receipt
               </button>
               <button onClick={() => setShowPrintSummary(false)} style={{ flex: 1, padding: '9px', background: '#e2e8f0', color: '#000', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: '700', cursor: 'pointer', fontSize: '13px' }}>

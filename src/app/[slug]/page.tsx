@@ -9,6 +9,35 @@ import ShiftDrawer from '@/components/ShiftDrawer';
 import CeoDashboard from '@/components/CeoDashboard';
 import FinancialLedgers from '@/components/FinancialLedgers';
 import ClientCreditRecovery from '@/components/ClientCreditRecovery';
+import SalesHistory from '@/components/SalesHistory';
+import HoldInvoices from '@/components/HoldInvoices';
+import PurchasesView from '@/components/PurchasesView';
+
+import {
+  ShoppingCart,
+  Boxes,
+  ShoppingBag,
+  TrendingUp,
+  Users,
+  RotateCcw,
+  PauseCircle,
+  Scale,
+  BarChart3,
+  CalendarCheck,
+  Truck,
+  BookOpen,
+  ChevronLeft,
+  ChevronRight,
+  LogOut,
+  ArrowLeftRight,
+  Search,
+  Wifi,
+  WifiOff,
+  Bell,
+  User,
+  Layers,
+  Lock,
+} from 'lucide-react';
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -27,19 +56,19 @@ export default function TenantAppPage({ params }: PageProps) {
   const [loginPassword, setLoginPassword] = useState('');
   const [loginRoleTab, setLoginRoleTab] = useState<'staff' | 'ceo'>('staff');
   const [loginError, setLoginError] = useState('');
-  const [activeTab, setActiveTab] = useState<'pos' | 'stock' | 'ledgers' | 'credit' | 'transfers' | 'shift' | 'ceo_reports'>('pos');
+  const [activeTab, setActiveTab] = useState<
+    'pos' | 'inventory' | 'purchases' | 'sales' | 'customers' | 'returns' | 'hold_invoices' | 'credit_recovery' | 'reports' | 'day_close' | 'stock' | 'ledgers' | 'credit' | 'transfers' | 'shift' | 'ceo_reports'
+  >('pos');
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
   const [showOpenShiftModal, setShowOpenShiftModal] = useState(false);
   const [openingCashInput, setOpeningCashInput] = useState('15000');
   const [items, setItems] = useState<Item[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
-  const [expenses, setExpenses] = useState<PettyExpense[]>([
-    { id: '1', tenant_id: '', category: 'Staff', title: 'Tea & Snacks', amount: 450, created_at: '10:30 AM' },
-    { id: '2', tenant_id: '', category: 'Office', title: 'Stationery (Pens)', amount: 250, created_at: '01:15 PM' },
-    { id: '3', tenant_id: '', category: 'Operations', title: 'Labor (Unloading)', amount: 500, created_at: '03:00 PM' },
-  ]);
+  const [expenses, setExpenses] = useState<PettyExpense[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<any | null>(null);
+  const [restoringHeldOrder, setRestoringHeldOrder] = useState<any | null>(null);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     const up = () => setIsOnline(true);
@@ -168,24 +197,51 @@ export default function TenantAppPage({ params }: PageProps) {
   const isCEO = currentUser?.role === 'ceo' || currentUser?.role === 'developer';
   const totalSales = invoices.reduce((s, i) => s + (i.grandTotal || 0), 0);
 
+  // Automatic Redirect for Invalid / Non-existent Shop URL
+  const [redirectCountdown, setRedirectCountdown] = useState(3);
+  useEffect(() => {
+    if (!loading && (error || !tenant)) {
+      const interval = setInterval(() => {
+        setRedirectCountdown((prev) => {
+          if (prev <= 1) {
+            clearInterval(interval);
+            window.location.href = '/';
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [loading, error, tenant]);
+
   // Loading Screen
   if (loading) return (
     <div className="login-wrapper">
       <div style={{ textAlign: 'center' }}>
-        <div className="spinner" style={{ margin: '0 auto 1rem' }} />
-        <p className="text-muted" style={{ fontSize: '13px' }}>Loading branch...</p>
+        <div className="spinner" style={{ margin: '0 auto 1rem', borderColor: '#f97316', borderTopColor: 'transparent' }} />
+        <p className="text-muted" style={{ fontSize: '13px', fontFamily: 'JetBrains Mono, monospace' }}>Loading PyntFlow branch...</p>
       </div>
     </div>
   );
 
-  // Error Screen
+  // Error / Invalid Shop Screen — Auto Redirect to Homepage
   if (error || !tenant) return (
     <div className="login-wrapper">
-      <div className="login-card" style={{ textAlign: 'center' }}>
-        <span className="material-symbols-outlined filled" style={{ fontSize: 40, color: 'var(--error)', marginBottom: '0.75rem' }}>domain_disabled</span>
-        <h2 className="headline-sm" style={{ marginBottom: '0.5rem' }}>Branch Not Found</h2>
-        <p className="text-muted body-md" style={{ marginBottom: '1.25rem' }}>{error}</p>
-        <a href="/" style={{ color: 'var(--secondary)', fontSize: '14px' }}>← Go back to home</a>
+      <div className="login-card" style={{ textAlign: 'center', maxWidth: '420px', padding: '2rem' }}>
+        <div style={{ width: 56, height: 56, borderRadius: '14px', background: '#fee2e2', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem' }}>
+          <Layers style={{ width: 28, height: 28 }} />
+        </div>
+        <h2 className="headline-sm" style={{ marginBottom: '0.5rem', color: '#0F172A' }}>Shop Not Found</h2>
+        <p className="text-muted body-md" style={{ marginBottom: '1rem', lineHeight: 1.5 }}>
+          The shop URL <strong>/{slug}</strong> is not registered on PyntFlow or has been modified.
+        </p>
+        <div style={{ backgroundColor: '#F1F5F9', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '10px 14px', fontSize: '12px', color: '#64748B', marginBottom: '1.25rem', fontFamily: 'JetBrains Mono, monospace' }}>
+          Redirecting to PyntFlow Homepage in <strong style={{ color: '#F97316' }}>{redirectCountdown}s</strong>...
+        </div>
+        <a href="/" className="btn btn-primary btn-full" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+          ← Return to PyntFlow Home
+        </a>
       </div>
     </div>
   );
@@ -196,18 +252,16 @@ export default function TenantAppPage({ params }: PageProps) {
     return (
       <div className="login-wrapper">
         <div style={{ width: '100%', maxWidth: '420px' }}>
-          {/* Brand */}
+          {/* Brand Header */}
           <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-            <div className="login-brand-icon">
-              <span className="material-symbols-outlined filled" style={{ fontSize: 32, color: 'var(--secondary)' }}>
-                {isShop ? 'format_paint' : 'warehouse'}
-              </span>
+            <div style={{ width: 56, height: 56, borderRadius: '12px', background: '#0F172A', border: '1px solid rgba(249, 115, 22, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem' }}>
+              <div style={{ width: 14, height: 14, background: '#F97316', borderRadius: '3px' }} />
             </div>
-            <h1 className="headline-md" style={{ marginBottom: '4px' }}>{tenant.name}</h1>
+            <h1 className="headline-md" style={{ marginBottom: '4px', color: '#0F172A' }}>{tenant.name}</h1>
             <p className="text-muted body-md">{isShop ? 'PaintERP Retail & Wholesale POS' : 'Warehouse & Godown Management'}</p>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem', marginTop: '0.75rem' }}>
               <span className={`status-pill ${isOnline ? 'online' : 'offline'}`}>
-                <span className="material-symbols-outlined" style={{ fontSize: 12 }}>{isOnline ? 'wifi' : 'wifi_off'}</span>
+                {isOnline ? <Wifi style={{ width: 12, height: 12 }} /> : <WifiOff style={{ width: 12, height: 12 }} />}
                 {isOnline ? 'Cloud Database Connected' : 'Offline Mode Active'}
               </span>
             </div>
@@ -248,13 +302,13 @@ export default function TenantAppPage({ params }: PageProps) {
               </div>
 
               {loginError && (
-                <div style={{ background: 'var(--error-container)', border: '1px solid rgba(186,26,26,0.3)', borderRadius: 'var(--radius-sm)', padding: '0.625rem 0.875rem', fontSize: '13px', color: 'var(--on-error-container)' }}>
+                <div style={{ background: '#fee2e2', border: '1px solid rgba(220,38,38,0.3)', borderRadius: 'var(--radius-sm)', padding: '0.625rem 0.875rem', fontSize: '13px', color: '#991b1b' }}>
                   {loginError}
                 </div>
               )}
 
               <button type="submit" className="btn btn-primary btn-lg btn-full" style={{ marginTop: '0.25rem' }}>
-                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>lock_open</span>
+                <Lock style={{ width: 16, height: 16 }} />
                 Login to {tenant.name}
               </button>
             </form>
@@ -264,118 +318,239 @@ export default function TenantAppPage({ params }: PageProps) {
     );
   }
 
-  // Navigation Items
+  // When logged in as CEO or viewing Reports, render full-screen CEO Executive Suite scoped to this shop
+  if (currentUser?.role === 'ceo' || activeTab === 'ceo_reports' || activeTab === 'reports') {
+    return (
+      <CeoDashboard
+        tenant={tenant}
+        slug={tenant.slug}
+        todaySales={totalSales}
+        auditLogs={auditLogs}
+        onLogout={() => {
+          if (currentUser?.role === 'ceo') {
+            setCurrentUser(null);
+          } else {
+            setActiveTab('pos');
+          }
+        }}
+      />
+    );
+  }
+
+  // Navigation Items for Cashier / Staff POS Workspace
   const navItems = [
-    { id: 'pos',         label: 'POS',             icon: 'point_of_sale' },
-    { id: 'stock',       label: 'Inventory',       icon: 'inventory_2' },
-    { id: 'ledgers',     label: 'Ledgers',         icon: 'menu_book' },
-    { id: 'credit',      label: 'Credit Recovery', icon: 'account_balance_wallet' },
-    { id: 'transfers',   label: 'Production',      icon: 'factory' },
-    { id: 'shift',       label: 'Day Close',       icon: 'payments' },
-    { id: 'ceo_reports', label: 'Admin',           icon: 'settings' },
+    { id: 'pos',             label: 'POS Billing',       icon: ShoppingCart },
+    { id: 'inventory',       label: 'Inventory',         icon: Boxes },
+    { id: 'purchases',       label: 'Purchases',         icon: ShoppingBag },
+    { id: 'sales',           label: 'Sales',             icon: TrendingUp },
+    { id: 'customers',       label: 'Customers',         icon: Users },
+    { id: 'returns',         label: 'Returns',           icon: RotateCcw },
+    { id: 'hold_invoices',   label: 'Hold Invoices',     icon: PauseCircle },
+    { id: 'credit_recovery', label: 'Credit & Recovery', icon: Scale },
+    { id: 'reports',         label: 'Reports',           icon: BarChart3 },
+    { id: 'day_close',       label: 'Day Close',         icon: CalendarCheck },
   ];
 
   return (
     <div className="app-shell">
-      {/* ── Fixed Sidebar ── */}
-      <aside className="sidebar">
-        {/* Brand Logo Header */}
+      {/* ── Collapsible Dark Navy Sidebar ── */}
+      <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
+        {/* Brand Header */}
         <div className="sidebar-brand">
-          <div className="sidebar-brand-icon">
-            <span className="material-symbols-outlined filled" style={{ fontSize: 22 }}>format_paint</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+            <div className="sidebar-brand-icon">
+              <span style={{ width: '8px', height: '8px', background: '#F97316', borderRadius: '2px', display: 'block' }} />
+            </div>
+            {!isSidebarCollapsed && (
+              <div style={{ minWidth: 0 }}>
+                <div className="sidebar-brand-name">PaintERP</div>
+                <div className="sidebar-brand-sub">{tenant.city || 'Pakistan'} Branch</div>
+              </div>
+            )}
           </div>
-          <div>
-            <div className="sidebar-brand-name">{tenant.name}</div>
-            <div className="sidebar-brand-sub">{tenant.city || 'Pakistan'} Branch</div>
-          </div>
+
+          {/* Collapse Toggle */}
+          <button
+            type="button"
+            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            className="sidebar-collapse-toggle"
+            title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {isSidebarCollapsed ? <ChevronRight style={{ width: 16, height: 16 }} /> : <ChevronLeft style={{ width: 16, height: 16 }} />}
+          </button>
         </div>
 
         {/* Navigation Items */}
-        <nav className="sidebar-nav">
-          {navItems.map(item => (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id as any)}
-              className={`sidebar-link ${activeTab === item.id ? 'active' : ''}`}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: 20 }}>{item.icon}</span>
-              {item.label}
-            </button>
-          ))}
+        <nav className="sidebar-nav no-scrollbar">
+          {!isSidebarCollapsed && (
+            <div className="sidebar-section-title">
+              Workspace
+            </div>
+          )}
+          {navItems.map(item => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id as any)}
+                title={isSidebarCollapsed ? item.label : undefined}
+                className={`sidebar-link ${isActive ? 'active' : ''}`}
+              >
+                <Icon style={{ width: 16, height: 16, flexShrink: 0 }} />
+                {!isSidebarCollapsed && (
+                  <>
+                    <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {item.label}
+                    </span>
+                    {isActive && <ChevronRight style={{ width: 14, height: 14, opacity: 0.9 }} />}
+                  </>
+                )}
+              </button>
+            );
+          })}
         </nav>
 
-        {/* Footer Actions */}
-        <div>
-          <button
-            onClick={() => window.location.href = '/dev'}
-            className="sidebar-footer-btn"
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>swap_horiz</span>
-            Switch Tenant
-          </button>
-          <div className="sidebar-footer">
-            <button
-              onClick={() => setCurrentUser(null)}
-              className="sidebar-link"
-              style={{ color: 'var(--error)', opacity: 0.9 }}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: 20 }}>logout</span>
-              Logout
-            </button>
-          </div>
+        {/* Sidebar Bottom Switcher / Session Panel */}
+        <div className="sidebar-footer">
+          {!isSidebarCollapsed ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+              <div>
+                <label style={{ fontSize: '9px', color: '#64748b', textTransform: 'uppercase', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                  Branch
+                </label>
+                <div style={{ background: '#1e293b', border: '1px solid rgba(51,65,85,0.6)', borderRadius: '6px', padding: '6px 8px', color: '#e2e8f0', fontSize: '11.5px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tenant.name}</span>
+                  <a href="/dev" title="Switch Branch" style={{ color: '#F97316', display: 'flex', alignItems: 'center' }}>
+                    <ArrowLeftRight style={{ width: 13, height: 13 }} />
+                  </a>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '4px', borderTop: '1px solid rgba(51,65,85,0.5)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ width: '6px', height: '6px', background: '#16a34a', borderRadius: '50%' }} />
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', color: '#94a3b8' }}>
+                    T01 · Online
+                  </span>
+                </div>
+                <button
+                  onClick={() => setCurrentUser(null)}
+                  style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', padding: 0 }}
+                  title="Logout Session"
+                >
+                  <LogOut style={{ width: 12, height: 12 }} />
+                  Logout
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+              <span style={{ width: '8px', height: '8px', background: '#16a34a', borderRadius: '50%' }} title="Terminal Online" />
+              <button
+                onClick={() => setCurrentUser(null)}
+                style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '4px' }}
+                title="Logout"
+              >
+                <LogOut style={{ width: 14, height: 14 }} />
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 
       {/* ── Main Content Area ── */}
       <div className="main-wrapper">
-        {/* Sticky Topbar */}
-        <header className="topbar">
-          <div className="flex items-center gap-md">
-            <span className="topbar-brand">PaintERP</span>
-            <div className="topbar-search">
-              <span className="material-symbols-outlined topbar-search-icon">search</span>
-              <input type="text" placeholder="Search across branches..." />
+        {/* Sticky Topbar matching PaintERP exactly */}
+        {activeTab !== 'pos' && activeTab !== 'sales' && activeTab !== 'returns' && activeTab !== 'hold_invoices' && activeTab !== 'purchases' && (
+          <header className="pos-topbar" style={{ height: '56px', borderBottom: '1px solid #E2E8F0', background: '#FFFFFF', padding: '0 1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, zIndex: 10 }}>
+            {/* Left: Counter Staff / Active Register Identity */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+              <div
+                style={{ width: '30px', height: '30px', background: '#F1F5F9', color: '#334155', fontFamily: 'JetBrains Mono, monospace', fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', border: '1px solid #CBD5E1', flexShrink: 0 }}
+                title="Active Register: 01"
+              >
+                01
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#0F172A', lineHeight: 1.2 }}>
+                  {currentUser?.full_name || (currentUser?.role === 'ceo' ? 'CEO / Owner' : 'Counter Staff')}
+                </span>
+                <span style={{ fontSize: '10px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', lineHeight: 1.2 }}>
+                  Register: {currentUser?.username?.toUpperCase() || '01'}
+                </span>
+              </div>
             </div>
-          </div>
-          <div className="topbar-actions">
-            <span className={`status-pill ${isOnline ? 'online' : 'offline'}`} style={{ fontSize: 11 }}>
-              <span className="material-symbols-outlined" style={{ fontSize: 13 }}>{isOnline ? 'wifi' : 'wifi_off'}</span>
-              {isOnline ? 'Online' : 'Offline'}
-            </span>
-            {totalSales > 0 && (
-              <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 12, color: 'var(--on-surface-variant)', background: 'var(--surface-container)', padding: '4px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--outline-variant)' }}>
-                Sales: <strong style={{ color: '#065f46' }}>Rs. {totalSales.toLocaleString()}</strong>
+
+            {/* Right: Online Status & Bell Notification with Orange Dot */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 600, color: isOnline ? '#16A34A' : '#DC2626', background: isOnline ? '#DCFCE7' : '#FEE2E2', padding: '3px 9px', borderRadius: '6px', border: isOnline ? '1px solid #BBF7D0' : '1px solid #FECACA' }}>
+                {isOnline ? <Wifi style={{ width: 12, height: 12 }} /> : <WifiOff style={{ width: 12, height: 12 }} />}
+                {isOnline ? 'Online' : 'Offline'}
               </span>
-            )}
-            <div className="topbar-divider" />
-            <button className="topbar-icon-btn" title="Notifications">
-              <span className="material-symbols-outlined" style={{ fontSize: 22 }}>notifications</span>
-            </button>
-            <div className="topbar-user">
-              <div className="topbar-user-info">
-                <div className="topbar-user-name">{currentUser?.full_name || currentUser?.username}</div>
-                <div className="topbar-user-role">{currentUser?.role === 'ceo' ? 'CEO / Owner' : 'Counter Staff'}</div>
-              </div>
-              <div className="topbar-avatar">
-                <span className="material-symbols-outlined filled" style={{ fontSize: 22 }}>account_circle</span>
-              </div>
+
+              {totalSales > 0 && (
+                <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '11px', color: '#0F172A', background: '#F1F5F9', padding: '3px 8px', borderRadius: '6px', border: '1px solid #E2E8F0' }}>
+                  Sales: <strong style={{ color: '#16A34A' }}>Rs. {totalSales.toLocaleString()}</strong>
+                </span>
+              )}
+
+              <button
+                type="button"
+                style={{ padding: '7px', color: '#64748B', background: 'transparent', border: 'none', borderRadius: '8px', position: 'relative', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                title="Notifications"
+              >
+                <Bell style={{ width: 16, height: 16 }} />
+                <span style={{ width: '8px', height: '8px', background: '#F97316', borderRadius: '50%', position: 'absolute', top: '5px', right: '5px' }} />
+              </button>
             </div>
-          </div>
-        </header>
+          </header>
+        )}
 
         {/* Dynamic Screen View */}
-        <main className="main-content">
-          {activeTab === 'pos' && (
+        <main className={`main-content ${(activeTab === 'pos' || activeTab === 'sales' || activeTab === 'returns' || activeTab === 'purchases') ? 'no-pad' : ''}`}>
+          {activeTab === 'purchases' && (
+            <PurchasesView
+              tenantId={tenant.id}
+              tenantName={tenant.name}
+              staffName={currentUser?.full_name || currentUser?.username || 'Purchase Officer'}
+              items={items}
+              onStockUpdated={refreshItems}
+            />
+          )}
+          {activeTab === 'sales' && (
+            <SalesHistory
+              tenantId={tenant.id}
+              tenantName={tenant.name}
+              staffName={currentUser?.full_name || currentUser?.username || 'Staff'}
+              onNavigateToPos={() => setActiveTab('pos')}
+            />
+          )}
+          {activeTab === 'hold_invoices' && (
+            <HoldInvoices
+              tenantId={tenant.id}
+              tenantName={tenant.name}
+              staffName={currentUser?.full_name || currentUser?.username || 'Staff'}
+              onResumeOrder={(order) => {
+                setRestoringHeldOrder(order);
+                setActiveTab('pos');
+              }}
+              onNavigateToPos={() => setActiveTab('pos')}
+            />
+          )}
+          {(activeTab === 'pos' || activeTab === 'returns') && (
             <PosBilling
               items={items}
               tenantId={tenant.id}
               shiftId={activeShift?.id}
               tenantName={tenant.name}
               staffName={currentUser?.full_name || 'Staff'}
+              restoringHeldOrder={restoringHeldOrder}
+              onClearRestoringHeldOrder={() => setRestoringHeldOrder(null)}
               onCompleteSale={handleCompleteSale}
             />
           )}
-          {activeTab === 'stock' && (
+          {(activeTab === 'inventory' || activeTab === 'stock') && (
             <StockInventory
               items={items}
               tenantId={tenant.id}
@@ -383,14 +558,14 @@ export default function TenantAppPage({ params }: PageProps) {
               onStockUpdated={refreshItems}
             />
           )}
-          {activeTab === 'ledgers' && (
+          {(activeTab === 'customers' || activeTab === 'ledgers') && (
             <FinancialLedgers
               tenantId={tenant.id}
               tenantName={tenant.name}
               staffName={currentUser?.full_name || currentUser?.username || 'Staff'}
             />
           )}
-          {activeTab === 'credit' && (
+          {(activeTab === 'credit_recovery' || activeTab === 'credit') && (
             <ClientCreditRecovery
               tenantId={tenant.id}
               tenantName={tenant.name}
@@ -405,7 +580,7 @@ export default function TenantAppPage({ params }: PageProps) {
               onStockDispatched={refreshItems}
             />
           )}
-          {activeTab === 'shift' && (
+          {(activeTab === 'day_close' || activeTab === 'shift') && (
             <ShiftDrawer
               shift={activeShift}
               tenantId={tenant.id}
@@ -422,7 +597,6 @@ export default function TenantAppPage({ params }: PageProps) {
               }}
             />
           )}
-          {activeTab === 'ceo_reports' && <CeoDashboard auditLogs={auditLogs} todaySales={totalSales} />}
         </main>
       </div>
 
@@ -479,7 +653,7 @@ export default function TenantAppPage({ params }: PageProps) {
               <span>Rs. {selectedInvoiceForPrint.grandTotal?.toLocaleString()}</span>
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={() => window.print()} style={{ flex: 1, padding: '9px', background: '#0051d5', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: '700', cursor: 'pointer', fontSize: '13px' }}>
+              <button onClick={() => window.print()} style={{ flex: 1, padding: '9px', background: '#f97316', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: '700', cursor: 'pointer', fontSize: '13px' }}>
                 Print
               </button>
               <button onClick={() => setSelectedInvoiceForPrint(null)} style={{ flex: 1, padding: '9px', background: '#e2e8f0', color: '#000', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: '700', cursor: 'pointer', fontSize: '13px' }}>

@@ -1,5 +1,12 @@
-import { redirect } from 'next/navigation';
+import React from 'react';
 
 export default function RootHomePage() {
-  redirect('/tawakkal-paint-house');
+  return (
+    <div
+      style={{
+        minHeight: '100vh',
+        backgroundColor: '#0B0F17',
+      }}
+    />
+  );
 }

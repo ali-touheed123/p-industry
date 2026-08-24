@@ -8,6 +8,7 @@ export interface Tenant {
   type: TenantType;
   owner_name?: string;
   phone?: string;
+  email?: string;
   address?: string;
   city?: string;
   logo_url?: string;
@@ -67,6 +68,9 @@ export interface Item {
   category?: string;
   item_type?: 'finish_goods' | 'raw_material';
   unit: string;
+  pack_size?: string;
+  shade_code?: string;
+  shade_hex?: string;
   cost_price: number;
   retail_price: number;
   wholesale_price: number;
@@ -114,11 +118,17 @@ export interface Invoice {
   date: string;
   subtotal: number;
   discount: number;
-  tax: number;
+  delivery_charge?: number;
+  remarks?: string;
+  invoice_type?: 'sales' | 'return';
   net_total: number;
   paid_amount: number;
   due_amount: number;
-  payment_type: 'cash' | 'credit' | 'bank' | 'split';
+  payment_type: 'cash' | 'credit' | 'card' | 'bank' | 'others' | 'split';
+  cash_paid?: number;
+  card_paid?: number;
+  bank_paid?: number;
+  others_paid?: number;
   status: 'completed' | 'cancelled' | 'return';
   created_by?: string;
   created_at: string;
@@ -131,11 +141,31 @@ export interface InvoiceItem {
   item_id?: string;
   item_code?: string;
   item_name: string;
+  shade_code?: string;
+  shade_hex?: string;
+  pack_size?: string;
   unit?: string;
   qty: number;
   unit_price: number;
   discount: number;
+  discount_percent?: number;
   total_price: number;
+}
+
+export interface HeldInvoice {
+  id: string;
+  tenant_id: string;
+  hold_no: string;
+  client_id?: string;
+  client_name?: string;
+  invoice_type: 'sales' | 'return';
+  items_json: any[];
+  subtotal: number;
+  discount: number;
+  delivery_charge: number;
+  net_total: number;
+  remarks?: string;
+  created_at: string;
 }
 
 export interface AuditLog {

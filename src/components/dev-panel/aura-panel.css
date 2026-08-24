@@ -1,0 +1,477 @@
+/* ============================================================
+   Aura Developer Control Panel — Complete Luxury Gold Styling
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+
+/* Base Container */
+.aura-container {
+  min-height: 100vh;
+  background-color: #050505 !important;
+  color: #f3f4f6 !important;
+  font-family: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, sans-serif !important;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Background Ambient Luxury Lighting */
+.aura-glow-top {
+  position: fixed;
+  top: 0;
+  left: 25%;
+  width: 600px;
+  height: 400px;
+  background: rgba(212, 175, 55, 0.06);
+  border-radius: 9999px;
+  filter: blur(150px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.aura-glow-bottom {
+  position: fixed;
+  bottom: 0;
+  right: 25%;
+  width: 500px;
+  height: 400px;
+  background: rgba(138, 109, 59, 0.06);
+  border-radius: 9999px;
+  filter: blur(150px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Navbar */
+.aura-navbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  width: 100%;
+  background: rgba(5, 5, 5, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(212, 175, 55, 0.2);
+  padding: 12px 24px;
+}
+
+.aura-navbar-inner {
+  max-width: 1600px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.aura-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.aura-emblem {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #D4AF37, #8A6D3B);
+  padding: 1px;
+  box-shadow: 0 0 16px rgba(212, 175, 55, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.aura-emblem-inner {
+  width: 100%;
+  height: 100%;
+  background: #050505;
+  border-radius: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.aura-emblem-dot {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: #34d399;
+  border: 2px solid #000;
+}
+
+.aura-btn-gold {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border-radius: 9999px;
+  background: #D4AF37 !important;
+  color: #000000 !important;
+  font-weight: 700 !important;
+  font-size: 12px !important;
+  letter-spacing: 0.02em;
+  box-shadow: 0 4px 20px rgba(212, 175, 55, 0.25);
+  border: none !important;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-decoration: none;
+}
+
+.aura-btn-gold:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.aura-btn-gold:active {
+  transform: scale(0.97);
+}
+
+.aura-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #e2e8f0 !important;
+  font-weight: 600 !important;
+  font-size: 12px !important;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-decoration: none;
+}
+
+.aura-btn-secondary:hover {
+  border-color: rgba(212, 175, 55, 0.4) !important;
+  color: #D4AF37 !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.aura-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 9999px;
+  background: rgba(239, 68, 68, 0.12) !important;
+  border: 1px solid rgba(239, 68, 68, 0.25) !important;
+  color: #fca5a5 !important;
+  font-weight: 600 !important;
+  font-size: 12px !important;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.aura-btn-danger:hover {
+  background: rgba(239, 68, 68, 0.22) !important;
+}
+
+/* Layout */
+.aura-layout {
+  display: flex;
+  flex-direction: column;
+  max-width: 1600px;
+  margin: 0 auto;
+  width: 100%;
+  position: relative;
+  z-index: 10;
+}
+
+@media (min-width: 1024px) {
+  .aura-layout {
+    flex-direction: row;
+  }
+}
+
+/* Sidebar */
+.aura-sidebar {
+  width: 100%;
+  background: rgba(5, 5, 5, 0.95);
+  border-right: 1px solid rgba(212, 175, 55, 0.18);
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 24px;
+  flex-shrink: 0;
+  box-shadow: 10px 0 30px rgba(0, 0, 0, 0.5);
+}
+
+@media (min-width: 1024px) {
+  .aura-sidebar {
+    width: 288px;
+    min-height: calc(100vh - 67px);
+  }
+}
+
+.aura-user-card {
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.aura-avatar {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #D4AF37, #8A6D3B);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #000;
+  font-weight: 800;
+  font-size: 13px;
+  box-shadow: 0 0 14px rgba(212, 175, 55, 0.3);
+  flex-shrink: 0;
+}
+
+.aura-nav-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #d1d5db;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+  margin-bottom: 6px;
+}
+
+.aura-nav-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #ffffff;
+}
+
+.aura-nav-btn.active {
+  background: linear-gradient(90deg, rgba(212, 175, 55, 0.18) 0%, rgba(212, 175, 55, 0.03) 100%);
+  border-color: rgba(212, 175, 55, 0.4);
+  color: #ffffff;
+  box-shadow: 0 4px 20px rgba(212, 175, 55, 0.12);
+}
+
+.aura-nav-icon {
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(212, 175, 55, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.aura-nav-btn.active .aura-nav-icon {
+  background: #D4AF37;
+  color: #000000;
+}
+
+/* Main Viewport */
+.aura-main {
+  flex: 1;
+  padding: 24px;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+@media (min-width: 768px) {
+  .aura-main {
+    padding: 32px;
+  }
+}
+
+/* Glass Card */
+.aura-card {
+  padding: 24px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.035);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.aura-card-hover {
+  transition: all 0.2s ease;
+}
+
+.aura-card-hover:hover {
+  border-color: rgba(212, 175, 55, 0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 36px rgba(212, 175, 55, 0.1);
+}
+
+/* Banner */
+.aura-banner {
+  padding: 28px 32px;
+  border-radius: 24px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border: 1px solid rgba(212, 175, 55, 0.3);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 20px;
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 28px;
+}
+
+@media (min-width: 1024px) {
+  .aura-banner {
+    flex-direction: row;
+    align-items: center;
+  }
+}
+
+/* Grids */
+.aura-grid-3 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+@media (min-width: 640px) {
+  .aura-grid-3 {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.aura-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+}
+
+@media (min-width: 1024px) {
+  .aura-grid-2 {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* Tables */
+.aura-table-container {
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.035);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+
+.aura-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+
+.aura-table th {
+  padding: 16px 20px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: #9ca3af;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.aura-table td {
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: #e5e7eb;
+}
+
+.aura-table tr:hover td {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* Modals */
+.aura-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  overflow-y: auto;
+}
+
+.aura-modal-box {
+  position: relative;
+  width: 100%;
+  max-width: 680px;
+  margin: 24px auto;
+  padding: 32px;
+  border-radius: 24px;
+  background: rgba(10, 10, 10, 0.96);
+  border: 1px solid rgba(212, 175, 55, 0.25);
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.9), 0 0 35px rgba(212, 175, 55, 0.12);
+  text-align: left;
+}
+
+/* Form Inputs */
+.aura-form-group {
+  margin-bottom: 16px;
+}
+
+.aura-form-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9ca3af;
+  margin-bottom: 6px;
+}
+
+.aura-form-input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+  transition: all 0.15s ease;
+}
+
+.aura-form-input:focus {
+  border-color: #D4AF37;
+  box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.4);
+}
+
+.aura-form-select {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+  cursor: pointer;
+}

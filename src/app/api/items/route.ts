@@ -42,6 +42,9 @@ export async function POST(req: NextRequest) {
       trade_price = 0,
       stock_qty = 0,
       min_stock_alert = 5,
+      shade_code,
+      shade_hex,
+      pack_size,
     } = body;
 
     if (!tenant_id || !name || !code) {
@@ -57,6 +60,9 @@ export async function POST(req: NextRequest) {
         category: category || 'General',
         item_type,
         unit,
+        pack_size: pack_size || unit,
+        shade_code: shade_code || null,
+        shade_hex: shade_hex || null,
         cost_price: Number(cost_price) || 0,
         retail_price: Number(retail_price) || 0,
         wholesale_price: Number(wholesale_price) || 0,

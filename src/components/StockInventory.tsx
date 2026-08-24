@@ -1,7 +1,18 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { Item } from '@/types';
+import {
+  Search,
+  Plus,
+  Boxes,
+  CheckCircle2,
+  Filter,
+  Download,
+  PackagePlus,
+  Edit2,
+  X,
+} from 'lucide-react';
 
 interface Props {
   items: Item[];
@@ -10,424 +21,664 @@ interface Props {
   onStockUpdated?: () => void;
 }
 
+const DEFAULT_CATEGORIES = [
+  'Interior Emulsion',
+  'Weather Shield Exterior',
+  'Primers & Putty',
+  'Synthetic Enamel',
+  'Wood & Varnish',
+  'Solvents & Thinners',
+  'Accessories',
+];
+
+const DEFAULT_UNITS = [
+  '20L Drum',
+  '4L Gallon',
+  '1L Quarter',
+  '500ml Can',
+  '20 KG Bag',
+  'PCS',
+  'Drum',
+  'Gallon',
+  'Quarter',
+  'Bag',
+];
+
 export default function StockInventory({
   items,
   tenantId,
-  tenantName = 'Paint House',
+  tenantName = 'Main Godown & Retail Counter #1',
   onStockUpdated,
 }: Props) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [selectedLocation, setSelectedLocation] = useState('All Locations');
-  const [stockStatusFilter, setStockStatusFilter] = useState<'all' | 'low' | 'out'>('all');
+  // Filters state (Matching painterp InventoryView.tsx)
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [selectedLocation, setSelectedLocation] = useState<string>('All');
+  const [stockStatus, setStockStatus] = useState<'all' | 'in_stock' | 'low_stock' | 'out_of_stock'>('all');
+  const [tableSearch, setTableSearch] = useState<string>('');
+  const [sortField, setSortField] = useState<keyof Item>('name');
+  const [sortAsc, setSortAsc] = useState<boolean>(true);
 
-  // Receive Stock Modal State
-  const [showReceiveModal, setShowReceiveModal] = useState(false);
-  const [receiveMode, setReceiveMode] = useState<'existing' | 'new'>('existing');
-  const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError] = useState('');
+  // Modals state
+  const [showAddProductModal, setShowAddProductModal] = useState<boolean>(false);
+  const [showReceiveModal, setShowReceiveModal] = useState<boolean>(false);
+  const [submitting, setSubmitting] = useState<boolean>(false);
+  const [notification, setNotification] = useState<string | null>(null);
 
-  // Existing Item Receiving State
-  const [selectedExistingId, setSelectedExistingId] = useState('');
-  const [receivedQty, setReceivedQty] = useState('10');
-  const [receivedCost, setReceivedCost] = useState('');
-  const [supplierName, setSupplierName] = useState('');
-  const [biltyRef, setBiltyRef] = useState('');
+  // Custom Categories & Units state (Dynamic additions)
+  const [customCategories, setCustomCategories] = useState<string[]>([]);
+  const [customUnits, setCustomUnits] = useState<string[]>([]);
+  const [isAddingNewCategory, setIsAddingNewCategory] = useState<boolean>(false);
+  const [isAddingNewUnit, setIsAddingNewUnit] = useState<boolean>(false);
+  const [newCategoryInput, setNewCategoryInput] = useState<string>('');
+  const [newUnitInput, setNewUnitInput] = useState<string>('');
 
-  // New Item Creation State
-  const [newItemCode, setNewItemCode] = useState('');
-  const [newItemName, setNewItemName] = useState('');
-  const [newItemCategory, setNewItemCategory] = useState('Emulsion');
-  const [newItemUnit, setNewItemUnit] = useState('Can (4L)');
-  const [newItemCost, setNewItemCost] = useState('');
-  const [newItemRetail, setNewItemRetail] = useState('');
-  const [newItemWholesale, setNewItemWholesale] = useState('');
-  const [newItemTrade, setNewItemTrade] = useState('');
-  const [newItemInitialStock, setNewItemInitialStock] = useState('20');
-  const [newItemMinStock, setNewItemMinStock] = useState('5');
+  // Add / Edit Product Form State (Text-only shade name, no visual color swatch)
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [formCode, setFormCode] = useState<string>('');
+  const [formName, setFormName] = useState<string>('');
+  const [formCategory, setFormCategory] = useState<string>('Interior Emulsion');
+  const [formUnit, setFormUnit] = useState<string>('4L Gallon');
+  const [formShadeCode, setFormShadeCode] = useState<string>('Off-White 101');
+  const [formCostPrice, setFormCostPrice] = useState<string>('');
+  const [formRetailPrice, setFormRetailPrice] = useState<string>('');
+  const [formWholesalePrice, setFormWholesalePrice] = useState<string>('');
+  const [formTradePrice, setFormTradePrice] = useState<string>('');
+  const [formStockQty, setFormStockQty] = useState<string>('20');
+  const [formMinAlert, setFormMinAlert] = useState<string>('5');
+
+  // Receive Stock Form State
+  const [selectedProdForReceive, setSelectedProdForReceive] = useState<string>(items[0]?.id || '');
+  const [receiveQty, setReceiveQty] = useState<number>(20);
+  const [receiveBatchNo, setReceiveBatchNo] = useState<string>(
+    () => `BATCH-${new Date().toISOString().slice(2, 7).replace('-', '')}-A9`
+  );
+  const [supplierBillRef, setSupplierBillRef] = useState<string>(
+    () => `SUP-INV-${Math.floor(10000 + Math.random() * 90000)}`
+  );
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Set initial selected item for receiving
-  useEffect(() => {
-    if (items.length > 0 && !selectedExistingId) {
-      setSelectedExistingId(items[0].id);
-      setReceivedCost(items[0].cost_price?.toString() || '');
+  const showToast = (msg: string) => {
+    setNotification(msg);
+    setTimeout(() => setNotification(null), 3200);
+  };
+
+  // Merge default + existing item categories + custom added categories
+  const allCategories = useMemo(() => {
+    const fromItems = items.map((i) => i.category).filter(Boolean) as string[];
+    const set = new Set([...DEFAULT_CATEGORIES, ...fromItems, ...customCategories]);
+    return Array.from(set);
+  }, [items, customCategories]);
+
+  // Merge default + existing item units + custom added units
+  const allUnits = useMemo(() => {
+    const fromItems = items.map((i) => i.pack_size || i.unit).filter(Boolean) as string[];
+    const set = new Set([...DEFAULT_UNITS, ...fromItems, ...customUnits]);
+    return Array.from(set);
+  }, [items, customUnits]);
+
+  const locations = ['All', 'Main Godown', 'Retail Shop Front', 'Rack A', 'Rack B', 'Solvent Vault'];
+
+  // Inventory stats calculations (Matching painterp top row)
+  const totalSKUs = items.length;
+  const totalStockUnits = items.reduce((acc, p) => acc + (Number(p.stock_qty) || 0), 0);
+  const lowStockCount = items.filter((p) => (p.stock_qty || 0) <= (p.min_stock_alert || p.min_stock || 5)).length;
+  const totalValuation = items.reduce(
+    (acc, p) => acc + (Number(p.stock_qty) || 0) * (Number(p.wholesale_price || p.retail_price) || 0),
+    0
+  );
+
+  // Filter products
+  const filteredProducts = items.filter((p) => {
+    if (selectedCategory !== 'All' && p.category !== selectedCategory) return false;
+    const minAlert = p.min_stock_alert || p.min_stock || 5;
+    if (stockStatus === 'low_stock' && p.stock_qty > minAlert) return false;
+    if (stockStatus === 'in_stock' && p.stock_qty <= minAlert) return false;
+    if (stockStatus === 'out_of_stock' && p.stock_qty > 0) return false;
+
+    if (tableSearch.trim() !== '') {
+      const q = tableSearch.toLowerCase();
+      return (
+        p.name.toLowerCase().includes(q) ||
+        p.code.toLowerCase().includes(q) ||
+        (p.shade_code && p.shade_code.toLowerCase().includes(q)) ||
+        (p.category && p.category.toLowerCase().includes(q))
+      );
     }
-  }, [items, selectedExistingId]);
-
-  // Keyboard Shortcuts ([F2], [F3], [Escape])
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'F2') {
-        e.preventDefault();
-        setShowReceiveModal(true);
-      } else if (e.key === 'F3') {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-      } else if (e.key === 'Escape') {
-        setShowReceiveModal(false);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  const categories = Array.from(
-    new Set(items.map(i => i.category).filter(Boolean))
-  ) as string[];
-  if (categories.length === 0) {
-    categories.push('Emulsion', 'Enamel', 'Primer', 'Distemper', 'Solvent', 'Accessories');
-  }
-
-  const handleCategoryToggle = (cat: string) => {
-    setSelectedCategories(prev =>
-      prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
-    );
-  };
-
-  const handleClearFilters = () => {
-    setSelectedCategories([]);
-    setSelectedLocation('All Locations');
-    setStockStatusFilter('all');
-    setSearchQuery('');
-  };
-
-  const filteredItems = items.filter(it => {
-    const matchesSearch =
-      it.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      it.code.toLowerCase().includes(searchQuery.toLowerCase());
-
-    const matchesCat =
-      selectedCategories.length === 0 ||
-      (it.category && selectedCategories.includes(it.category));
-
-    const isOut = it.stock_qty <= 0;
-    const isLow = !isOut && it.stock_qty <= (it.min_stock_alert ?? it.min_stock ?? 10);
-
-    let matchesStock = true;
-    if (stockStatusFilter === 'low') matchesStock = isLow;
-    if (stockStatusFilter === 'out') matchesStock = isOut;
-
-    return matchesSearch && matchesCat && matchesStock;
+    return true;
   });
 
-  // Export to CSV Functionality
-  const handleExportCSV = () => {
-    if (items.length === 0) {
-      alert('No items to export.');
+  // Sort products
+  const sortedProducts = [...filteredProducts].sort((a, b) => {
+    const valA = (a as any)[sortField];
+    const valB = (b as any)[sortField];
+    if (typeof valA === 'string' && typeof valB === 'string') {
+      return sortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+    }
+    if (typeof valA === 'number' && typeof valB === 'number') {
+      return sortAsc ? valA - valB : valB - valA;
+    }
+    return 0;
+  });
+
+  const handleSort = (field: keyof Item) => {
+    if (sortField === field) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortField(field);
+      setSortAsc(true);
+    }
+  };
+
+  // Open modal for new product
+  const handleOpenAddProduct = () => {
+    setEditingItemId(null);
+    setFormCode(`PNT-${Math.floor(100 + Math.random() * 900)}`);
+    setFormName('');
+    setFormCategory(allCategories[0] || 'Interior Emulsion');
+    setFormUnit(allUnits[0] || '4L Gallon');
+    setFormShadeCode('Off-White 101');
+    setFormCostPrice('');
+    setFormRetailPrice('');
+    setFormWholesalePrice('');
+    setFormTradePrice('');
+    setFormStockQty('20');
+    setFormMinAlert('5');
+    setIsAddingNewCategory(false);
+    setIsAddingNewUnit(false);
+    setShowAddProductModal(true);
+  };
+
+  // Open modal for editing existing product
+  const handleOpenEditProduct = (item: Item) => {
+    setEditingItemId(item.id);
+    setFormCode(item.code);
+    setFormName(item.name);
+    setFormCategory(item.category || allCategories[0]);
+    setFormUnit(item.pack_size || item.unit || allUnits[0]);
+    setFormShadeCode(item.shade_code || 'Standard');
+    setFormCostPrice(item.cost_price?.toString() || '');
+    setFormRetailPrice(item.retail_price?.toString() || '');
+    setFormWholesalePrice(item.wholesale_price?.toString() || '');
+    setFormTradePrice(item.trade_price?.toString() || '');
+    setFormStockQty(item.stock_qty?.toString() || '0');
+    setFormMinAlert((item.min_stock_alert || item.min_stock || 5).toString());
+    setIsAddingNewCategory(false);
+    setIsAddingNewUnit(false);
+    setShowAddProductModal(true);
+  };
+
+  // Add custom new category handler
+  const handleAddNewCategory = () => {
+    if (!newCategoryInput.trim()) return;
+    const cat = newCategoryInput.trim();
+    if (!customCategories.includes(cat)) {
+      setCustomCategories((prev) => [...prev, cat]);
+    }
+    setFormCategory(cat);
+    setNewCategoryInput('');
+    setIsAddingNewCategory(false);
+    showToast(`Category "${cat}" added to system!`);
+  };
+
+  // Add custom new unit handler
+  const handleAddNewUnit = () => {
+    if (!newUnitInput.trim()) return;
+    const unit = newUnitInput.trim();
+    if (!customUnits.includes(unit)) {
+      setCustomUnits((prev) => [...prev, unit]);
+    }
+    setFormUnit(unit);
+    setNewUnitInput('');
+    setIsAddingNewUnit(false);
+    showToast(`Unit/Pack Size "${unit}" added to system!`);
+  };
+
+  // Save product to Supabase
+  const handleSaveProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formName.trim() || !formCode.trim()) {
+      alert('Product name and code are required');
+      return;
+    }
+    if (!tenantId) {
+      alert('Tenant ID missing');
       return;
     }
 
-    const headers = [
-      'Item Code',
-      'Item Name',
-      'Category',
-      'Unit',
-      'Current Stock',
-      'Cost Price (PKR)',
-      'Retail Price (PKR)',
-      'Wholesale Price (PKR)',
-      'Trade Price (PKR)',
-    ];
-
-    const rows = filteredItems.map(it => [
-      `"${it.code}"`,
-      `"${it.name.replace(/"/g, '""')}"`,
-      `"${it.category || 'General'}"`,
-      `"${it.unit}"`,
-      it.stock_qty,
-      it.cost_price || 0,
-      it.retail_price,
-      it.wholesale_price,
-      it.trade_price,
-    ]);
-
-    const csvContent =
-      'data:text/csv;charset=utf-8,' +
-      [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    const dateStr = new Date().toISOString().split('T')[0];
-    link.setAttribute('download', `Inventory_${tenantName.replace(/\s+/g, '_')}_${dateStr}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  // Submit Stock Inward
-  const handleReceiveSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormError('');
     setSubmitting(true);
+    const retail = Number(formRetailPrice) || 0;
+    const cost = Number(formCostPrice) || Math.round(retail * 0.75);
+    const wholesale = Number(formWholesalePrice) || Math.round(retail * 0.9);
+    const trade = Number(formTradePrice) || Math.round(retail * 0.85);
+
+    const payload = {
+      tenant_id: tenantId,
+      code: formCode.trim().toUpperCase(),
+      name: formName.trim(),
+      category: formCategory,
+      unit: formUnit,
+      pack_size: formUnit,
+      shade_code: formShadeCode.trim() || 'Standard',
+      cost_price: cost,
+      retail_price: retail,
+      wholesale_price: wholesale,
+      trade_price: trade,
+      stock_qty: Number(formStockQty) || 0,
+      min_stock_alert: Number(formMinAlert) || 5,
+    };
 
     try {
-      if (receiveMode === 'existing') {
-        const itemObj = items.find(i => i.id === selectedExistingId);
-        if (!itemObj) {
-          setFormError('Please select a valid item');
-          setSubmitting(false);
-          return;
-        }
-
-        const qtyToAdd = parseFloat(receivedQty) || 0;
-        const newTotalStock = (itemObj.stock_qty || 0) + qtyToAdd;
-
+      if (editingItemId) {
+        // Update existing item
         const res = await fetch('/api/items', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: itemObj.id,
-            stock_qty: newTotalStock,
-            cost_price: receivedCost ? parseFloat(receivedCost) : itemObj.cost_price,
-          }),
+          body: JSON.stringify({ id: editingItemId, ...payload }),
         });
-
         const data = await res.json();
         if (data.success) {
-          setShowReceiveModal(false);
-          setReceivedQty('10');
-          setSupplierName('');
-          setBiltyRef('');
-          if (onStockUpdated) onStockUpdated();
+          showToast(`Product "${formName}" updated successfully!`);
+          setShowAddProductModal(false);
+          onStockUpdated?.();
         } else {
-          setFormError(data.error || 'Failed to update stock');
+          alert(`Failed to update: ${data.error}`);
         }
       } else {
-        // Create brand new item
-        if (!tenantId || !newItemName || !newItemCode) {
-          setFormError('Tenant ID, Item Code and Name are required');
-          setSubmitting(false);
-          return;
-        }
-
+        // Insert new item
         const res = await fetch('/api/items', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            tenant_id: tenantId,
-            code: newItemCode,
-            name: newItemName,
-            category: newItemCategory,
-            unit: newItemUnit,
-            cost_price: parseFloat(newItemCost) || 0,
-            retail_price: parseFloat(newItemRetail) || 0,
-            wholesale_price: parseFloat(newItemWholesale) || 0,
-            trade_price: parseFloat(newItemTrade) || 0,
-            stock_qty: parseFloat(newItemInitialStock) || 0,
-            min_stock_alert: parseFloat(newItemMinStock) || 5,
-          }),
+          body: JSON.stringify(payload),
         });
-
         const data = await res.json();
         if (data.success) {
-          setShowReceiveModal(false);
-          setNewItemCode('');
-          setNewItemName('');
-          setNewItemCost('');
-          setNewItemRetail('');
-          setNewItemWholesale('');
-          setNewItemTrade('');
-          if (onStockUpdated) onStockUpdated();
+          showToast(`New Product "${formName}" added to catalog!`);
+          setShowAddProductModal(false);
+          onStockUpdated?.();
         } else {
-          setFormError(data.error || 'Failed to create item');
+          alert(`Failed to create: ${data.error}`);
         }
       }
     } catch (err: any) {
-      setFormError(err.message || 'Network error while receiving stock');
+      alert(`Network error saving product: ${err.message}`);
     } finally {
       setSubmitting(false);
     }
   };
 
+  // Confirm Inward Goods Receipt (GRN)
+  const handleConfirmReceive = async () => {
+    if (!selectedProdForReceive || receiveQty <= 0) return;
+    setSubmitting(true);
+
+    const prod = items.find((i) => i.id === selectedProdForReceive);
+    if (!prod) return;
+
+    try {
+      const newStock = (prod.stock_qty || 0) + receiveQty;
+      const res = await fetch('/api/items', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: prod.id, stock_qty: newStock }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`Received ${receiveQty} units of ${prod.name}! (Batch: ${receiveBatchNo})`);
+        setShowReceiveModal(false);
+        onStockUpdated?.();
+      } else {
+        alert(`Failed: ${data.error}`);
+      }
+    } catch (err: any) {
+      alert(`Error receiving stock: ${err.message}`);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Export CSV
+  const handleExportCSV = () => {
+    if (items.length === 0) return;
+    const headers = ['Code', 'Product Name', 'Category', 'Pack Size', 'Shade', 'Stock Qty', 'Retail Price', 'Wholesale Price'];
+    const rows = items.map((i) => [
+      i.code,
+      `"${i.name.replace(/"/g, '""')}"`,
+      i.category || 'General',
+      i.pack_size || i.unit || 'Can',
+      i.shade_code || 'Standard',
+      i.stock_qty,
+      i.retail_price,
+      i.wholesale_price,
+    ]);
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `PaintERP_Inventory_${tenantName.replace(/\s+/g, '_')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast('Inventory manifest exported to CSV!');
+  };
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-      {/* ── Top Action Header ── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h1 className="page-title">Stock Management</h1>
-          <p className="page-subtitle">Warehouse inventory, multi-godown allocation &amp; 3-tier price matrices</p>
+    <section className="inv-screen" style={{ width: '100%', overflowX: 'hidden' }}>
+      {/* Toast Notification */}
+      {notification && (
+        <div style={{ position: 'fixed', top: '16px', right: '16px', zIndex: 60, background: '#0F172A', color: '#ffffff', padding: '10px 16px', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', border: '1px solid #334155', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 600 }}>
+          <CheckCircle2 style={{ width: 16, height: 16, color: '#F97316' }} />
+          {notification}
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button onClick={handleExportCSV} className="btn btn-secondary-outline" title="Download Excel/CSV sheet">
-            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>download</span>
-            Export List
-          </button>
-          <button onClick={() => setShowReceiveModal(true)} className="btn btn-primary" title="Inward Stock (F2)">
-            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>add_box</span>
-            Receive Stock (F2)
-          </button>
+      )}
+
+      {/* Top Metric KPI Cards Row (Matching painterp) */}
+      <div className="inv-kpi-grid">
+        <div className="inv-kpi-card">
+          <p className="inv-kpi-label">
+            Total Catalog SKUs
+          </p>
+          <p className="inv-kpi-val">
+            {totalSKUs}
+          </p>
+        </div>
+
+        <div className="inv-kpi-card">
+          <p className="inv-kpi-label">
+            Units In Stock
+          </p>
+          <p className="inv-kpi-val">
+            {totalStockUnits.toLocaleString()}
+          </p>
+        </div>
+
+        <div className="inv-kpi-card">
+          <p className="inv-kpi-label">
+            Stock Valuation (Wholesale)
+          </p>
+          <p className="inv-kpi-val">
+            Rs. {(totalValuation / 100000).toFixed(2)} Lac
+          </p>
+        </div>
+
+        <div className="inv-kpi-card">
+          <p className="inv-kpi-label">
+            Low Stock Alerts
+          </p>
+          <p className="inv-kpi-val" style={{ color: lowStockCount > 0 ? '#DC2626' : '#16A34A' }}>
+            {lowStockCount} Items
+          </p>
         </div>
       </div>
 
-      {/* ── Main Layout: Filter Sidebar + Inventory Table ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '1.25rem', alignItems: 'start' }}>
-        {/* Filter Panel */}
-        <div className="card" style={{ padding: '1.25rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>tune</span>
-              Filters
-            </h3>
-            <button
-              onClick={handleClearFilters}
-              style={{ background: 'none', border: 'none', color: 'var(--secondary)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
-            >
-              Clear
-            </button>
-          </div>
-
-          {/* Category Section */}
-          <div style={{ marginBottom: '1.5rem' }}>
-            <label className="form-label" style={{ marginBottom: '0.75rem' }}>Category</label>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {categories.map(cat => (
-                <label key={cat} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer', color: 'var(--on-surface)' }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedCategories.includes(cat)}
-                    onChange={() => handleCategoryToggle(cat)}
-                    style={{ accentColor: 'var(--secondary)', width: 15, height: 15 }}
-                  />
-                  <span>{cat}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {/* Godown Location */}
-          <div style={{ marginBottom: '1.5rem' }}>
-            <label className="form-label">Godown Location</label>
-            <select
-              className="form-select"
-              value={selectedLocation}
-              onChange={e => setSelectedLocation(e.target.value)}
-            >
-              <option value="All Locations">All Locations</option>
-              <option value="Main Hub">Main Hub (Central)</option>
-              <option value="North Wing">North Wing Godown</option>
-              <option value="South Yard">South Yard Storage</option>
-            </select>
-          </div>
-
-          {/* Stock Status */}
+      {/* Main Content Area: Left Filters Panel + Right Inventory Table */}
+      <div className="inv-main-layout" style={{ width: '100%', overflowX: 'hidden' }}>
+        {/* Left Filter Panel (Matching painterp) */}
+        <aside className="inv-filter-sidebar no-scrollbar">
           <div>
-            <label className="form-label" style={{ marginBottom: '0.75rem' }}>Stock Status</label>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
-                <input
-                  type="radio"
-                  name="stockStatus"
-                  checked={stockStatusFilter === 'all'}
-                  onChange={() => setStockStatusFilter('all')}
-                  style={{ accentColor: 'var(--secondary)' }}
-                />
-                <span>All Stock</span>
+            <h3 style={{ fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em', color: '#0F172A', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Filter style={{ width: 14, height: 14, color: '#F97316' }} />
+              Filters &amp; Grouping
+            </h3>
+
+            {/* Godown Location Dropdown */}
+            <div style={{ marginBottom: '14px' }}>
+              <label style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', color: '#64748B', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                Godown / Location
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
-                <input
-                  type="radio"
-                  name="stockStatus"
-                  checked={stockStatusFilter === 'out'}
-                  onChange={() => setStockStatusFilter('out')}
-                  style={{ accentColor: 'var(--secondary)' }}
-                />
-                <span style={{ color: 'var(--error)' }}>Out of Stock</span>
+              <select
+                value={selectedLocation}
+                onChange={(e) => setSelectedLocation(e.target.value)}
+                style={{ width: '100%', fontSize: '12px', background: '#F8FAFC', border: '1px solid #E2E8F0', padding: '6px 8px', color: '#0F172A', fontWeight: 500, borderRadius: '8px', outline: 'none' }}
+              >
+                {locations.map((loc) => (
+                  <option key={loc} value={loc}>
+                    {loc === 'All' ? 'All Godowns & Vaults' : loc}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Stock Status Radio Buttons */}
+            <div style={{ marginBottom: '14px' }}>
+              <label style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', color: '#64748B', fontWeight: 700, display: 'block', marginBottom: '6px' }}>
+                Stock Status
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
-                <input
-                  type="radio"
-                  name="stockStatus"
-                  checked={stockStatusFilter === 'low'}
-                  onChange={() => setStockStatusFilter('low')}
-                  style={{ accentColor: 'var(--secondary)' }}
-                />
-                <span style={{ color: '#b45309' }}>Low Stock Alert</span>
-              </label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: '#334155' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="stockStatus"
+                    checked={stockStatus === 'all'}
+                    onChange={() => setStockStatus('all')}
+                    style={{ accentColor: '#F97316' }}
+                  />
+                  <span>All Statuses</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="stockStatus"
+                    checked={stockStatus === 'in_stock'}
+                    onChange={() => setStockStatus('in_stock')}
+                    style={{ accentColor: '#F97316' }}
+                  />
+                  <span>Healthy Stock</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="stockStatus"
+                    checked={stockStatus === 'low_stock'}
+                    onChange={() => setStockStatus('low_stock')}
+                    style={{ accentColor: '#F97316' }}
+                  />
+                  <span style={{ color: '#DC2626', fontWeight: 600 }}>
+                    Low Stock ({lowStockCount})
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            {/* Category Filter */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                <label style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', color: '#64748B', fontWeight: 700, display: 'block' }}>
+                  Categories
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsAddingNewCategory(true);
+                    setShowAddProductModal(true);
+                  }}
+                  style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#F97316', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                  title="Add New Category"
+                >
+                  + New
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '12px', color: '#334155' }}>
+                {['All', ...allCategories].map((cat) => (
+                  <label key={cat} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '3px 0', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="categorySelection"
+                      checked={selectedCategory === cat}
+                      onChange={() => setSelectedCategory(cat)}
+                      style={{ accentColor: '#F97316' }}
+                    />
+                    <span style={{ fontWeight: selectedCategory === cat ? 700 : 400, color: selectedCategory === cat ? '#F97316' : '#475569' }}>
+                      {cat}
+                    </span>
+                  </label>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+        </aside>
 
-        {/* Data Table Panel */}
-        <div className="card" style={{ overflow: 'hidden' }}>
-          <div style={{ padding: '0.75rem 1.25rem', borderBottom: '1px solid var(--outline-variant)', background: 'var(--surface)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ fontSize: '13px', color: 'var(--on-surface-variant)' }}>
-              Showing <strong style={{ color: 'var(--on-surface)' }}>{filteredItems.length}</strong> items
-            </div>
-            <div style={{ width: '280px', position: 'relative' }}>
-              <span className="material-symbols-outlined" style={{ position: 'absolute', left: '0.625rem', top: '50%', transform: 'translateY(-50%)', fontSize: 18, color: 'var(--on-surface-variant)' }}>search</span>
+        {/* Right Table Container (Strictly fits without horizontal scroll) */}
+        <div className="inv-table-card" style={{ width: '100%', minWidth: 0, overflowX: 'hidden' }}>
+          {/* Action Row */}
+          <div className="inv-action-bar">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, maxWidth: '420px', position: 'relative' }}>
+              <Search style={{ width: 15, height: 15, color: '#94A3B8', position: 'absolute', left: '10px' }} />
               <input
                 ref={searchInputRef}
                 type="text"
-                className="form-input"
-                placeholder="Search item code or name (F3)..."
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                style={{ paddingLeft: '2.25rem', height: '34px' }}
+                value={tableSearch}
+                onChange={(e) => setTableSearch(e.target.value)}
+                placeholder="Filter by SKU, product name, shade or category..."
+                style={{ width: '100%', fontSize: '12px', background: '#F8FAFC', border: '1px solid #E2E8F0', padding: '7px 10px 7px 32px', color: '#0F172A', borderRadius: '8px', outline: 'none' }}
               />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={handleExportCSV}
+                className="inv-btn-secondary"
+                title="Export stock manifest to CSV"
+              >
+                <Download style={{ width: 14, height: 14 }} />
+                Export CSV
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedProdForReceive(items[0]?.id || '');
+                  setShowReceiveModal(true);
+                }}
+                className="inv-btn-secondary"
+                title="Inward goods stock receiving"
+              >
+                <PackagePlus style={{ width: 14, height: 14, color: '#F97316' }} />
+                Receive Stock
+              </button>
+
+              <button
+                type="button"
+                onClick={handleOpenAddProduct}
+                className="inv-btn-primary"
+                title="Create a new paint product in catalog"
+              >
+                <Plus style={{ width: 15, height: 15 }} />
+                Add Product
+              </button>
             </div>
           </div>
 
-          <div style={{ overflowX: 'auto' }}>
-            <table className="data-table">
+          {/* Data Table – vertical scroll only */}
+          <div className="inv-table-wrap">
+            <table className="inv-data-table" style={{ width: '100%', tableLayout: 'fixed' }}>
+              <colgroup>
+                <col style={{ width: '108px' }} />
+                <col />
+                <col style={{ width: '120px' }} />
+                <col style={{ width: '80px' }} />
+                <col style={{ width: '90px' }} />
+                <col style={{ width: '130px' }} />
+                <col style={{ width: '72px' }} />
+                <col style={{ width: '52px' }} />
+              </colgroup>
               <thead>
                 <tr>
-                  <th style={{ width: 100 }}>Item Code</th>
-                  <th>Item Name</th>
+                  <th onClick={() => handleSort('code')} style={{ cursor: 'pointer' }}>
+                    Code {sortField === 'code' && (sortAsc ? '▲' : '▼')}
+                  </th>
+                  <th onClick={() => handleSort('name')} style={{ cursor: 'pointer' }}>
+                    Product &amp; Shade {sortField === 'name' && (sortAsc ? '▲' : '▼')}
+                  </th>
                   <th>Category</th>
-                  <th>Location</th>
-                  <th>Stock (Unit)</th>
-                  <th className="text-right">Retail (PKR)</th>
-                  <th className="text-right">W.Sale (PKR)</th>
-                  <th className="text-right">Trade (PKR)</th>
+                  <th>Pack Size</th>
+                  <th onClick={() => handleSort('stock_qty')} style={{ textAlign: 'right', cursor: 'pointer' }}>
+                    Stock {sortField === 'stock_qty' && (sortAsc ? '▲' : '▼')}
+                  </th>
+                  <th style={{ textAlign: 'right' }}>Retail / WS / Trade</th>
+                  <th style={{ textAlign: 'center' }}>Status</th>
+                  <th style={{ textAlign: 'center' }}>Edit</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.map(it => {
-                  const isOut = it.stock_qty <= 0;
-                  const isLow = !isOut && it.stock_qty <= (it.min_stock_alert ?? it.min_stock ?? 10);
-                  return (
-                    <tr key={it.id}>
-                      <td className="font-mono text-blue font-bold" style={{ fontSize: '12px' }}>
-                        {it.code}
-                      </td>
-                      <td>
-                        <div style={{ fontWeight: 600, color: isOut ? 'var(--error)' : 'inherit' }}>
-                          {it.name}
-                        </div>
-                      </td>
-                      <td className="text-muted">{it.category || 'General'}</td>
-                      <td className="text-muted">Main Hub</td>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          {isOut && <span className="badge badge-out">OUT</span>}
-                          {isLow && <span className="badge badge-low">LOW</span>}
-                          <span className="font-mono" style={{ fontWeight: 700, color: isOut ? 'var(--error)' : 'inherit' }}>
-                            {it.stock_qty} <span style={{ fontSize: '11px', fontWeight: 400, color: 'var(--on-surface-variant)' }}>{it.unit}</span>
-                          </span>
-                        </div>
-                      </td>
-                      <td className="text-right font-mono" style={{ fontWeight: 600 }}>
-                        {it.retail_price.toLocaleString()}
-                      </td>
-                      <td className="text-right font-mono text-muted">
-                        {it.wholesale_price.toLocaleString()}
-                      </td>
-                      <td className="text-right font-mono text-muted">
-                        {it.trade_price.toLocaleString()}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {filteredItems.length === 0 && (
+                {sortedProducts.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ textAlign: 'center', padding: '3rem', color: 'var(--on-surface-variant)' }}>
-                      No inventory matching the selected filters.
+                    <td colSpan={8} style={{ padding: '3.5rem 1rem', textAlign: 'center', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace', fontSize: '12px' }}>
+                      No products found. Click &quot;+ Add Product&quot; above.
                     </td>
                   </tr>
+                ) : (
+                  sortedProducts.map((prod) => {
+                    const minAlert = prod.min_stock_alert || prod.min_stock || 5;
+                    const isCritical = prod.stock_qty <= minAlert;
+                    return (
+                      <tr key={prod.id}>
+                        {/* Code */}
+                        <td style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {prod.code}
+                        </td>
+                        {/* Product & Shade */}
+                        <td style={{ overflow: 'hidden' }}>
+                          <div style={{ fontWeight: 700, color: '#0F172A', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{prod.name}</div>
+                          {prod.shade_code && prod.shade_code !== '—' && (
+                            <div style={{ fontSize: '11px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {prod.shade_code}
+                            </div>
+                          )}
+                        </td>
+                        {/* Category */}
+                        <td style={{ color: '#334155', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {prod.category || 'General'}
+                        </td>
+                        {/* Pack Size */}
+                        <td style={{ fontFamily: 'JetBrains Mono, monospace', color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {prod.pack_size || prod.unit || 'Can'}
+                        </td>
+                        {/* Stock Qty */}
+                        <td style={{ textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>
+                          <span style={{ fontWeight: 700, color: isCritical ? '#DC2626' : '#0F172A' }}>
+                            {prod.stock_qty}
+                          </span>
+                          <span style={{ fontSize: '10px', color: '#94A3B8', display: 'block' }}>
+                            Min: {minAlert}
+                          </span>
+                        </td>
+                        {/* Prices stacked */}
+                        <td style={{ textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', lineHeight: 1.55 }}>
+                          <span style={{ fontWeight: 700, color: '#0F172A', display: 'block', fontSize: '12px' }}>
+                            {Number(prod.retail_price).toLocaleString()}
+                          </span>
+                          <span style={{ color: '#64748B', display: 'block', fontSize: '11px' }}>
+                            {Number(prod.wholesale_price || prod.retail_price).toLocaleString()}
+                          </span>
+                          <span style={{ color: '#94A3B8', display: 'block', fontSize: '11px' }}>
+                            {Number(prod.trade_price || prod.retail_price).toLocaleString()}
+                          </span>
+                        </td>
+                        {/* Status */}
+                        <td style={{ textAlign: 'center' }}>
+                          {isCritical ? (
+                            <span className="inv-badge-alert">Low</span>
+                          ) : (
+                            <span className="inv-badge-optimal">OK</span>
+                          )}
+                        </td>
+                        {/* Action */}
+                        <td style={{ textAlign: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditProduct(prod)}
+                            style={{ padding: '5px', color: '#64748B', background: 'none', border: 'none', cursor: 'pointer', borderRadius: '4px' }}
+                            title="Edit Product Details"
+                          >
+                            <Edit2 style={{ width: 14, height: 14 }} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -435,257 +686,395 @@ export default function StockInventory({
         </div>
       </div>
 
-      {/* ── Receive Stock Modal (F2) ── */}
-      {showReceiveModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem', zIndex: 2500 }}>
-          <div className="card" style={{ width: '100%', maxWidth: '560px', maxHeight: '90vh', overflowY: 'auto', padding: '1.5rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+      {/* ── MODAL 1: ADD / EDIT PRODUCT WITH DYNAMIC CATEGORY & UNIT (TEXT-ONLY SHADE) ── */}
+      {showAddProductModal && (
+        <div className="pos-modal-overlay">
+          <div className="pos-modal-card" style={{ maxWidth: '620px' }}>
+            <div style={{ padding: '1rem', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#F8FAFC' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span className="material-symbols-outlined filled" style={{ fontSize: 24, color: 'var(--secondary)' }}>inventory</span>
-                <h3 className="headline-sm">Receive Stock / Inward Shipment (F2)</h3>
+                <Boxes style={{ width: 16, height: 16, color: '#F97316' }} />
+                <h3 style={{ fontWeight: 700, fontSize: '13px', textTransform: 'uppercase', color: '#0F172A' }}>
+                  {editingItemId ? 'Edit Product SKU' : 'Add New Paint Product SKU'}
+                </h3>
               </div>
-              <button onClick={() => setShowReceiveModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--on-surface-variant)' }}>
-                <span className="material-symbols-outlined">close</span>
+              <button
+                type="button"
+                onClick={() => setShowAddProductModal(false)}
+                style={{ background: 'none', border: 'none', color: '#94A3B8', fontSize: '16px', fontWeight: 700, cursor: 'pointer' }}
+              >
+                ✕
               </button>
             </div>
 
-            {/* Mode Selector Tabs */}
-            <div style={{ display: 'flex', background: 'var(--surface-container)', borderRadius: 'var(--radius-sm)', padding: '3px', marginBottom: '1.25rem' }}>
-              <button
-                type="button"
-                onClick={() => setReceiveMode('existing')}
-                className={`role-tab ${receiveMode === 'existing' ? 'active' : ''}`}
-              >
-                Inward Existing Product
-              </button>
-              <button
-                type="button"
-                onClick={() => setReceiveMode('new')}
-                className={`role-tab ${receiveMode === 'new' ? 'active' : ''}`}
-              >
-                + Add New Paint Formulation
-              </button>
-            </div>
-
-            {formError && (
-              <div style={{ background: 'var(--error-container)', border: '1px solid rgba(186,26,26,0.3)', borderRadius: 'var(--radius-sm)', padding: '0.625rem 0.875rem', fontSize: '13px', color: 'var(--on-error-container)', marginBottom: '1rem' }}>
-                {formError}
+            <form onSubmit={handleSaveProduct} style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '12px', maxHeight: '80vh', overflowY: 'auto' }}>
+              {/* Code & Name Row */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                    Product Code / SKU *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formCode}
+                    onChange={(e) => setFormCode(e.target.value)}
+                    placeholder="e.g. EM-INT-101"
+                    className="pos-text-input"
+                    style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, textTransform: 'uppercase' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                    Product Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formName}
+                    onChange={(e) => setFormName(e.target.value)}
+                    placeholder="e.g. Super Matt Plastic Emulsion (Base A)"
+                    className="pos-text-input"
+                    style={{ fontWeight: 600 }}
+                  />
+                </div>
               </div>
-            )}
 
-            <form onSubmit={handleReceiveSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {receiveMode === 'existing' ? (
-                <>
-                  <div>
-                    <label className="form-label">Select Paint Product *</label>
-                    <select
-                      className="form-select"
-                      value={selectedExistingId}
-                      onChange={e => {
-                        setSelectedExistingId(e.target.value);
-                        const it = items.find(i => i.id === e.target.value);
-                        if (it) setReceivedCost(it.cost_price?.toString() || '');
-                      }}
-                      required
+              {/* Dynamic Category Row */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <label style={{ fontWeight: 700, color: '#334155' }}>
+                    Category *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingNewCategory(!isAddingNewCategory)}
+                    style={{ fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', color: '#F97316', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                  >
+                    {isAddingNewCategory ? '← Choose Existing' : '+ Add New Category'}
+                  </button>
+                </div>
+
+                {isAddingNewCategory ? (
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <input
+                      type="text"
+                      value={newCategoryInput}
+                      onChange={(e) => setNewCategoryInput(e.target.value)}
+                      placeholder="Type new category (e.g. Epoxy Flooring, Auto Paints)..."
+                      className="pos-text-input"
+                      style={{ flex: 1, borderColor: '#F97316' }}
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddNewCategory}
+                      style={{ padding: '0 14px', background: '#F97316', color: '#ffffff', fontWeight: 700, borderRadius: '8px', border: 'none', cursor: 'pointer', fontSize: '11.5px' }}
                     >
-                      {items.map(it => (
-                        <option key={it.id} value={it.id}>
-                          {it.code} — {it.name} (Current Stock: {it.stock_qty} {it.unit})
-                        </option>
-                      ))}
-                    </select>
+                      Save
+                    </button>
                   </div>
+                ) : (
+                  <select
+                    value={formCategory}
+                    onChange={(e) => {
+                      if (e.target.value === '__add_new__') {
+                        setIsAddingNewCategory(true);
+                      } else {
+                        setFormCategory(e.target.value);
+                      }
+                    }}
+                    className="pos-text-input"
+                    style={{ fontWeight: 500 }}
+                  >
+                    {allCategories.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                    <option value="__add_new__">+ Add New Category...</option>
+                  </select>
+                )}
+              </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                    <div>
-                      <label className="form-label">Quantity to Add (Units) *</label>
-                      <input
-                        type="number"
-                        min="1"
-                        step="any"
-                        required
-                        className="form-input"
-                        value={receivedQty}
-                        onChange={e => setReceivedQty(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="form-label">Purchase / Cost Price (PKR)</label>
-                      <input
-                        type="number"
-                        className="form-input"
-                        placeholder="Cost per unit"
-                        value={receivedCost}
-                        onChange={e => setReceivedCost(e.target.value)}
-                      />
-                    </div>
-                  </div>
+              {/* Dynamic Unit / Pack Size Row */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <label style={{ fontWeight: 700, color: '#334155' }}>
+                    Unit / Pack Size *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingNewUnit(!isAddingNewUnit)}
+                    style={{ fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', color: '#F97316', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                  >
+                    {isAddingNewUnit ? '← Choose Existing' : '+ Add New Unit / Size'}
+                  </button>
+                </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                    <div>
-                      <label className="form-label">Supplier / Factory Vendor</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="e.g. Master Paints / Berger"
-                        value={supplierName}
-                        onChange={e => setSupplierName(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="form-label">Bilty / Inward Challan No</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="e.g. BL-7821"
-                        value={biltyRef}
-                        onChange={e => setBiltyRef(e.target.value)}
-                      />
-                    </div>
+                {isAddingNewUnit ? (
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <input
+                      type="text"
+                      value={newUnitInput}
+                      onChange={(e) => setNewUnitInput(e.target.value)}
+                      placeholder="Type new pack size (e.g. 10L Bucket, 250ml Bottle)..."
+                      className="pos-text-input"
+                      style={{ flex: 1, borderColor: '#F97316' }}
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddNewUnit}
+                      style={{ padding: '0 14px', background: '#F97316', color: '#ffffff', fontWeight: 700, borderRadius: '8px', border: 'none', cursor: 'pointer', fontSize: '11.5px' }}
+                    >
+                      Save
+                    </button>
                   </div>
-                </>
-              ) : (
-                <>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '0.75rem' }}>
-                    <div>
-                      <label className="form-label">Item SKU / Code *</label>
-                      <input
-                        type="text"
-                        required
-                        className="form-input"
-                        placeholder="e.g. EM-109"
-                        value={newItemCode}
-                        onChange={e => setNewItemCode(e.target.value.toUpperCase())}
-                      />
-                    </div>
-                    <div>
-                      <label className="form-label">Product Name *</label>
-                      <input
-                        type="text"
-                        required
-                        className="form-input"
-                        placeholder="e.g. Matt Finish Super Emulsion"
-                        value={newItemName}
-                        onChange={e => setNewItemName(e.target.value)}
-                      />
-                    </div>
-                  </div>
+                ) : (
+                  <select
+                    value={formUnit}
+                    onChange={(e) => {
+                      if (e.target.value === '__add_new__') {
+                        setIsAddingNewUnit(true);
+                      } else {
+                        setFormUnit(e.target.value);
+                      }
+                    }}
+                    className="pos-text-input"
+                    style={{ fontWeight: 500 }}
+                  >
+                    {allUnits.map((u) => (
+                      <option key={u} value={u}>
+                        {u}
+                      </option>
+                    ))}
+                    <option value="__add_new__">+ Add New Unit / Pack Size...</option>
+                  </select>
+                )}
+              </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                    <div>
-                      <label className="form-label">Category</label>
-                      <select
-                        className="form-select"
-                        value={newItemCategory}
-                        onChange={e => setNewItemCategory(e.target.value)}
-                      >
-                        <option value="Emulsion">Interior Emulsion</option>
-                        <option value="Weather Shield">Weather Shield Exterior</option>
-                        <option value="Enamel">High Gloss Enamel</option>
-                        <option value="Primer">Wall Primer &amp; Sealer</option>
-                        <option value="Putty">Wall Putty</option>
-                        <option value="Solvent">Thinner &amp; Solvent</option>
-                        <option value="Accessories">Rollers &amp; Brushes</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="form-label">Packaging Unit</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="e.g. Drum (16L), Can (4L), Gallon"
-                        value={newItemUnit}
-                        onChange={e => setNewItemUnit(e.target.value)}
-                      />
-                    </div>
-                  </div>
+              {/* Shade / Color Name (Text-only, no visual picker) */}
+              <div>
+                <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  Paint Shade / Color Name (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={formShadeCode}
+                  onChange={(e) => setFormShadeCode(e.target.value)}
+                  placeholder="e.g. Off-White 101, Ocean Blue, Signal Red, Matt Finish"
+                  className="pos-text-input"
+                  style={{ fontWeight: 500 }}
+                />
+              </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '0.5rem' }}>
-                    <div>
-                      <label className="form-label">Cost (Rs)</label>
-                      <input
-                        type="number"
-                        className="form-input"
-                        placeholder="Cost"
-                        value={newItemCost}
-                        onChange={e => setNewItemCost(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="form-label">Retail (Rs)</label>
-                      <input
-                        type="number"
-                        className="form-input"
-                        placeholder="Retail"
-                        value={newItemRetail}
-                        onChange={e => setNewItemRetail(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="form-label">W.Sale (Rs)</label>
-                      <input
-                        type="number"
-                        className="form-input"
-                        placeholder="Wholesale"
-                        value={newItemWholesale}
-                        onChange={e => setNewItemWholesale(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="form-label">Trade (Rs)</label>
-                      <input
-                        type="number"
-                        className="form-input"
-                        placeholder="Trade"
-                        value={newItemTrade}
-                        onChange={e => setNewItemTrade(e.target.value)}
-                      />
-                    </div>
+              {/* 3-Tier Price Matrix */}
+              <div>
+                <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  Price Matrix (PKR)
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
+                  <div>
+                    <label style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B', display: 'block', marginBottom: '2px' }}>Cost</label>
+                    <input
+                      type="number"
+                      value={formCostPrice}
+                      onChange={(e) => setFormCostPrice(e.target.value)}
+                      placeholder="0.00"
+                      className="pos-text-input"
+                      style={{ textAlign: 'right', fontWeight: 700 }}
+                    />
                   </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                    <div>
-                      <label className="form-label">Initial Stock Qty</label>
-                      <input
-                        type="number"
-                        className="form-input"
-                        value={newItemInitialStock}
-                        onChange={e => setNewItemInitialStock(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="form-label">Low Stock Alert Level</label>
-                      <input
-                        type="number"
-                        className="form-input"
-                        value={newItemMinStock}
-                        onChange={e => setNewItemMinStock(e.target.value)}
-                      />
-                    </div>
+                  <div>
+                    <label style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B', display: 'block', marginBottom: '2px' }}>Retail *</label>
+                    <input
+                      type="number"
+                      required
+                      value={formRetailPrice}
+                      onChange={(e) => setFormRetailPrice(e.target.value)}
+                      placeholder="0.00"
+                      className="pos-text-input"
+                      style={{ textAlign: 'right', fontWeight: 700, borderColor: '#F97316' }}
+                    />
                   </div>
-                </>
-              )}
+                  <div>
+                    <label style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B', display: 'block', marginBottom: '2px' }}>Wholesale</label>
+                    <input
+                      type="number"
+                      value={formWholesalePrice}
+                      onChange={(e) => setFormWholesalePrice(e.target.value)}
+                      placeholder="0.00"
+                      className="pos-text-input"
+                      style={{ textAlign: 'right', fontWeight: 700 }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B', display: 'block', marginBottom: '2px' }}>Trade</label>
+                    <input
+                      type="number"
+                      value={formTradePrice}
+                      onChange={(e) => setFormTradePrice(e.target.value)}
+                      placeholder="0.00"
+                      className="pos-text-input"
+                      style={{ textAlign: 'right', fontWeight: 700 }}
+                    />
+                  </div>
+                </div>
+              </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+              {/* Stock Qty & Low Alert */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <div>
+                  <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                    Opening Stock Quantity
+                  </label>
+                  <input
+                    type="number"
+                    value={formStockQty}
+                    onChange={(e) => setFormStockQty(e.target.value)}
+                    className="pos-text-input"
+                    style={{ fontWeight: 700 }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                    Min Stock Low Alert Limit
+                  </label>
+                  <input
+                    type="number"
+                    value={formMinAlert}
+                    onChange={(e) => setFormMinAlert(e.target.value)}
+                    className="pos-text-input"
+                    style={{ fontWeight: 700 }}
+                  />
+                </div>
+              </div>
+
+              {/* Modal Actions */}
+              <div style={{ display: 'flex', gap: '8px', paddingTop: '10px', borderTop: '1px solid #E2E8F0' }}>
                 <button
                   type="button"
-                  onClick={() => setShowReceiveModal(false)}
-                  className="btn btn-secondary-outline"
+                  onClick={() => setShowAddProductModal(false)}
+                  style={{ flex: 1, padding: '10px', background: '#F1F5F9', color: '#334155', fontWeight: 700, fontSize: '12px', borderRadius: '8px', border: '1px solid #CBD5E1', cursor: 'pointer' }}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="btn btn-primary"
+                  style={{ flex: 1, padding: '10px', background: '#F97316', color: '#ffffff', fontWeight: 700, fontSize: '12px', borderRadius: '8px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
                 >
-                  {submitting ? 'Saving...' : 'Confirm Stock Inward'}
+                  <Plus style={{ width: 15, height: 15 }} />
+                  {submitting ? 'Saving...' : editingItemId ? 'Update Product SKU' : 'Save New Product to DB'}
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
-    </div>
+
+      {/* ── MODAL 2: INWARD GOODS RECEIPT (GRN) ── */}
+      {showReceiveModal && (
+        <div className="pos-modal-overlay">
+          <div className="pos-modal-card" style={{ maxWidth: '480px' }}>
+            <div style={{ padding: '1rem', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#F8FAFC' }}>
+              <div>
+                <h3 style={{ fontWeight: 700, fontSize: '13px', textTransform: 'uppercase', color: '#0F172A' }}>
+                  Inward Goods Receipt (GRN)
+                </h3>
+                <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B' }}>
+                  GRN-{new Date().getFullYear()}-891
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowReceiveModal(false)}
+                style={{ background: 'none', border: 'none', color: '#94A3B8', fontSize: '16px', fontWeight: 700, cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '12px' }}>
+              <div>
+                <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  Select SKU / Product:
+                </label>
+                <select
+                  value={selectedProdForReceive}
+                  onChange={(e) => setSelectedProdForReceive(e.target.value)}
+                  className="pos-text-input"
+                  style={{ fontWeight: 500 }}
+                >
+                  {items.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.code} — {p.name} ({p.pack_size || p.unit})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <div>
+                  <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                    Quantity Received:
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={receiveQty}
+                    onChange={(e) => setReceiveQty(Number(e.target.value) || 1)}
+                    className="pos-text-input"
+                    style={{ fontWeight: 700 }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                    Manufacturer Batch #:
+                  </label>
+                  <input
+                    type="text"
+                    value={receiveBatchNo}
+                    onChange={(e) => setReceiveBatchNo(e.target.value)}
+                    className="pos-text-input"
+                    style={{ textTransform: 'uppercase', fontFamily: 'JetBrains Mono, monospace' }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  Supplier Invoice / Bilty Reference:
+                </label>
+                <input
+                  type="text"
+                  value={supplierBillRef}
+                  onChange={(e) => setSupplierBillRef(e.target.value)}
+                  className="pos-text-input"
+                />
+              </div>
+            </div>
+
+            <div style={{ padding: '1rem', display: 'flex', gap: '8px', borderTop: '1px solid #E2E8F0' }}>
+              <button
+                type="button"
+                onClick={() => setShowReceiveModal(false)}
+                style={{ flex: 1, padding: '10px', background: '#F1F5F9', color: '#334155', fontWeight: 700, fontSize: '12px', borderRadius: '8px', border: '1px solid #CBD5E1', cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={handleConfirmReceive}
+                style={{ flex: 1, padding: '10px', background: '#F97316', color: '#ffffff', fontWeight: 700, fontSize: '12px', borderRadius: '8px', border: 'none', cursor: 'pointer', textTransform: 'uppercase' }}
+              >
+                {submitting ? 'Receiving...' : 'Confirm Inward Batch'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
