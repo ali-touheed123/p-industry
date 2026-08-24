@@ -199,7 +199,7 @@ export const DevUserModal: React.FC<DevUserModalProps> = ({
 
             {/* Field 4: EMAIL ADDRESS */}
             <div>
-              <label className="aura-form-label">EMAIL ADDRESS (SUPABASE)</label>
+              <label className="aura-form-label">EMAIL ADDRESS</label>
               <input
                 type="email"
                 value={email}

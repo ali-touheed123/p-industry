@@ -251,7 +251,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
 
             {/* Field 5: Email Address */}
             <div>
-              <label className="aura-form-label">EMAIL ADDRESS (SUPABASE AUTH)</label>
+              <label className="aura-form-label">EMAIL ADDRESS</label>
               <input
                 type="email"
                 value={email}
