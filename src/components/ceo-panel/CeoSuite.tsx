@@ -12,6 +12,7 @@ import { ReturnsView } from './ReturnsView';
 import { DayCloseView } from './DayCloseView';
 import { CustomersView } from './CustomersView';
 import { PurchaseView } from './PurchaseView';
+import { SettingsView } from './SettingsView';
 import './ceo-panel.css';
 
 interface CeoSuiteProps {
@@ -191,6 +192,7 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
           {currentSection === 'day-close' && <DayCloseView branch={selectedBranch} />}
           {currentSection === 'customers' && <CustomersView branch={selectedBranch} />}
           {currentSection === 'purchase'  && <PurchaseView branch={selectedBranch} />}
+          {currentSection === 'settings'  && <SettingsView tenant={tenant} />}
         </main>
       </div>
     </div>

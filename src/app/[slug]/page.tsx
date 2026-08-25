@@ -369,11 +369,9 @@ export default function TenantAppPage({ params }: PageProps) {
     { id: 'purchases',       label: 'Purchases',         icon: ShoppingBag },
     { id: 'sales',           label: 'Sales',             icon: TrendingUp },
     { id: 'customers',       label: 'Customers',         icon: Users },
-    { id: 'returns',         label: 'Returns',           icon: RotateCcw },
     { id: 'orders',          label: 'Branch Orders',     icon: PackagePlus, badgeCount: pendingOrdersCount },
     { id: 'hold_invoices',   label: 'Hold Invoices',     icon: PauseCircle },
     { id: 'credit_recovery', label: 'Credit & Recovery', icon: Scale },
-    { id: 'reports',         label: 'Reports',           icon: BarChart3 },
     { id: 'day_close',       label: 'Day Close',         icon: CalendarCheck },
   ];
 
@@ -662,6 +660,7 @@ export default function TenantAppPage({ params }: PageProps) {
             <ShiftDrawer
               shift={activeShift}
               tenantId={tenant.id}
+              tenant={tenant}
               staffName={currentUser?.full_name || currentUser?.username || 'Staff'}
               tenantName={tenant.name}
               ownerPhone={tenant.phone || ''}

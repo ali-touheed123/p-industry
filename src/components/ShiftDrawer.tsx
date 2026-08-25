@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Shift, PettyExpense } from '@/types';
+import { Shift, PettyExpense, Tenant } from '@/types';
 
 interface Props {
   shift: Shift | null;
   tenantId?: string;
+  tenant?: Tenant | null;
   staffName?: string;
   tenantName?: string;
   ownerPhone?: string;
@@ -19,6 +20,7 @@ interface Props {
 export default function ShiftDrawer({
   shift,
   tenantId,
+  tenant,
   staffName = 'Counter Staff',
   tenantName = 'Paint House',
   ownerPhone = '',
@@ -40,25 +42,70 @@ export default function ShiftDrawer({
   const [showPrintSummary, setShowPrintSummary] = useState(false);
   const [closedShiftData, setClosedShiftData] = useState<any | null>(null);
 
-  // Dynamic Sales breakdown from live invoices
+  const [purchases, setPurchases] = useState<any[]>([]);
+
+  // Fetch today's purchases for tenant
+  React.useEffect(() => {
+    if (!tenantId) return;
+    const fetchPurchases = async () => {
+      try {
+        const res = await fetch(`/api/purchases?tenant_id=${tenantId}`);
+        const data = await res.json();
+        if (data.success) {
+          setPurchases(data.purchases || []);
+        }
+      } catch (err) {
+        console.error('Error fetching purchases for shift drawer', err);
+      }
+    };
+    fetchPurchases();
+  }, [tenantId]);
+
+  // Dynamic Sales & Returns breakdown from live invoices
   const openingCash = shift?.opening_cash || 0;
   
-  const cashSales = invoices.length > 0
-    ? invoices.filter(i => !i.payment_type || i.payment_type === 'cash').reduce((s, i) => s + (i.grandTotal || i.net_total || 0), 0)
+  const salesInvoices = invoices.filter(i => (i.invoice_type || 'sales') !== 'return');
+  const returnInvoices = invoices.filter(i => (i.invoice_type || 'sales') === 'return');
+
+  const grossSales = salesInvoices.length > 0
+    ? salesInvoices.reduce((s, i) => s + Number(i.grandTotal || i.net_total || 0), 0)
     : (totalSales > 0 ? totalSales : 0);
 
-  const creditSales = invoices.length > 0
-    ? invoices.filter(i => i.payment_type === 'credit').reduce((s, i) => s + (i.grandTotal || i.net_total || 0), 0)
-    : 0;
+  const totalSalesReturns = returnInvoices.reduce((s, i) => s + Number(i.grandTotal || i.net_total || 0), 0);
+  const netSales = Math.max(0, grossSales - totalSalesReturns);
 
-  const bankSales = invoices.length > 0
-    ? invoices.filter(i => i.payment_type === 'bank' || i.payment_type === 'cheque').reduce((s, i) => s + (i.grandTotal || i.net_total || 0), 0)
-    : 0;
+  const cashSales = salesInvoices.length > 0
+    ? salesInvoices.filter(i => !i.payment_type || i.payment_type === 'cash').reduce((s, i) => s + Number(i.cash_paid || i.paid_amount || i.grandTotal || i.net_total || 0), 0)
+    : (totalSales > 0 ? totalSales : 0);
 
-  const totalSalesAggregate = cashSales + creditSales + bankSales;
+  const cashReturns = returnInvoices
+    .filter(i => !i.payment_type || i.payment_type === 'cash')
+    .reduce((s, i) => s + Number(i.paid_amount || i.grandTotal || i.net_total || 0), 0);
+
+  const creditSales = salesInvoices
+    .filter(i => i.payment_type === 'credit')
+    .reduce((s, i) => s + Number(i.due_amount || i.grandTotal || i.net_total || 0), 0);
+
+  const bankSales = salesInvoices
+    .filter(i => i.payment_type === 'bank' || i.payment_type === 'card' || i.payment_type === 'cheque')
+    .reduce((s, i) => s + Number(i.bank_paid || i.card_paid || i.grandTotal || i.net_total || 0), 0);
+
+  // Dynamic Purchases breakdown
+  const regularPurchases = purchases.filter(p => (p.purchase_type || 'purchase') !== 'return');
+  const purchaseReturns = purchases.filter(p => (p.purchase_type || 'purchase') === 'return');
+
+  const totalPurchases = regularPurchases.reduce((s, p) => s + Number(p.net_total || 0), 0);
+  const totalPurchaseReturns = purchaseReturns.reduce((s, p) => s + Number(p.net_total || 0), 0);
+  const supplierCashPaid = regularPurchases
+    .reduce((s, p) => s + Number(p.paid_amount || (p.payment_type === 'cash' ? p.net_total : 0) || 0), 0);
+
+  const totalSalesAggregate = grossSales;
   const currentExpenses = expenses || [];
   const totalExpenses = currentExpenses.reduce((sum, exp) => sum + exp.amount, 0);
-  const expectedCash = openingCash + cashSales - totalExpenses;
+
+  // Exact Daraz Reconciliation Formula:
+  // Expected Cash = Opening Cash + Cash Inflow (Sales) - Cash Outflow (Sales Returns + Supplier Cash + Expenses)
+  const expectedCash = Math.max(0, openingCash + cashSales - cashReturns - supplierCashPaid - totalExpenses);
 
   // Actual Physical Cash & Variance
   const actualPhysicalCash = actualCashInput !== '' ? (parseFloat(actualCashInput) || 0) : expectedCash;
@@ -66,10 +113,16 @@ export default function ShiftDrawer({
   const isShort = variance < 0;
   const isBalanced = variance === 0;
 
-  // 2% Commission Breakdown
-  const commissionPool = Math.round(totalSalesAggregate * 0.02);
-  const staffAShare = Math.round(commissionPool * 0.35);
-  const staffBShare = Math.round(commissionPool * 0.35);
+  // Commission Settings (Configured by CEO / Tenant)
+  const isCommissionEnabled = Boolean(tenant?.commission_enabled);
+  const commissionRate = Number(tenant?.commission_rate || 2.0);
+  const splitLead = Number(tenant?.commission_split_lead || 35.0);
+  const splitStaff = Number(tenant?.commission_split_staff || 35.0);
+
+  // Commission Breakdown (Only calculated if enabled)
+  const commissionPool = isCommissionEnabled ? Math.round(netSales * (commissionRate / 100)) : 0;
+  const staffAShare = isCommissionEnabled ? Math.round(commissionPool * (splitLead / 100)) : 0;
+  const staffBShare = isCommissionEnabled ? Math.round(commissionPool * (splitStaff / 100)) : 0;
 
   // Add Petty Expense to DB
   const handleAddExpense = async (e: React.FormEvent) => {
@@ -169,16 +222,19 @@ export default function ShiftDrawer({
       `Date: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}\n` +
       `--------------------------------\n` +
       `• Opening Daraz Cash: Rs. ${openingCash.toLocaleString()}\n` +
-      `• Total Sales (Cash): Rs. ${cashSales.toLocaleString()}\n` +
-      `• Sales (Credit/Udhaar): Rs. ${creditSales.toLocaleString()}\n` +
-      `• Sales (Bank/Online): Rs. ${bankSales.toLocaleString()}\n` +
+      `• Gross Sales: Rs. ${grossSales.toLocaleString()} (${salesInvoices.length} invoices)\n` +
+      (totalSalesReturns > 0 ? `• Customer Returns: -Rs. ${totalSalesReturns.toLocaleString()} (${returnInvoices.length} returns)\n` : '') +
+      `• Net Sales: Rs. ${netSales.toLocaleString()}\n` +
+      `• Cash Inflow (Sales): +Rs. ${cashSales.toLocaleString()}\n` +
+      (cashReturns > 0 ? `• Cash Returns Refunded: -Rs. ${cashReturns.toLocaleString()}\n` : '') +
+      (supplierCashPaid > 0 ? `• Supplier Cash Paid: -Rs. ${supplierCashPaid.toLocaleString()}\n` : '') +
       `• Total Petty Expenses: -Rs. ${totalExpenses.toLocaleString()}\n` +
+      (totalPurchases > 0 ? `• Total Purchases Today: Rs. ${totalPurchases.toLocaleString()}\n` : '') +
       `--------------------------------\n` +
       `*Expected Cash:* Rs. ${expectedCash.toLocaleString()}\n` +
       `*Actual Physical Cash:* Rs. ${actualPhysicalCash.toLocaleString()}\n` +
       `*Variance:* ${variance < 0 ? `- Rs. ${Math.abs(variance).toLocaleString()} (SHORT)` : variance > 0 ? `+ Rs. ${variance.toLocaleString()} (OVER)` : 'Rs. 0 (BALANCED)'}\n` +
-      `--------------------------------\n` +
-      `*Commission Pool (2%):* Rs. ${commissionPool.toLocaleString()}\n` +
+      (isCommissionEnabled && commissionPool > 0 ? `--------------------------------\n*Commission Pool (${commissionRate}%):* Rs. ${commissionPool.toLocaleString()}\n` : '') +
       `Status: Shift Closed & Verified`;
 
     const phone = ownerPhone.replace(/[^0-9]/g, '');
@@ -190,243 +246,327 @@ export default function ShiftDrawer({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', height: '100%', paddingBottom: '1rem' }}>
       {/* ── Page Header ── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
         <div>
-          <h1 className="page-title">Shift End Reconciliation</h1>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '4px', fontSize: '13px', color: 'var(--on-surface-variant)' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <span className="material-symbols-outlined" style={{ fontSize: 16 }}>calendar_today</span>
-              {new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })}
+          <h1 style={{ fontSize: '20px', fontWeight: 800, color: '#0F172A', margin: 0, letterSpacing: '-0.02em' }}>
+            Shift End Reconciliation
+          </h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px', fontSize: '12px', color: '#64748B' }}>
+            <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+              📅 {new Date().toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' })}
             </span>
             <span>•</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <span className="material-symbols-outlined" style={{ fontSize: 16 }}>schedule</span>
-              08:00 AM - 04:30 PM
-            </span>
+            <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>⏰ Active Register</span>
             <span>•</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <span className="material-symbols-outlined" style={{ fontSize: 16 }}>person</span>
-              {staffName}
-            </span>
+            <span style={{ fontWeight: 600, color: '#0F172A' }}>👤 {staffName}</span>
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button onClick={() => window.print()} className="btn btn-secondary-outline" title="Print Summary Receipt">
-            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>download</span>
-            PDF
-          </button>
-          <button onClick={handleSendWhatsAppSummary} className="btn" style={{ background: '#22c55e', color: '#fff' }} title="Send Day Close to CEO">
-            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>chat</span>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={handleSendWhatsAppSummary}
+            className="btn"
+            style={{ background: '#22c55e', color: '#fff', fontSize: '12px', padding: '6px 14px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}
+            title="Send WhatsApp Day Close to CEO"
+          >
+            <span style={{ fontSize: '14px' }}>💬</span>
             WhatsApp
           </button>
-          <button onClick={handleCloseShift} disabled={isClosing} className="btn btn-primary" title="Reconcile & Close Register">
-            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>done_all</span>
-            {isClosing ? 'Closing...' : 'Close & Print'}
+          <button
+            type="button"
+            onClick={handleCloseShift}
+            disabled={isClosing}
+            className="btn btn-primary"
+            style={{ fontSize: '12px', padding: '6px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}
+            title="Reconcile & Close Register"
+          >
+            <span>🔒</span>
+            {isClosing ? 'Closing Shift...' : 'Close & Reconcile'}
           </button>
         </div>
       </div>
 
-      {/* ── 3-Column Layout ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.15fr', gap: '1.25rem', alignItems: 'start' }}>
+      {/* ── Top 4 KPI Summary Cards (Horizontal Balanced Bar) ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.875rem' }}>
+        {/* KPI 1: Expected Drawer Cash */}
+        <div className="card" style={{ padding: '0.875rem 1rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '10.5px', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', color: '#64748B', fontWeight: 700 }}>
+              Expected Cash
+            </span>
+            <span
+              style={{
+                fontSize: '9.5px',
+                fontWeight: 800,
+                padding: '1px 6px',
+                borderRadius: '4px',
+                background: isBalanced ? '#DCFCE7' : isShort ? '#FEE2E2' : '#FFEDD5',
+                color: isBalanced ? '#166534' : isShort ? '#991B1B' : '#9A3412',
+                fontFamily: 'JetBrains Mono, monospace',
+              }}
+            >
+              {isBalanced ? 'BALANCED' : isShort ? 'SHORT' : 'OVER'}
+            </span>
+          </div>
+          <div style={{ fontSize: '18px', fontWeight: 800, color: '#0F172A', fontFamily: 'JetBrains Mono, monospace' }}>
+            Rs. {expectedCash.toLocaleString()}
+          </div>
+          <div style={{ fontSize: '10.5px', color: '#64748B' }}>
+            Counted: <strong style={{ color: '#0F172A', fontFamily: 'JetBrains Mono, monospace' }}>Rs. {actualPhysicalCash.toLocaleString()}</strong>
+          </div>
+        </div>
+
+        {/* KPI 2: Net Sales Today */}
+        <div className="card" style={{ padding: '0.875rem 1rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '10.5px', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', color: '#64748B', fontWeight: 700 }}>
+              Net Sales
+            </span>
+            <span style={{ fontSize: '9.5px', color: '#16A34A', fontWeight: 700, background: '#DCFCE7', padding: '1px 6px', borderRadius: '4px' }}>
+              {salesInvoices.length} Bills
+            </span>
+          </div>
+          <div style={{ fontSize: '18px', fontWeight: 800, color: '#16A34A', fontFamily: 'JetBrains Mono, monospace' }}>
+            Rs. {netSales.toLocaleString()}
+          </div>
+          <div style={{ fontSize: '10.5px', color: '#64748B' }}>
+            Gross: <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {grossSales.toLocaleString()}</span>
+            {totalSalesReturns > 0 && <span style={{ color: '#DC2626', marginLeft: '4px' }}>(-{totalSalesReturns.toLocaleString()})</span>}
+          </div>
+        </div>
+
+        {/* KPI 3: Purchases Today */}
+        <div className="card" style={{ padding: '0.875rem 1rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '10.5px', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', color: '#64748B', fontWeight: 700 }}>
+              Purchases
+            </span>
+            <span style={{ fontSize: '9.5px', color: '#64748B', fontWeight: 600, background: '#F1F5F9', padding: '1px 6px', borderRadius: '4px' }}>
+              {regularPurchases.length} Orders
+            </span>
+          </div>
+          <div style={{ fontSize: '18px', fontWeight: 800, color: '#0F172A', fontFamily: 'JetBrains Mono, monospace' }}>
+            Rs. {totalPurchases.toLocaleString()}
+          </div>
+          <div style={{ fontSize: '10.5px', color: '#64748B' }}>
+            Paid Cash: <strong style={{ color: '#EA580C', fontFamily: 'JetBrains Mono, monospace' }}>Rs. {supplierCashPaid.toLocaleString()}</strong>
+          </div>
+        </div>
+
+        {/* KPI 4: Petty Expenses */}
+        <div className="card" style={{ padding: '0.875rem 1rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '10.5px', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', color: '#64748B', fontWeight: 700 }}>
+              Petty Expenses
+            </span>
+            <span style={{ fontSize: '9.5px', color: '#DC2626', fontWeight: 600, background: '#FEE2E2', padding: '1px 6px', borderRadius: '4px' }}>
+              {currentExpenses.length} Entries
+            </span>
+          </div>
+          <div style={{ fontSize: '18px', fontWeight: 800, color: '#DC2626', fontFamily: 'JetBrains Mono, monospace' }}>
+            - Rs. {totalExpenses.toLocaleString()}
+          </div>
+          <div style={{ fontSize: '10.5px', color: '#64748B' }}>
+            Staff &amp; Tea Expenses
+          </div>
+        </div>
+      </div>
+
+      {/* ── 3-Column Equal Balanced Grid ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.875rem', alignItems: 'stretch' }}>
         
-        {/* ── Col 1: Financial Summary & Reconciliation Status ── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          
-          {/* Financial Summary Card */}
-          <div className="card" style={{ padding: '1.25rem' }}>
-            <h3 className="headline-sm" style={{ marginBottom: '1.25rem' }}>Financial Summary</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem', fontSize: '13px' }}>
+        {/* ── Col 1: Cash Drawer & Physical Count ── */}
+        <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', borderBottom: '1px solid #F1F5F9', paddingBottom: '6px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 800, color: '#0F172A', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                💵 Cash Reconciliation
+              </span>
+              <span style={{ fontSize: '10px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>DARAZ HISAB</span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '12px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--on-surface-variant)' }}>Opening Balance</span>
+                <span style={{ color: '#64748B' }}>Opening Cash</span>
                 <span className="font-mono" style={{ fontWeight: 600 }}>Rs. {openingCash.toLocaleString()}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--on-surface-variant)' }}>Total Sales (Cash)</span>
-                <span className="font-mono font-bold" style={{ color: '#16a34a' }}>Rs. {cashSales.toLocaleString()}</span>
+                <span style={{ color: '#16A34A', fontWeight: 600 }}>(+) Cash Sales Inflow</span>
+                <span className="font-mono font-bold" style={{ color: '#16A34A' }}>+ Rs. {cashSales.toLocaleString()}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: '1rem' }}>
-                <span style={{ color: 'var(--on-surface-variant)', fontSize: '12px' }}>Sales (Credit)</span>
-                <span className="font-mono text-muted" style={{ fontSize: '12px' }}>Rs. {creditSales.toLocaleString()}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: '1rem' }}>
-                <span style={{ color: 'var(--on-surface-variant)', fontSize: '12px' }}>Sales (Bank/Card)</span>
-                <span className="font-mono text-muted" style={{ fontSize: '12px' }}>Rs. {bankSales.toLocaleString()}</span>
-              </div>
+              {cashReturns > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#DC2626', fontWeight: 600 }}>(-) Customer Returns</span>
+                  <span className="font-mono font-bold" style={{ color: '#DC2626' }}>- Rs. {cashReturns.toLocaleString()}</span>
+                </div>
+              )}
+              {supplierCashPaid > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#EA580C', fontWeight: 600 }}>(-) Supplier Cash Paid</span>
+                  <span className="font-mono font-bold" style={{ color: '#EA580C' }}>- Rs. {supplierCashPaid.toLocaleString()}</span>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--on-surface-variant)' }}>Petty Expenses</span>
-                <span className="font-mono font-bold" style={{ color: 'var(--error)' }}>- Rs. {totalExpenses.toLocaleString()}</span>
+                <span style={{ color: '#DC2626', fontWeight: 600 }}>(-) Petty Expenses</span>
+                <span className="font-mono font-bold" style={{ color: '#DC2626' }}>- Rs. {totalExpenses.toLocaleString()}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--outline-variant)', paddingTop: '0.875rem', marginTop: '0.25rem' }}>
-                <span style={{ fontWeight: 700 }}>Expected Cash</span>
-                <span className="font-mono" style={{ fontSize: '15px', fontWeight: 800 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #E2E8F0', paddingTop: '6px', marginTop: '2px' }}>
+                <span style={{ fontWeight: 800, color: '#0F172A' }}>Expected Cash</span>
+                <span className="font-mono font-bold" style={{ fontSize: '14px', color: '#0F172A' }}>
                   Rs. {expectedCash.toLocaleString()}
                 </span>
               </div>
             </div>
           </div>
 
-          {/* Light Blue Reconciliation Status Card */}
-          <div
-            style={{
-              background: '#dce9ff',
-              border: '1px solid #c2d8ff',
-              borderRadius: 'var(--radius-md)',
-              padding: '1.25rem',
-            }}
-          >
+          {/* Physical Cash Input Box */}
+          <div style={{ marginTop: '0.75rem', background: '#F8FAFC', padding: '8px 10px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-              <h4 style={{ color: 'var(--on-surface)', fontSize: '16px', fontWeight: 700 }}>Reconciliation Status</h4>
-              <button
-                onClick={() => {
-                  const val = prompt('Enter counted physical cash in drawer:', actualPhysicalCash.toString());
-                  if (val !== null) setActualCashInput(val);
-                }}
-                style={{ background: 'none', border: 'none', color: 'var(--secondary)', fontSize: '11px', fontWeight: 700, cursor: 'pointer', textDecoration: 'underline' }}
-              >
-                Edit Count
-              </button>
-            </div>
-            <p style={{ color: 'var(--on-surface-variant)', fontSize: '12px', marginBottom: '1.25rem' }}>
-              Difference between Expected and Actual Physical Cash.
-            </p>
-            
-            <div className="label-caps" style={{ color: 'var(--on-surface-variant)', marginBottom: '4px' }}>VARIANCE AMOUNT</div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span className="material-symbols-outlined" style={{ fontSize: 20, color: isBalanced ? '#16a34a' : 'var(--error)' }}>
-                  {isBalanced ? 'check_circle' : 'trending_down'}
-                </span>
-                <span className="font-mono font-bold" style={{ fontSize: '24px', color: isBalanced ? '#16a34a' : 'var(--error)' }}>
-                  {variance < 0 ? `- Rs. ${Math.abs(variance).toLocaleString()}` : variance > 0 ? `+ Rs. ${variance.toLocaleString()}` : 'Rs. 0'}
-                </span>
-              </div>
-              <span
-                style={{
-                  background: isBalanced ? '#16a34a' : isShort ? '#ba1a1a' : '#f97316',
-                  color: '#ffffff',
-                  padding: '4px 12px',
-                  borderRadius: 'var(--radius-sm)',
-                  fontWeight: 800,
-                  fontSize: '11px',
-                  letterSpacing: '0.05em',
-                  textTransform: 'uppercase',
-                }}
-              >
-                {isBalanced ? 'BALANCED' : isShort ? 'SHORT' : 'OVER'}
+              <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>
+                Counted Physical Cash
+              </span>
+              <span style={{ fontSize: '11px', fontWeight: 800, color: isBalanced ? '#16A34A' : '#DC2626', fontFamily: 'JetBrains Mono, monospace' }}>
+                {variance === 0 ? 'Exact Match' : variance < 0 ? `Short: Rs. ${Math.abs(variance).toLocaleString()}` : `Over: +Rs. ${variance.toLocaleString()}`}
               </span>
             </div>
-          </div>
-
-        </div>
-
-        {/* ── Col 2: Staff Commission Breakdown ── */}
-        <div className="card" style={{ padding: '1.25rem' }}>
-          <h3 className="headline-sm" style={{ marginBottom: '1.25rem' }}>
-            Staff Commission<br />Breakdown
-          </h3>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
-              <span style={{ color: 'var(--on-surface-variant)' }}>Total Sales</span>
-              <span className="font-mono" style={{ fontWeight: 600 }}>Rs. {totalSalesAggregate.toLocaleString()}</span>
-            </div>
-
-            {/* Highlight Box for Commission Pool */}
-            <div
-              style={{
-                background: 'var(--surface-container-low)',
-                border: '1px solid var(--outline-variant)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '1rem',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-              }}
-            >
-              <div>
-                <div style={{ fontWeight: 700, fontSize: '13px', color: 'var(--on-background)' }}>Commission Pool</div>
-                <div className="label-caps" style={{ color: 'var(--on-surface-variant)', marginTop: '2px', fontSize: '10px' }}>2% OF TOTAL SALES</div>
-              </div>
-              <div className="font-mono text-blue font-bold" style={{ fontSize: '17px' }}>
-                Rs. {commissionPool.toLocaleString()}
-              </div>
-            </div>
-
-            {/* Staff Share Rows */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem', marginTop: '0.25rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: '13px' }}>{staffName} (Lead)</div>
-                  <div style={{ fontSize: '11px', color: 'var(--on-surface-variant)' }}>35% Share</div>
-                </div>
-                <div className="font-mono" style={{ fontWeight: 600, fontSize: '13px' }}>
-                  Rs. {staffAShare.toLocaleString()}
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: '13px' }}>Floor Staff (Junior)</div>
-                  <div style={{ fontSize: '11px', color: 'var(--on-surface-variant)' }}>35% Share</div>
-                </div>
-                <div className="font-mono" style={{ fontWeight: 600, fontSize: '13px' }}>
-                  Rs. {staffBShare.toLocaleString()}
-                </div>
-              </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>Rs.</span>
+              <input
+                type="number"
+                value={actualCashInput !== '' ? actualCashInput : expectedCash}
+                onChange={e => setActualCashInput(e.target.value)}
+                style={{
+                  width: '100%',
+                  background: '#FFFFFF',
+                  border: '1px solid #CBD5E1',
+                  borderRadius: '6px',
+                  padding: '4px 8px',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  fontFamily: 'JetBrains Mono, monospace',
+                  color: '#0F172A',
+                  outline: 'none',
+                }}
+                placeholder="Enter physical cash"
+              />
             </div>
           </div>
         </div>
 
-        {/* ── Col 3: Petty Cash Log ── */}
-        <div className="card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-            <h3 className="headline-sm">Petty Cash Log</h3>
-            <button
-              onClick={() => setShowExpenseModal(true)}
-              style={{ width: 30, height: 30, borderRadius: 'var(--radius-full)', background: 'var(--secondary)', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-              title="Add Expense"
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: 20 }}>add</span>
-            </button>
+        {/* ── Col 2: Trading & Commission Breakdown ── */}
+        <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', borderBottom: '1px solid #F1F5F9', paddingBottom: '6px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 800, color: '#0F172A', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                📊 Sales &amp; Commission
+              </span>
+              <span style={{ fontSize: '10px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>BREAKDOWN</span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748B' }}>Cash Sales</span>
+                <span className="font-mono" style={{ fontWeight: 600 }}>Rs. {cashSales.toLocaleString()}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748B' }}>Credit / Udhaar</span>
+                <span className="font-mono" style={{ fontWeight: 600 }}>Rs. {creditSales.toLocaleString()}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748B' }}>Bank / Online</span>
+                <span className="font-mono" style={{ fontWeight: 600 }}>Rs. {bankSales.toLocaleString()}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #F1F5F9', paddingTop: '4px' }}>
+                <span style={{ color: '#64748B' }}>Gross Total Sales</span>
+                <span className="font-mono font-bold" style={{ color: '#0F172A' }}>Rs. {grossSales.toLocaleString()}</span>
+              </div>
+            </div>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', flex: 1, minHeight: '260px', maxHeight: '380px', overflowY: 'auto' }}>
-            {currentExpenses.map(exp => (
-              <div
-                key={exp.id}
-                style={{ padding: '0.875rem 1rem', background: 'var(--surface-container-lowest)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--outline-variant)' }}
+          {/* Dynamic Commission Pool Box (Only visible if CEO turned it ON) */}
+          {isCommissionEnabled && (
+            <div style={{ marginTop: '0.75rem', background: '#F8FAFC', padding: '8px 10px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#0F172A' }}>Staff Commission ({commissionRate}%)</span>
+                <span className="font-mono font-bold" style={{ fontSize: '12.5px', color: '#2563EB' }}>
+                  Rs. {commissionPool.toLocaleString()}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#64748B' }}>
+                <span>{staffName} ({splitLead}%): <strong style={{ color: '#0F172A', fontFamily: 'JetBrains Mono, monospace' }}>Rs. {staffAShare.toLocaleString()}</strong></span>
+                <span>Floor Staff ({splitStaff}%): <strong style={{ color: '#0F172A', fontFamily: 'JetBrains Mono, monospace' }}>Rs. {staffBShare.toLocaleString()}</strong></span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Col 3: Petty Cash Expenses Log ── */}
+        <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', borderBottom: '1px solid #F1F5F9', paddingBottom: '6px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 800, color: '#0F172A', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                💸 Petty Cash Log
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowExpenseModal(true)}
+                style={{
+                  background: '#F97316',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '2px 8px',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
-                  <span style={{ fontWeight: 600, fontSize: '13px' }}>{exp.title}</span>
-                  <span className="font-mono font-bold" style={{ fontSize: '13px', color: 'var(--error)' }}>
-                    Rs. {exp.amount.toLocaleString()}
-                  </span>
+                + Add Expense
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '140px', overflowY: 'auto' }}>
+              {currentExpenses.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '1.5rem 0', color: '#94A3B8', fontSize: '11.5px' }}>
+                  No petty expenses recorded today.
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--on-surface-variant)' }}>
-                  <span>{exp.created_at || '10:30 AM'}</span>
-                  <span
+              ) : (
+                currentExpenses.map(exp => (
+                  <div
+                    key={exp.id}
                     style={{
-                      background: 'var(--surface-container-high)',
-                      color: 'var(--on-surface)',
-                      padding: '2px 8px',
-                      borderRadius: 'var(--radius-xs)',
-                      fontSize: '10px',
-                      fontWeight: 600,
+                      padding: '6px 8px',
+                      background: '#F8FAFC',
+                      borderRadius: '6px',
+                      border: '1px solid #E2E8F0',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
                     }}
                   >
-                    {exp.category}
-                  </span>
-                </div>
-              </div>
-            ))}
+                    <div>
+                      <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#0F172A' }}>{exp.title}</div>
+                      <div style={{ fontSize: '9.5px', color: '#64748B' }}>{exp.category} · {exp.created_at || 'Today'}</div>
+                    </div>
+                    <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px', fontWeight: 800, color: '#DC2626' }}>
+                      Rs. {Number(exp.amount).toLocaleString()}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
 
-          <div style={{ borderTop: '1px solid var(--outline-variant)', paddingTop: '0.875rem', marginTop: '0.875rem', display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-            <span style={{ fontSize: '13px', color: 'var(--on-surface-variant)' }}>
-              Total Expenses: <strong className="font-mono" style={{ color: 'var(--error)', marginLeft: '4px' }}>Rs. {totalExpenses.toLocaleString()}</strong>
+          <div style={{ borderTop: '1px solid #E2E8F0', paddingTop: '6px', marginTop: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 600 }}>Total Expenses:</span>
+            <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 800, fontSize: '13px', color: '#DC2626' }}>
+              - Rs. {totalExpenses.toLocaleString()}
             </span>
           </div>
         </div>

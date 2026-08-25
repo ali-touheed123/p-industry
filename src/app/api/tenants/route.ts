@@ -272,7 +272,21 @@ export async function DELETE(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { id, is_active, name, phone, email, city, address, type } = body;
+    const { 
+      id, 
+      is_active, 
+      name, 
+      phone, 
+      email, 
+      city, 
+      address, 
+      type,
+      commission_enabled,
+      commission_rate,
+      commission_split_lead,
+      commission_split_staff,
+      commission_split_reserve,
+    } = body;
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Tenant ID required' }, { status: 400 });
@@ -286,6 +300,11 @@ export async function PATCH(req: NextRequest) {
     if (city !== undefined) updateData.city = city;
     if (address !== undefined) updateData.address = address;
     if (type) updateData.type = type;
+    if (commission_enabled !== undefined) updateData.commission_enabled = commission_enabled;
+    if (commission_rate !== undefined) updateData.commission_rate = Number(commission_rate);
+    if (commission_split_lead !== undefined) updateData.commission_split_lead = Number(commission_split_lead);
+    if (commission_split_staff !== undefined) updateData.commission_split_staff = Number(commission_split_staff);
+    if (commission_split_reserve !== undefined) updateData.commission_split_reserve = Number(commission_split_reserve);
 
     const { error } = await supabaseAdmin
       .from('tenants')

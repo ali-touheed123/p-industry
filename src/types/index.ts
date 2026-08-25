@@ -13,6 +13,11 @@ export interface Tenant {
   city?: string;
   logo_url?: string;
   is_active: boolean;
+  commission_enabled?: boolean;
+  commission_rate?: number;
+  commission_split_lead?: number;
+  commission_split_staff?: number;
+  commission_split_reserve?: number;
   created_at: string;
   updated_at: string;
 }

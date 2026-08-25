@@ -146,58 +146,31 @@ export default function PurchasesView({
   const [purchaseType, setPurchaseType] = useState<'purchase' | 'return'>('purchase');
 
   // Record & Meta
-  const [recordNo, setRecordNo] = useState<string>('54');
+  const [recordNo, setRecordNo] = useState<string>('01');
   const [purchaseInvNo, setPurchaseInvNo] = useState<string>(
     () => `P-INV-${Math.floor(1000 + Math.random() * 9000)}`
   );
   const [invoiceDate, setInvoiceDate] = useState<string>(
     () => new Date().toISOString().split('T')[0]
   );
-  const [selectedCompany, setSelectedCompany] = useState<string>('Berger Paints Pakistan Ltd');
-  const [poNumber, setPoNumber] = useState<string>('PO-4091');
+  const [selectedCompany, setSelectedCompany] = useState<string>('');
+  const [poNumber, setPoNumber] = useState<string>(() => `PO-${Math.floor(1000 + Math.random() * 9000)}`);
   const [selectedGodown, setSelectedGodown] = useState<string>('SHOP - Main Retail Floor');
 
   // Supplier state
-  const [suppliers, setSuppliers] = useState<any[]>(DEFAULT_SUPPLIERS);
-  const [selectedSupplier, setSelectedSupplier] = useState<any>(DEFAULT_SUPPLIERS[0]);
-  const [supplierQuery, setSupplierQuery] = useState<string>(DEFAULT_SUPPLIERS[0].name);
+  const [suppliers, setSuppliers] = useState<any[]>([]);
+  const [selectedSupplier, setSelectedSupplier] = useState<any>(null);
+  const [supplierQuery, setSupplierQuery] = useState<string>('');
   const [showSupplierDropdown, setShowSupplierDropdown] = useState<boolean>(false);
 
-  // Line items
-  const [items, setItems] = useState<PurchaseLineItem[]>([
-    {
-      id: 'pli-1',
-      code: 'EM-INT-102',
-      productName: 'Super Matt Plastic Emulsion (Base A)',
-      shadeCode: 'Off-White 101',
-      shadeColorHex: '#FAF9F6',
-      packSize: '4L Gallon',
-      qty: 1,
-      unit: 'Gallon',
-      rate: 2950,
-      stdDiscPercent: 0,
-      taxPercent: 0,
-    },
-    {
-      id: 'pli-2',
-      code: 'EM-INT-102',
-      productName: 'Super Matt Plastic Emulsion (Base A)',
-      shadeCode: 'Off-White 101',
-      shadeColorHex: '#FAF9F6',
-      packSize: '4L Gallon',
-      qty: 1,
-      unit: 'Gallon',
-      rate: 2950,
-      stdDiscPercent: 0,
-      taxPercent: 0,
-    },
-  ]);
+  // Line items (starts completely clean/empty)
+  const [items, setItems] = useState<PurchaseLineItem[]>([]);
 
   // Product entry row state
   const [productQuery, setProductQuery] = useState<string>('');
   const [inputQty, setInputQty] = useState<number>(1);
   const [inputUnit, setInputUnit] = useState<string>('Gallon');
-  const [inputRate, setInputRate] = useState<number>(2950);
+  const [inputRate, setInputRate] = useState<number>(0);
   const [inputStdDisc, setInputStdDisc] = useState<number>(0);
   const [inputTax, setInputTax] = useState<number>(0);
   const [selectedProduct, setSelectedProduct] = useState<Item | null>(null);
@@ -274,9 +247,9 @@ export default function PurchasesView({
     taxableValue + effectiveSalesTax - additionalDiscount + cartageFreight
   );
 
-  const currentSupplierBalance = selectedSupplier?.currentBalance || selectedSupplier?.current_balance || 145200;
-  const lastPayment = selectedSupplier?.lastPaymentAmount || selectedSupplier?.last_payment_amount || 85000;
-  const lastPaymentDateStr = selectedSupplier?.lastPaymentDate || selectedSupplier?.last_payment_date || '18 Aug';
+  const currentSupplierBalance = selectedSupplier ? (selectedSupplier.currentBalance ?? selectedSupplier.current_balance ?? 0) : 0;
+  const lastPayment = selectedSupplier ? (selectedSupplier.lastPaymentAmount ?? selectedSupplier.last_payment_amount ?? 0) : 0;
+  const lastPaymentDateStr = selectedSupplier ? (selectedSupplier.lastPaymentDate || selectedSupplier.last_payment_date || '—') : '—';
 
   const projectedBalance =
     purchaseType === 'purchase'
@@ -338,22 +311,55 @@ export default function PurchasesView({
     showFeedback(`Initiated new Purchase Record #${nextRecord}`);
   };
 
-  const handleSavePurchase = () => {
+  const handleSavePurchase = async () => {
     if (items.length === 0) {
       showFeedback('Cannot save empty purchase invoice. Please add items.');
       return;
     }
-    showFeedback(
-      `${purchaseType === 'purchase' ? 'Purchase Invoice' : 'Purchase Return'} #${purchaseInvNo} saved successfully.`
-    );
+
+    try {
+      const res = await fetch('/api/purchases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          purchase_no: purchaseInvNo,
+          purchase_type: purchaseType,
+          supplier_id: selectedSupplier?.id || null,
+          supplier_name: selectedSupplier?.name || supplierQuery || 'Supplier',
+          date: invoiceDate,
+          subtotal: grossSubtotal,
+          discount: totalStdDiscount + additionalDiscount,
+          net_total: netBillValue,
+          paid_amount: paidAmount,
+          due_amount: Math.max(0, netBillValue - paidAmount),
+          payment_type: paymentMode,
+          created_by: staffName,
+          items: items,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        showFeedback(
+          `✅ ${purchaseType === 'purchase' ? 'Purchase Invoice' : 'Purchase Return'} #${purchaseInvNo} saved to database & stock updated!`
+        );
+        if (onStockUpdated) onStockUpdated();
+        handleNewPurchase();
+      } else {
+        showFeedback(`❌ Error: ${data.error || 'Failed to save'}`);
+      }
+    } catch (err: any) {
+      showFeedback(`❌ Network error: ${err.message}`);
+    }
   };
 
-  const handleSaveAndPrint = () => {
+  const handleSaveAndPrint = async () => {
     if (items.length === 0) {
       showFeedback('Cannot print empty invoice.');
       return;
     }
-    showFeedback(`Purchase ${purchaseInvNo} finalized & dispatched to Voucher Printer.`);
+    await handleSavePurchase();
     setShowVoucherModal(true);
   };
 

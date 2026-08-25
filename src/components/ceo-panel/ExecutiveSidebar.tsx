@@ -9,11 +9,12 @@ import {
   CalendarCheck,
   Users,
   ShoppingBag,
+  Settings,
   LogOut,
   X,
 } from 'lucide-react';
 
-export type CEOSection = 'overview' | 'sales' | 'returns' | 'day-close' | 'customers' | 'purchase';
+export type CEOSection = 'overview' | 'sales' | 'returns' | 'day-close' | 'customers' | 'purchase' | 'settings';
 
 interface ExecutiveSidebarProps {
   currentSection: CEOSection;
@@ -31,6 +32,7 @@ const NAV_ITEMS: { id: CEOSection; label: string; icon: React.ComponentType<{ st
   { id: 'day-close', label: 'Day Close & Variance',    icon: CalendarCheck },
   { id: 'customers', label: 'Customers & Udhaar',      icon: Users },
   { id: 'purchase',  label: 'Procurement & POs',       icon: ShoppingBag },
+  { id: 'settings',  label: 'Branch & Commission',     icon: Settings },
 ];
 
 const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () => void }> = ({
