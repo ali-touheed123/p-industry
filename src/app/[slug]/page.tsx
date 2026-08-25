@@ -12,6 +12,7 @@ import ClientCreditRecovery from '@/components/ClientCreditRecovery';
 import SalesHistory from '@/components/SalesHistory';
 import HoldInvoices from '@/components/HoldInvoices';
 import PurchasesView from '@/components/PurchasesView';
+import BranchOrders from '@/components/BranchOrders';
 
 import {
   ShoppingCart,
@@ -37,6 +38,7 @@ import {
   User,
   Layers,
   Lock,
+  PackagePlus,
 } from 'lucide-react';
 
 interface PageProps {
@@ -57,8 +59,9 @@ export default function TenantAppPage({ params }: PageProps) {
   const [loginRoleTab, setLoginRoleTab] = useState<'staff' | 'ceo'>('staff');
   const [loginError, setLoginError] = useState('');
   const [activeTab, setActiveTab] = useState<
-    'pos' | 'inventory' | 'purchases' | 'sales' | 'customers' | 'returns' | 'hold_invoices' | 'credit_recovery' | 'reports' | 'day_close' | 'stock' | 'ledgers' | 'credit' | 'transfers' | 'shift' | 'ceo_reports'
+    'pos' | 'inventory' | 'purchases' | 'sales' | 'customers' | 'returns' | 'orders' | 'hold_invoices' | 'credit_recovery' | 'reports' | 'day_close' | 'stock' | 'ledgers' | 'credit' | 'transfers' | 'shift' | 'ceo_reports'
   >('pos');
+  const [pendingOrdersCount, setPendingOrdersCount] = useState<number>(0);
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
   const [showOpenShiftModal, setShowOpenShiftModal] = useState(false);
   const [openingCashInput, setOpeningCashInput] = useState('15000');
@@ -173,6 +176,28 @@ export default function TenantAppPage({ params }: PageProps) {
     }
     setShowOpenShiftModal(false);
   };
+
+  const fetchPendingOrdersCount = async () => {
+    if (!tenant?.id) return;
+    try {
+      const counterParam = currentUser?.username ? `&counter=${encodeURIComponent(currentUser.username)}` : '';
+      const res = await fetch(`/api/branch-orders?tenant_id=${tenant.id}${counterParam}&count_only=incoming`);
+      const data = await res.json();
+      if (data.success) {
+        setPendingOrdersCount(data.pendingCount || 0);
+      }
+    } catch (err) {
+      console.error('Failed to fetch pending orders count', err);
+    }
+  };
+
+  useEffect(() => {
+    if (tenant?.id) {
+      fetchPendingOrdersCount();
+      const interval = setInterval(fetchPendingOrdersCount, 15000);
+      return () => clearInterval(interval);
+    }
+  }, [tenant?.id, currentUser?.username]);
 
   const refreshItems = async () => {
     if (tenant?.id) {
@@ -345,6 +370,7 @@ export default function TenantAppPage({ params }: PageProps) {
     { id: 'sales',           label: 'Sales',             icon: TrendingUp },
     { id: 'customers',       label: 'Customers',         icon: Users },
     { id: 'returns',         label: 'Returns',           icon: RotateCcw },
+    { id: 'orders',          label: 'Branch Orders',     icon: PackagePlus, badgeCount: pendingOrdersCount },
     { id: 'hold_invoices',   label: 'Hold Invoices',     icon: PauseCircle },
     { id: 'credit_recovery', label: 'Credit & Recovery', icon: Scale },
     { id: 'reports',         label: 'Reports',           icon: BarChart3 },
@@ -390,19 +416,53 @@ export default function TenantAppPage({ params }: PageProps) {
           {navItems.map(item => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
+            const hasBadge = (item.badgeCount ?? 0) > 0;
             return (
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id as any)}
-                title={isSidebarCollapsed ? item.label : undefined}
+                title={isSidebarCollapsed ? (hasBadge ? `${item.label} (${item.badgeCount} pending)` : item.label) : undefined}
                 className={`sidebar-link ${isActive ? 'active' : ''}`}
+                style={{ position: 'relative' }}
               >
-                <Icon style={{ width: 16, height: 16, flexShrink: 0 }} />
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                  <Icon style={{ width: 16, height: 16, flexShrink: 0 }} />
+                  {isSidebarCollapsed && hasBadge && (
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: '-3px',
+                        right: '-3px',
+                        width: '7px',
+                        height: '7px',
+                        borderRadius: '50%',
+                        background: '#F97316',
+                      }}
+                    />
+                  )}
+                </div>
                 {!isSidebarCollapsed && (
                   <>
                     <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {item.label}
                     </span>
+                    {hasBadge && (
+                      <span
+                        style={{
+                          background: '#F97316',
+                          color: '#FFFFFF',
+                          fontSize: '10px',
+                          fontWeight: 800,
+                          padding: '1px 6px',
+                          borderRadius: '10px',
+                          fontFamily: 'JetBrains Mono, monospace',
+                          flexShrink: 0,
+                          marginRight: isActive ? '4px' : '0',
+                        }}
+                      >
+                        {item.badgeCount}
+                      </span>
+                    )}
                     {isActive && <ChevronRight style={{ width: 14, height: 14, opacity: 0.9 }} />}
                   </>
                 )}
@@ -497,11 +557,14 @@ export default function TenantAppPage({ params }: PageProps) {
 
               <button
                 type="button"
+                onClick={() => setActiveTab('orders')}
                 style={{ padding: '7px', color: '#64748B', background: 'transparent', border: 'none', borderRadius: '8px', position: 'relative', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                title="Notifications"
+                title={pendingOrdersCount > 0 ? `${pendingOrdersCount} pending incoming order${pendingOrdersCount > 1 ? 's' : ''}` : 'Branch Orders'}
               >
                 <Bell style={{ width: 16, height: 16 }} />
-                <span style={{ width: '8px', height: '8px', background: '#F97316', borderRadius: '50%', position: 'absolute', top: '5px', right: '5px' }} />
+                {pendingOrdersCount > 0 && (
+                  <span style={{ width: '8px', height: '8px', background: '#F97316', borderRadius: '50%', position: 'absolute', top: '5px', right: '5px' }} />
+                )}
               </button>
             </div>
           </header>
@@ -509,6 +572,17 @@ export default function TenantAppPage({ params }: PageProps) {
 
         {/* Dynamic Screen View */}
         <main className={`main-content ${(activeTab === 'pos' || activeTab === 'sales' || activeTab === 'returns' || activeTab === 'purchases') ? 'no-pad' : ''}`}>
+          {activeTab === 'orders' && (
+            <BranchOrders
+              items={items}
+              tenantId={tenant.id}
+              tenantSlug={tenant.slug}
+              tenantName={tenant.name}
+              staffName={currentUser?.full_name || currentUser?.username || 'Staff'}
+              staffUsername={currentUser?.username}
+              onOrderPlaced={fetchPendingOrdersCount}
+            />
+          )}
           {activeTab === 'purchases' && (
             <PurchasesView
               tenantId={tenant.id}
@@ -516,6 +590,8 @@ export default function TenantAppPage({ params }: PageProps) {
               staffName={currentUser?.full_name || currentUser?.username || 'Purchase Officer'}
               items={items}
               onStockUpdated={refreshItems}
+              pendingOrdersCount={pendingOrdersCount}
+              onNavigateToOrders={() => setActiveTab('orders')}
             />
           )}
           {activeTab === 'sales' && (
@@ -548,6 +624,8 @@ export default function TenantAppPage({ params }: PageProps) {
               restoringHeldOrder={restoringHeldOrder}
               onClearRestoringHeldOrder={() => setRestoringHeldOrder(null)}
               onCompleteSale={handleCompleteSale}
+              pendingOrdersCount={pendingOrdersCount}
+              onNavigateToOrders={() => setActiveTab('orders')}
             />
           )}
           {(activeTab === 'inventory' || activeTab === 'stock') && (

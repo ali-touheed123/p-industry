@@ -33,6 +33,8 @@ interface PurchasesViewProps {
   staffName?: string;
   items?: Item[];
   onStockUpdated?: () => void;
+  pendingOrdersCount?: number;
+  onNavigateToOrders?: () => void;
 }
 
 interface PurchaseLineItem {
@@ -137,6 +139,8 @@ export default function PurchasesView({
   staffName = 'Purchase Officer',
   items: liveCatalogItems = [],
   onStockUpdated,
+  pendingOrdersCount = 0,
+  onNavigateToOrders,
 }: PurchasesViewProps) {
   // Mode toggle: Purchase Invoice vs Purchase Return
   const [purchaseType, setPurchaseType] = useState<'purchase' | 'return'>('purchase');
@@ -425,11 +429,14 @@ export default function PurchasesView({
           </span>
           <button
             type="button"
-            style={{ padding: '7px', color: '#64748B', background: 'transparent', border: 'none', borderRadius: '8px', position: 'relative', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            title="Notifications"
+            onClick={onNavigateToOrders}
+            style={{ padding: '7px', color: '#64748B', background: 'transparent', border: 'none', borderRadius: '8px', position: 'relative', cursor: onNavigateToOrders ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            title={pendingOrdersCount > 0 ? `${pendingOrdersCount} pending incoming order${pendingOrdersCount > 1 ? 's' : ''}` : 'Notifications'}
           >
             <Bell style={{ width: 16, height: 16 }} />
-            <span style={{ width: '8px', height: '8px', background: '#F97316', borderRadius: '50%', position: 'absolute', top: '5px', right: '5px' }} />
+            {pendingOrdersCount > 0 && (
+              <span style={{ width: '8px', height: '8px', background: '#F97316', borderRadius: '50%', position: 'absolute', top: '5px', right: '5px' }} />
+            )}
           </button>
         </div>
       </header>

@@ -210,3 +210,28 @@ export interface StockTransferItem {
   unit?: string;
   qty: number;
 }
+
+export interface BranchOrder {
+  id: string;
+  order_no: string;
+  from_tenant_id: string;
+  to_tenant_id: string;
+  from_counter?: string;
+  target_counter?: string;
+  status: 'pending' | 'accepted' | 'dispatched' | 'received' | 'rejected';
+  notes?: string;
+  created_by?: string;
+  created_at: string;
+  from_tenant?: Tenant;
+  to_tenant?: Tenant;
+  items?: BranchOrderItem[];
+}
+
+export interface BranchOrderItem {
+  id?: string;
+  order_id?: string;
+  item_code?: string;
+  item_name: string;
+  unit?: string;
+  qty: number;
+}

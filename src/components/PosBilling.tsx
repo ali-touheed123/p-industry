@@ -30,6 +30,8 @@ interface Props {
   tenantName?: string;
   restoringHeldOrder?: any;
   onClearRestoringHeldOrder?: () => void;
+  pendingOrdersCount?: number;
+  onNavigateToOrders?: () => void;
 }
 
 export interface InvoiceLineItem {
@@ -89,6 +91,8 @@ export default function PosBilling({
   tenantName = 'Main Godown & Retail Counter #1',
   restoringHeldOrder,
   onClearRestoringHeldOrder,
+  pendingOrdersCount = 0,
+  onNavigateToOrders,
 }: Props) {
   // Mode toggle: Sales Invoice vs Credit Note (Return)
   const [invoiceType, setInvoiceType] = useState<'sales' | 'return'>('sales');
@@ -626,11 +630,14 @@ export default function PosBilling({
 
             <button
               type="button"
-              style={{ padding: '7px', color: '#64748B', background: 'transparent', border: 'none', borderRadius: '8px', position: 'relative', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              title="Notifications"
+              onClick={onNavigateToOrders}
+              style={{ padding: '7px', color: '#64748B', background: 'transparent', border: 'none', borderRadius: '8px', position: 'relative', cursor: onNavigateToOrders ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              title={pendingOrdersCount > 0 ? `${pendingOrdersCount} pending incoming order${pendingOrdersCount > 1 ? 's' : ''}` : 'Notifications'}
             >
               <Bell style={{ width: 16, height: 16 }} />
-              <span style={{ width: '8px', height: '8px', background: '#F97316', borderRadius: '50%', position: 'absolute', top: '5px', right: '5px' }} />
+              {pendingOrdersCount > 0 && (
+                <span style={{ width: '8px', height: '8px', background: '#F97316', borderRadius: '50%', position: 'absolute', top: '5px', right: '5px' }} />
+              )}
             </button>
           </div>
         </header>

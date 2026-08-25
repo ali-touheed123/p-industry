@@ -173,6 +173,55 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 5. Automatically seed existing catalog products into this new branch with stock_qty = 0
+    try {
+      // Find other branches from same owner or any other active branch
+      let query = supabaseAdmin
+        .from('tenants')
+        .select('id')
+        .neq('id', tenant.id)
+        .eq('is_active', true);
+
+      if (owner_name) {
+        query = query.eq('owner_name', owner_name);
+      }
+
+      const { data: sisterTenants } = await query;
+
+      if (sisterTenants && sisterTenants.length > 0) {
+        // Fetch existing items from sister branch
+        const sisterId = sisterTenants[0].id;
+        const { data: existingItems } = await supabaseAdmin
+          .from('items')
+          .select('*')
+          .eq('tenant_id', sisterId);
+
+        if (existingItems && existingItems.length > 0) {
+          const newBranchItems = existingItems.map((it: any) => ({
+            tenant_id: tenant.id,
+            code: it.code,
+            name: it.name,
+            category: it.category || 'General',
+            item_type: it.item_type || 'finish_goods',
+            unit: it.unit || 'Can',
+            pack_size: it.pack_size || it.unit || 'Can',
+            shade_code: it.shade_code || null,
+            shade_hex: it.shade_hex || null,
+            cost_price: it.cost_price || 0,
+            retail_price: it.retail_price || 0,
+            wholesale_price: it.wholesale_price || 0,
+            trade_price: it.trade_price || 0,
+            stock_qty: 0, // Fresh branch starts with 0 stock
+            min_stock_alert: it.min_stock_alert || 5,
+          }));
+
+          await supabaseAdmin.from('items').insert(newBranchItems);
+        }
+      }
+    } catch (seedErr) {
+      console.error('Failed to seed catalog items to new branch:', seedErr);
+    }
+
     return NextResponse.json({ success: true, tenant });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

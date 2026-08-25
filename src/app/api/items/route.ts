@@ -51,6 +51,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Tenant ID, Name and Item Code are required' }, { status: 400 });
     }
 
+    // 1. Insert item for the active branch
     const { data: item, error } = await supabaseAdmin
       .from('items')
       .insert({
@@ -74,6 +75,62 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (error) throw error;
+
+    // 2. Automatically sync this new product to all other branches/godowns
+    try {
+      // Find current tenant's owner or all other tenants
+      const { data: currentTenant } = await supabaseAdmin
+        .from('tenants')
+        .select('id, owner_name, email')
+        .eq('id', tenant_id)
+        .single();
+
+      let sisterTenantsQuery = supabaseAdmin
+        .from('tenants')
+        .select('id')
+        .neq('id', tenant_id)
+        .eq('is_active', true);
+
+      if (currentTenant?.owner_name) {
+        sisterTenantsQuery = sisterTenantsQuery.eq('owner_name', currentTenant.owner_name);
+      }
+
+      const { data: sisterTenants } = await sisterTenantsQuery;
+
+      if (sisterTenants && sisterTenants.length > 0) {
+        for (const sister of sisterTenants) {
+          // Check if item code already exists in sister branch
+          const { data: existing } = await supabaseAdmin
+            .from('items')
+            .select('id')
+            .eq('tenant_id', sister.id)
+            .eq('code', code.trim().toUpperCase())
+            .maybeSingle();
+
+          if (!existing) {
+            await supabaseAdmin.from('items').insert({
+              tenant_id: sister.id,
+              code: code.trim().toUpperCase(),
+              name,
+              category: category || 'General',
+              item_type,
+              unit,
+              pack_size: pack_size || unit,
+              shade_code: shade_code || null,
+              shade_hex: shade_hex || null,
+              cost_price: Number(cost_price) || 0,
+              retail_price: Number(retail_price) || 0,
+              wholesale_price: Number(wholesale_price) || 0,
+              trade_price: Number(trade_price) || 0,
+              stock_qty: 0, // Other branches start with 0 stock
+              min_stock_alert: Number(min_stock_alert) || 5,
+            });
+          }
+        }
+      }
+    } catch (syncErr) {
+      console.error('Error syncing new product across sister branches:', syncErr);
+    }
 
     return NextResponse.json({ success: true, item });
   } catch (error: any) {
