@@ -43,42 +43,92 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
   const [fromDate, setFromDate] = useState<string>(firstOfMonthIso);
   const [toDate, setToDate] = useState<string>(todayIso);
   const [invoices, setInvoices] = useState<any[]>([]);
+  const [expensesList, setExpensesList] = useState<any[]>([]);
+  const [itemsCostMap, setItemsCostMap] = useState<Record<string, number>>({});
+  const [commissionConfig, setCommissionConfig] = useState<{ enabled: boolean; rate: number }>({ enabled: false, rate: 2.0 });
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
     let isMounted = true;
-    const fetchInvoices = async () => {
+    const fetchOverviewData = async () => {
       setLoading(true);
       try {
         const tenantId = branch.id.includes('-b') ? branch.id.split('-b')[0] : branch.id;
-        const res = await fetch(`/api/invoices?tenant_id=${tenantId}`);
-        const data = await res.json();
-        if (isMounted && data.success && data.invoices) {
-          setInvoices(data.invoices);
+        const [invoicesRes, expensesRes, itemsRes, tenantsRes] = await Promise.all([
+          fetch(`/api/invoices?tenant_id=${tenantId}`),
+          fetch(`/api/expenses?tenant_id=${tenantId}`),
+          fetch(`/api/items?tenant_id=${tenantId}`),
+          fetch(`/api/tenants`),
+        ]);
+
+        const [invoicesData, expensesData, itemsData, tenantsData] = await Promise.all([
+          invoicesRes.json(),
+          expensesRes.json(),
+          itemsRes.json(),
+          tenantsRes.json(),
+        ]);
+
+        if (isMounted) {
+          if (invoicesData.success && invoicesData.invoices) {
+            setInvoices(invoicesData.invoices);
+          }
+          if (expensesData.success && expensesData.expenses) {
+            setExpensesList(expensesData.expenses);
+          }
+          if (itemsData.success && itemsData.items) {
+            const map: Record<string, number> = {};
+            itemsData.items.forEach((it: any) => {
+              if (it.id) map[it.id] = Number(it.cost_price || 0);
+              if (it.code) map[it.code] = Number(it.cost_price || 0);
+            });
+            setItemsCostMap(map);
+          }
+          if (tenantsData.success && tenantsData.tenants) {
+            const currentTenant = tenantsData.tenants.find((t: any) => t.id === tenantId || t.slug === branch.slug);
+            if (currentTenant) {
+              setCommissionConfig({
+                enabled: Boolean(currentTenant.commission_enabled),
+                rate: Number(currentTenant.commission_rate || 2.0),
+              });
+            }
+          }
         }
       } catch (err) {
-        console.error('Failed to load invoices for overview', err);
+        console.error('Failed to load overview data', err);
       } finally {
         if (isMounted) setLoading(false);
       }
     };
 
-    fetchInvoices();
+    fetchOverviewData();
     return () => {
       isMounted = false;
     };
-  }, [branch.id]);
+  }, [branch.id, branch.slug]);
 
   const allDailyRecords = useMemo(() => {
     if (!invoices || invoices.length === 0) return [];
 
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const groups: Record<string, any[]> = {};
+    const expensesByDate: Record<string, number> = {};
 
+    // Group expenses by date
+    expensesList.forEach((exp) => {
+      const d = exp.created_at ? exp.created_at.split('T')[0] : (exp.date || todayIso);
+      expensesByDate[d] = (expensesByDate[d] || 0) + Number(exp.amount || 0);
+    });
+
+    // Group invoices by date
     invoices.forEach((inv) => {
       const d = inv.date || (inv.created_at ? inv.created_at.split('T')[0] : todayIso);
       if (!groups[d]) groups[d] = [];
       groups[d].push(inv);
+    });
+
+    // Ensure dates with only expenses also get represented if needed
+    Object.keys(expensesByDate).forEach((d) => {
+      if (!groups[d]) groups[d] = [];
     });
 
     const records: DailyFinancialPoint[] = Object.keys(groups)
@@ -89,13 +139,45 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
         const dateObj = new Date(dateStr);
         const dayName = isNaN(dateObj.getTime()) ? '' : dayNames[dateObj.getDay()];
 
-        const grossSales = dayInvs.reduce((sum, i) => sum + Number(i.subtotal || i.net_total || 0), 0);
-        const discounts = dayInvs.reduce((sum, i) => sum + Number(i.discount || 0), 0);
-        const netSales = dayInvs.reduce((sum, i) => sum + Number(i.net_total || 0), 0);
-        const cogs = Math.round(grossSales * 0.70); // Estimated 70% cost baseline
-        const grossProfit = netSales - cogs;
-        const commission = Math.round(netSales * 0.02);
-        const pettyCash = 0;
+        const salesInvs = dayInvs.filter((i) => (i.invoice_type || 'sales') !== 'return');
+        const returnInvs = dayInvs.filter((i) => (i.invoice_type || 'sales') === 'return');
+
+        const grossSales = salesInvs.reduce((sum, i) => sum + Number(i.subtotal || i.net_total || 0), 0);
+        const returnTotal = returnInvs.reduce((sum, i) => sum + Number(i.net_total || 0), 0);
+        const discounts = salesInvs.reduce((sum, i) => sum + Number(i.discount || 0), 0);
+        const netSales = Math.max(0, grossSales - returnTotal);
+
+        // Real COGS calculation based on items sold
+        let calculatedCogs = 0;
+        salesInvs.forEach((inv) => {
+          const rawItems = inv.invoice_items || inv.items || [];
+          if (Array.isArray(rawItems) && rawItems.length > 0) {
+            rawItems.forEach((it: any) => {
+              const qty = Number(it.qty || 1);
+              const cost = itemsCostMap[it.item_id] || itemsCostMap[it.item_code] || (Number(it.unit_price || it.rate || 0) * 0.70);
+              calculatedCogs += cost * qty;
+            });
+          } else {
+            calculatedCogs += Number(inv.net_total || 0) * 0.70;
+          }
+        });
+
+        // Deduct returned items cost from COGS
+        returnInvs.forEach((inv) => {
+          const rawItems = inv.invoice_items || inv.items || [];
+          if (Array.isArray(rawItems) && rawItems.length > 0) {
+            rawItems.forEach((it: any) => {
+              const qty = Number(it.qty || 1);
+              const cost = itemsCostMap[it.item_id] || itemsCostMap[it.item_code] || (Number(it.unit_price || it.rate || 0) * 0.70);
+              calculatedCogs = Math.max(0, calculatedCogs - (cost * qty));
+            });
+          }
+        });
+
+        const cogs = Math.round(calculatedCogs);
+        const grossProfit = Math.max(0, netSales - cogs);
+        const commission = commissionConfig.enabled ? Math.round(netSales * (commissionConfig.rate / 100)) : 0;
+        const pettyCash = Math.round(expensesByDate[dateStr] || 0);
         const expenses = pettyCash + commission;
         const netProfit = grossProfit - expenses;
         const marginPct = netSales > 0 ? Number(((netProfit / netSales) * 100).toFixed(1)) : 0;
@@ -114,12 +196,12 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
           commission,
           netProfit,
           marginPct,
-          invoiceCount: dayInvs.length,
+          invoiceCount: salesInvs.length,
         };
       });
 
     return records;
-  }, [invoices, todayIso]);
+  }, [invoices, expensesList, itemsCostMap, commissionConfig, todayIso]);
 
   const filteredRecords = useMemo(() => {
     return allDailyRecords.filter((r) => r.date >= fromDate && r.date <= toDate);

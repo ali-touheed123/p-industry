@@ -23,25 +23,61 @@ export const PurchaseView: React.FC<PurchaseViewProps> = ({ branch }) => {
       setLoading(true);
       try {
         const tenantId = branch.id.includes('-b') ? branch.id.split('-b')[0] : branch.id;
-        const res = await fetch(`/api/suppliers?tenant_id=${tenantId}`);
-        const data = await res.json();
-        if (isMounted && data.success && data.suppliers) {
-          const mapped: PurchaseRecord[] = data.suppliers.map((s: any) => ({
-            id: s.id,
-            poNumber: `PO-${s.id.substring(0, 6).toUpperCase()}`,
-            date: s.created_at ? s.created_at.split('T')[0] : 'Recent',
-            time: '12:00 PM',
-            supplierName: s.name || 'Supplier',
-            category: s.category || 'Raw Materials',
-            invoiceBillRef: s.phone || 'REF-001',
-            totalCost: Number(s.current_balance || 0),
-            paidAmount: 0,
-            dueAmount: Number(s.current_balance || 0),
-            stockReceivedQty: 0,
-            paymentStatus: Number(s.current_balance || 0) > 0 ? 'Due' : 'Paid',
-            receivedBy: 'Store Incharge',
-            items: [],
-          }));
+        const [purchasesRes, suppliersRes] = await Promise.all([
+          fetch(`/api/purchases?tenant_id=${tenantId}`),
+          fetch(`/api/suppliers?tenant_id=${tenantId}`),
+        ]);
+
+        const [purchasesData, suppliersData] = await Promise.all([
+          purchasesRes.json(),
+          suppliersRes.json(),
+        ]);
+
+        if (isMounted && purchasesData.success && purchasesData.purchases) {
+          const supplierMap: Record<string, any> = {};
+          if (suppliersData.success && suppliersData.suppliers) {
+            suppliersData.suppliers.forEach((s: any) => {
+              supplierMap[s.id] = s;
+            });
+          }
+
+          const mapped: PurchaseRecord[] = purchasesData.purchases.map((p: any) => {
+            const rawItems = p.purchase_items || p.items || [];
+            const netTotal = Number(p.net_total || p.subtotal || 0);
+            const paidAmt = Number(p.paid_amount || (p.payment_type === 'cash' ? netTotal : 0));
+            const dueAmt = Number(p.due_amount !== undefined ? p.due_amount : Math.max(0, netTotal - paidAmt));
+            const totalQty = rawItems.reduce((acc: number, it: any) => acc + Number(it.qty || 0), 0);
+
+            const paymentStatus: PurchaseRecord['paymentStatus'] =
+              dueAmt <= 0 ? 'Paid' : paidAmt > 0 ? 'Partial' : 'Due';
+
+            const supplierInfo = supplierMap[p.supplier_id];
+
+            return {
+              id: p.id,
+              poNumber: p.purchase_no || `PO-${p.id.substring(0, 6).toUpperCase()}`,
+              date: p.date || (p.created_at ? p.created_at.split('T')[0] : 'Recent'),
+              time: p.created_at ? new Date(p.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '12:00 PM',
+              supplierName: p.supplier_name || supplierInfo?.name || 'Supplier',
+              category: supplierInfo?.category || 'Raw Materials & Base Emulsions',
+              invoiceBillRef: p.purchase_no || supplierInfo?.phone || 'REF-001',
+              totalCost: netTotal,
+              paidAmount: paidAmt,
+              dueAmount: dueAmt,
+              stockReceivedQty: totalQty,
+              paymentStatus,
+              receivedBy: p.created_by || 'Store Incharge',
+              items: rawItems.map((it: any) => ({
+                code: it.item_code || it.code || '',
+                product: it.item_name || it.name || 'Raw Material',
+                packUnit: it.pack_size || it.unit || 'Can',
+                qty: Number(it.qty || 0),
+                costRate: Number(it.cost_price || it.unit_price || it.rate || 0),
+                amount: Number(it.total_price || (it.qty * (it.cost_price || it.unit_price || 0))),
+              })),
+            };
+          });
+
           setPurchases(mapped);
         }
       } catch (err) {

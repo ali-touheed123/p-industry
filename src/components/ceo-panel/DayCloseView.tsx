@@ -16,46 +16,145 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
 
   useEffect(() => {
     let isMounted = true;
-    const fetchShifts = async () => {
+    const fetchShiftsAndExpenses = async () => {
       setLoading(true);
       try {
         const tenantId = branch.id.includes('-b') ? branch.id.split('-b')[0] : branch.id;
-        const res = await fetch(`/api/shifts?tenant_id=${tenantId}`);
-        const data = await res.json();
-        if (isMounted && data.success && data.shifts) {
-          const mapped: DayCloseRecord[] = data.shifts.map((s: any) => {
+        const [shiftsRes, expensesRes, invoicesRes, tenantsRes] = await Promise.all([
+          fetch(`/api/shifts?tenant_id=${tenantId}`),
+          fetch(`/api/expenses?tenant_id=${tenantId}`),
+          fetch(`/api/invoices?tenant_id=${tenantId}`),
+          fetch(`/api/tenants`),
+        ]);
+
+        const [shiftsData, expensesData, invoicesData, tenantsData] = await Promise.all([
+          shiftsRes.json(),
+          expensesRes.json(),
+          invoicesRes.json(),
+          tenantsRes.json(),
+        ]);
+
+        if (!isMounted) return;
+
+        const allExpenses: any[] = expensesData.success ? (expensesData.expenses || []) : [];
+        const allInvoices: any[] = invoicesData.success ? (invoicesData.invoices || []) : [];
+        const currentTenant = tenantsData.success && tenantsData.tenants
+          ? tenantsData.tenants.find((t: any) => t.id === tenantId || t.slug === branch.slug)
+          : null;
+
+        const commEnabled = Boolean(currentTenant?.commission_enabled);
+        const commRate = Number(currentTenant?.commission_rate || 2.0);
+        const splitLead = Number(currentTenant?.commission_split_lead || 35.0);
+        const splitStaff = Number(currentTenant?.commission_split_staff || 35.0);
+        const splitReserve = Number(currentTenant?.commission_split_reserve || 30.0);
+
+        if (shiftsData.success && shiftsData.shifts) {
+          const mapped: DayCloseRecord[] = shiftsData.shifts.map((s: any) => {
+            const shiftDate = s.created_at ? s.created_at.split('T')[0] : 'Recent';
+            
+            // Match expenses for this shift or date
+            const shiftExpenses = allExpenses.filter((e: any) =>
+              (e.shift_id && e.shift_id === s.id) ||
+              (!e.shift_id && e.created_at?.split('T')[0] === shiftDate)
+            );
+
+            // Match invoices for this shift or date
+            const shiftInvoices = allInvoices.filter((i: any) =>
+              (i.shift_id && i.shift_id === s.id) ||
+              (!i.shift_id && (i.date === shiftDate || i.created_at?.split('T')[0] === shiftDate))
+            );
+
+            const salesInvs = shiftInvoices.filter((i: any) => (i.invoice_type || 'sales') !== 'return');
+            const returnInvs = shiftInvoices.filter((i: any) => (i.invoice_type || 'sales') === 'return');
+
+            const cashSales = salesInvs
+              .filter((i: any) => !i.payment_type || i.payment_type === 'cash')
+              .reduce((sum: number, i: any) => sum + Number(i.cash_paid || i.paid_amount || i.net_total || 0), 0);
+
+            const creditSales = salesInvs
+              .filter((i: any) => i.payment_type === 'credit')
+              .reduce((sum: number, i: any) => sum + Number(i.due_amount || i.net_total || 0), 0);
+
+            const bankSales = salesInvs
+              .filter((i: any) => i.payment_type === 'bank' || i.payment_type === 'card' || i.payment_type === 'cheque')
+              .reduce((sum: number, i: any) => sum + Number(i.bank_paid || i.card_paid || i.net_total || 0), 0);
+
+            const grossSales = salesInvs.reduce((sum: number, i: any) => sum + Number(i.net_total || 0), 0);
+            const returnTotal = returnInvs.reduce((sum: number, i: any) => sum + Number(i.net_total || 0), 0);
+            const netShiftSales = Math.max(0, grossSales - returnTotal);
+
+            const totalExpensesAmt = shiftExpenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0);
+
             const openAmt = Number(s.opening_cash || 0);
-            const closeAmt = Number(s.closing_cash || s.actual_cash || 0);
-            const expCash = Number(s.expected_cash || openAmt);
+            const closeAmt = Number(s.actual_cash !== undefined ? s.actual_cash : (s.closing_cash || openAmt));
+            const expCash = Number(s.expected_cash !== undefined ? s.expected_cash : (openAmt + cashSales - totalExpensesAmt));
             const variance = closeAmt - expCash;
+
+            // Commission distribution
+            const commissionPool = commEnabled ? Math.round(netShiftSales * (commRate / 100)) : 0;
+            const staffShares = commEnabled && commissionPool > 0 ? [
+              {
+                id: 'lead-share',
+                name: 'Lead Cashier / Supervisor',
+                role: 'Register Incharge',
+                sharePct: splitLead,
+                amount: Math.round(commissionPool * (splitLead / 100)),
+              },
+              {
+                id: 'staff-share',
+                name: 'Counter Sales Staff',
+                role: 'Sales Executive',
+                sharePct: splitStaff,
+                amount: Math.round(commissionPool * (splitStaff / 100)),
+              },
+              {
+                id: 'reserve-share',
+                name: 'Branch Retention Reserve',
+                role: 'Store Pool',
+                sharePct: splitReserve,
+                amount: Math.round(commissionPool * (splitReserve / 100)),
+              },
+            ] : [];
+
+            // Petty cash logs
+            const pettyLogs = shiftExpenses.map((e: any) => ({
+              id: e.id,
+              title: e.title || 'Petty Expense',
+              time: e.created_at ? new Date(e.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '12:00 PM',
+              department: e.category || 'General Store',
+              amount: Number(e.amount || 0),
+            }));
+
             return {
               id: s.id,
-              date: s.created_at ? s.created_at.split('T')[0] : 'Recent',
-              shiftTime: s.closed_at ? new Date(s.closed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Day Shift',
-              cashierName: s.notes || 'Staff',
+              shiftTitle: `Register Shift #${s.id.substring(0, 4)}`,
+              date: shiftDate,
+              shiftTime: s.closed_at ? new Date(s.closed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (s.opened_at ? new Date(s.opened_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Day Shift'),
+              cashierName: s.closed_by || s.opened_by || s.notes || 'Counter Staff',
               registerNo: '01',
               financialSummary: {
                 openingBalance: openAmt,
-                cashSales: Number(s.cash_sales || 0),
-                creditSales: Number(s.credit_sales || 0),
-                bankCardSales: Number(s.bank_sales || 0),
-                pettyExpenses: Number(s.total_expenses || 0),
+                cashSales,
+                creditSales,
+                bankCardSales: bankSales,
+                pettyExpenses: totalExpensesAmt,
                 expectedCash: expCash,
                 actualCashCounted: closeAmt,
                 varianceAmount: variance,
-                varianceStatus: variance === 0 ? 'MATCHED' : (variance < 0 ? 'SHORTAGE' : 'OVERAGE'),
+                varianceStatus: variance === 0 ? 'MATCHED' : (variance < 0 ? 'SHORT' : 'EXCESS'),
               },
               commissionBreakdown: {
-                totalShiftSales: Number(s.total_sales || 0),
-                commissionRate: 2,
-                commissionPool: Math.round(Number(s.total_sales || 0) * 0.02),
-                staffShares: [],
+                totalSales: netShiftSales,
+                commissionRate: commEnabled ? commRate : 0,
+                commissionPool,
+                staffShares,
               },
-              pettyCashLogs: [],
+              pettyCashLogs: pettyLogs,
             };
           });
+
           setShifts(mapped);
-          if (mapped.length > 0) {
+          if (mapped.length > 0 && !selectedRecordId) {
             setSelectedRecordId(mapped[0].id);
           }
         }
@@ -66,11 +165,11 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
       }
     };
 
-    fetchShifts();
+    fetchShiftsAndExpenses();
     return () => {
       isMounted = false;
     };
-  }, [branch.id]);
+  }, [branch.id, branch.slug, selectedRecordId]);
 
   const activeRecord: DayCloseRecord | undefined = useMemo(() => {
     return shifts.find((r) => r.id === selectedRecordId) || shifts[0];

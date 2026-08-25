@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { hashPassword } from '@/lib/auth-passwords';
 
 // GET all tenants or single tenant by slug
 export async function GET(req: NextRequest) {
@@ -119,11 +120,12 @@ export async function POST(req: NextRequest) {
 
     // 2. Create CEO user if credentials provided
     if (ceo_username && ceo_password) {
+      const secureCeoHash = await hashPassword(ceo_password);
       const { data: ceoUser, error: ceoErr } = await supabaseAdmin
         .from('app_users')
         .insert({
           username: ceo_username.trim().toLowerCase(),
-          password_hash: ceo_password,
+          password_hash: secureCeoHash,
           full_name: owner_name || `${name} Owner`,
           email: email || `${ceo_username.trim().toLowerCase()}@pyntflow.com`,
           role: 'ceo',
@@ -145,11 +147,12 @@ export async function POST(req: NextRequest) {
 
     // 3. Create Staff / Counter users if credentials provided
     if (staff_username && staff_password) {
+      const secureStaffHash = await hashPassword(staff_password);
       await supabaseAdmin
         .from('app_users')
         .insert({
           username: staff_username.trim().toLowerCase(),
-          password_hash: staff_password,
+          password_hash: secureStaffHash,
           full_name: `${name} Counter 01`,
           role: type === 'godown' ? 'godown_staff' : 'staff',
           tenant_id: tenant.id,
@@ -160,11 +163,12 @@ export async function POST(req: NextRequest) {
     if (Array.isArray(body.counters) && body.counters.length > 0) {
       for (const c of body.counters) {
         if (c.username && c.password && c.username.trim().toLowerCase() !== staff_username?.trim().toLowerCase()) {
+          const secureCounterHash = await hashPassword(c.password);
           await supabaseAdmin
             .from('app_users')
             .insert({
               username: c.username.trim().toLowerCase(),
-              password_hash: c.password,
+              password_hash: secureCounterHash,
               full_name: c.name || `${name} ${c.username.toUpperCase()}`,
               role: type === 'godown' ? 'godown_staff' : 'staff',
               tenant_id: tenant.id,
@@ -245,20 +249,71 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Tenant ID required' }, { status: 400 });
     }
 
-    // Clean up all dependent child records & users of this shop
+    // 1. Clean up branch orders & branch order items (as sender or receiver)
+    try {
+      const { data: relatedOrders } = await supabaseAdmin
+        .from('branch_orders')
+        .select('id')
+        .or(`from_tenant_id.eq.${id},to_tenant_id.eq.${id}`);
+
+      if (relatedOrders && relatedOrders.length > 0) {
+        const orderIds = relatedOrders.map((o: any) => o.id);
+        await supabaseAdmin.from('branch_order_items').delete().in('order_id', orderIds);
+        await supabaseAdmin.from('branch_orders').delete().in('id', orderIds);
+      }
+    } catch (err) {
+      console.error('Error cleaning branch orders on tenant delete:', err);
+    }
+
+    // 2. Clean up invoices & invoice items
+    try {
+      const { data: relatedInvoices } = await supabaseAdmin
+        .from('invoices')
+        .select('id')
+        .eq('tenant_id', id);
+
+      if (relatedInvoices && relatedInvoices.length > 0) {
+        const invIds = relatedInvoices.map((i: any) => i.id);
+        await supabaseAdmin.from('invoice_items').delete().in('invoice_id', invIds);
+        await supabaseAdmin.from('invoices').delete().in('id', invIds);
+      }
+    } catch (err) {
+      console.error('Error cleaning invoices on tenant delete:', err);
+    }
+
+    // 3. Clean up purchases & purchase items
+    try {
+      const { data: relatedPurchases } = await supabaseAdmin
+        .from('purchases')
+        .select('id')
+        .eq('tenant_id', id);
+
+      if (relatedPurchases && relatedPurchases.length > 0) {
+        const pIds = relatedPurchases.map((p: any) => p.id);
+        await supabaseAdmin.from('purchase_items').delete().in('purchase_id', pIds);
+        await supabaseAdmin.from('purchases').delete().in('id', pIds);
+      }
+    } catch (err) {
+      console.error('Error cleaning purchases on tenant delete:', err);
+    }
+
+    // 4. Clean up other child tables
     await supabaseAdmin.from('ceo_tenants').delete().eq('tenant_id', id);
     await supabaseAdmin.from('app_users').delete().eq('tenant_id', id);
-    await supabaseAdmin.from('invoices').delete().eq('tenant_id', id);
     await supabaseAdmin.from('held_invoices').delete().eq('tenant_id', id);
     await supabaseAdmin.from('items').delete().eq('tenant_id', id);
     await supabaseAdmin.from('shifts').delete().eq('tenant_id', id);
+    await supabaseAdmin.from('expenses').delete().eq('tenant_id', id);
     await supabaseAdmin.from('petty_expenses').delete().eq('tenant_id', id);
     await supabaseAdmin.from('clients').delete().eq('tenant_id', id);
     await supabaseAdmin.from('suppliers').delete().eq('tenant_id', id);
     await supabaseAdmin.from('audit_logs').delete().eq('tenant_id', id);
     await supabaseAdmin.from('vouchers').delete().eq('tenant_id', id);
-    await supabaseAdmin.from('stock_transfers').delete().or(`from_tenant_id.eq.${id},to_tenant_id.eq.${id}`);
+    try {
+      await supabaseAdmin.from('stock_transfers').delete().or(`from_tenant_id.eq.${id},to_tenant_id.eq.${id}`);
+    } catch {}
 
+    // 5. Finally delete the tenant
     const { error } = await supabaseAdmin.from('tenants').delete().eq('id', id);
     if (error) throw error;
 

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Client } from '@/types';
 
 interface Props {
@@ -18,6 +18,9 @@ export default function ClientCreditRecovery({
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'critical' | 'overdue' | 'pending'>('all');
+  const [totalCollected, setTotalCollected] = useState(0);
+  const [totalBilled, setTotalBilled] = useState(0);
+  const [thisMonthCollected, setThisMonthCollected] = useState(0);
 
   // Quick Payment Modal State
   const [selectedClientForPayment, setSelectedClientForPayment] = useState<Client | null>(null);
@@ -26,30 +29,65 @@ export default function ClientCreditRecovery({
   const [paymentNotes, setPaymentNotes] = useState('');
   const [submittingPayment, setSubmittingPayment] = useState(false);
 
-  const fetchClients = async () => {
+  const fetchClients = useCallback(async () => {
     if (!tenantId) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/clients?tenant_id=${tenantId}`);
-      const data = await res.json();
-      if (data.success) {
-        setClients(data.clients || []);
-      }
+      const [clientsRes, vouchersRes, invoicesRes] = await Promise.all([
+        fetch(`/api/clients?tenant_id=${tenantId}`),
+        fetch(`/api/vouchers?tenant_id=${tenantId}&party_type=client`),
+        fetch(`/api/invoices?tenant_id=${tenantId}&limit=5000`),
+      ]);
+      const [clientsData, vouchersData, invoicesData] = await Promise.all([
+        clientsRes.json(),
+        vouchersRes.json(),
+        invoicesRes.json(),
+      ]);
+      if (clientsData.success) setClients(clientsData.clients || []);
+
+      // Total ever collected (all receipt vouchers)
+      const receipts: any[] = vouchersData.success ? (vouchersData.vouchers || []) : [];
+      const collected = receipts
+        .filter((v: any) => v.voucher_type === 'receipt')
+        .reduce((s: number, v: any) => s + Number(v.amount || 0), 0);
+      setTotalCollected(collected);
+
+      // This month collected
+      const now = new Date();
+      const monthCollected = receipts
+        .filter((v: any) => {
+          const d = new Date(v.date || v.created_at || '');
+          return v.voucher_type === 'receipt' && d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+        })
+        .reduce((s: number, v: any) => s + Number(v.amount || 0), 0);
+      setThisMonthCollected(monthCollected);
+
+      // Total lifetime billed (all sales invoices)
+      const invoices: any[] = invoicesData.success ? (invoicesData.invoices || []) : [];
+      const billed = invoices
+        .filter((inv: any) => inv.invoice_type === 'sales')
+        .reduce((s: number, inv: any) => s + Number(inv.net_total || 0), 0);
+      setTotalBilled(billed);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [tenantId]);
 
   useEffect(() => {
     fetchClients();
-  }, [tenantId]);
+  }, [fetchClients]);
 
   // Aggregate Calculations
   const totalReceivables = clients.reduce((sum, c) => sum + (c.current_balance || 0), 0);
-  
-  // Categorize aging
+
+  // Real recovery rate: collected ÷ total billed × 100
+  const recoveryRate = totalBilled > 0
+    ? Math.min(100, Math.round((totalCollected / totalBilled) * 100 * 10) / 10)
+    : 100;
+
+  // Categorize aging by balance amount vs credit limit
   const categorizedClients = clients.map(c => {
     const bal = c.current_balance || 0;
     const limit = c.credit_limit || 50000;
@@ -71,14 +109,7 @@ export default function ClientCreditRecovery({
       d30 = bal;
     }
 
-    return {
-      ...c,
-      status,
-      d30,
-      d60,
-      d90,
-      totalDue: bal,
-    };
+    return { ...c, status, d30, d60, d90, totalDue: bal };
   });
 
   const criticalTotal = categorizedClients
@@ -86,7 +117,6 @@ export default function ClientCreditRecovery({
     .reduce((sum, c) => sum + c.totalDue, 0);
 
   const overdueAccountsCount = categorizedClients.filter(c => c.totalDue > 0).length;
-  const recoveryRate = totalReceivables > 0 ? 82.5 : 100;
 
   // Filtered List
   const filteredClients = categorizedClients.filter(c => {
@@ -410,24 +440,34 @@ export default function ClientCreditRecovery({
             </div>
           </div>
 
-          {/* Monthly Recovery Target */}
+          {/* Monthly Collections Card — real data */}
           <div className="card" style={{ padding: '1.25rem' }}>
             <h3 className="headline-sm" style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span className="material-symbols-outlined" style={{ fontSize: 20, color: 'var(--secondary)' }}>track_changes</span>
-              Monthly Recovery Target
+              This Month Collections
             </h3>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', fontSize: '13px' }}>
-                  <span style={{ fontWeight: 600 }}>Branch Recovery Target</span>
-                  <span className="font-mono" style={{ fontSize: '12px' }}>Rs. 450k / Rs. 500k</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem', fontSize: '13px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span className="text-muted">Collected This Month:</span>
+                <strong className="font-mono" style={{ color: '#065f46' }}>Rs. {thisMonthCollected.toLocaleString()}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span className="text-muted">Total Ever Collected:</span>
+                <strong className="font-mono">Rs. {totalCollected.toLocaleString()}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span className="text-muted">Total Ever Billed:</span>
+                <strong className="font-mono">Rs. {totalBilled.toLocaleString()}</strong>
+              </div>
+              <div style={{ borderTop: '1px solid var(--outline-variant)', paddingTop: '0.75rem', marginTop: '0.25rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <span style={{ fontWeight: 700 }}>Overall Recovery Rate:</span>
+                  <span className="font-mono font-bold" style={{ color: recoveryRate >= 80 ? '#065f46' : recoveryRate >= 50 ? '#b45309' : 'var(--error)' }}>
+                    {recoveryRate}%
+                  </span>
                 </div>
                 <div style={{ height: 8, background: 'var(--surface-container-high)', borderRadius: 'var(--radius-full)', overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: '90%', background: 'var(--secondary)' }} />
-                </div>
-                <div style={{ fontSize: '11px', color: '#065f46', marginTop: '4px', fontWeight: 600 }}>
-                  90% of target achieved this month
+                  <div style={{ height: '100%', width: `${recoveryRate}%`, background: recoveryRate >= 80 ? '#16a34a' : recoveryRate >= 50 ? '#d97706' : 'var(--error)', borderRadius: 'var(--radius-full)', transition: 'width 0.5s ease' }} />
                 </div>
               </div>
             </div>

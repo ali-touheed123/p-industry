@@ -60,17 +60,6 @@ interface HeldOrder {
   total: number;
 }
 
-const SHADE_COLOR_MAP: Record<string, string> = {
-  'Off-White 101': '#FAF9F6',
-  'Desert Sand 804': '#E6D7B9',
-  'Pure White Undercoat': '#FFFFFF',
-  'Ocean Blue 08-204': '#0284C7',
-  'Forest Green 12-401': '#15803D',
-  'Signal Red 04-102': '#DC2626',
-  'Charcoal Black 01-900': '#1E293B',
-  'Warm Cream 03-108': '#FEF3C7',
-  'Standard Off-White': '#F8FAFC',
-};
 
 const SHORTCUTS = [
   { key: 'F2', label: 'Save' },
@@ -248,22 +237,11 @@ export default function PosBilling({
     }
   }, [netTotal]);
 
-  // Helper for shade info directly using DB fields or smart map
+  // Helper for shade info — always use the product's own shade_code from DB.
+  // No silent overrides: if shade_code is set, use it exactly as stored.
   const getShadeInfo = (item: Item) => {
-    if (item.shade_code && item.shade_hex) {
-      return { shadeCode: item.shade_code, shadeColorHex: item.shade_hex };
-    }
-    const nameLower = item.name.toLowerCase();
-    for (const [shade, hex] of Object.entries(SHADE_COLOR_MAP)) {
-      if (nameLower.includes(shade.toLowerCase().split(' ')[0])) {
-        return { shadeCode: shade, shadeColorHex: hex };
-      }
-    }
-    if (item.category === 'Emulsion' || item.category === 'Interior Emulsion') {
-      return { shadeCode: 'Off-White 101', shadeColorHex: '#FAF9F6' };
-    }
-    if (item.category === 'Weather Shield' || item.category === 'Weather Shield Exterior') {
-      return { shadeCode: 'Ocean Blue 08-204', shadeColorHex: '#0284C7' };
+    if (item.shade_code) {
+      return { shadeCode: item.shade_code, shadeColorHex: item.shade_hex || '#94A3B8' };
     }
     return { shadeCode: '—', shadeColorHex: '#94A3B8' };
   };
@@ -817,11 +795,6 @@ export default function PosBilling({
                         className="pos-dropdown-item"
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          {shadeCode !== '—' && (
-                            <span
-                              style={{ width: '14px', height: '14px', borderRadius: '3px', border: '1px solid #CBD5E1', flexShrink: 0, backgroundColor: shadeColorHex }}
-                            />
-                          )}
                           <div>
                             <div style={{ fontWeight: 700, color: '#0F172A' }}>{prod.name}</div>
                             <div style={{ fontSize: '11px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
@@ -913,16 +886,9 @@ export default function PosBilling({
                             {item.productName}
                           </td>
                           <td style={{ whiteSpace: 'nowrap' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              {item.shadeCode !== '—' && (
-                                <span
-                                  style={{ width: '14px', height: '14px', borderRadius: '2px', border: '1px solid #CBD5E1', flexShrink: 0, backgroundColor: item.shadeColorHex }}
-                                />
-                              )}
-                              <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '11px', color: '#334155' }}>
-                                {item.shadeCode}
-                              </span>
-                            </div>
+                            <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '11px', color: '#334155' }}>
+                              {item.shadeCode}
+                            </span>
                           </td>
                           <td style={{ fontFamily: 'JetBrains Mono, monospace', color: '#475569', fontSize: '11px', whiteSpace: 'nowrap' }}>
                             {item.packSize}

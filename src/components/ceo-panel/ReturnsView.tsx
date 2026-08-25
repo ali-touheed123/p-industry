@@ -28,16 +28,38 @@ export const ReturnsView: React.FC<ReturnsViewProps> = ({ branch }) => {
         if (isMounted && data.success && data.invoices) {
           const mapped: ReturnRecord[] = data.invoices.map((inv: any) => {
             const rawItems = inv.invoice_items || inv.items || [];
+            const rawRemarks = inv.remarks || '';
+            let reason = 'Customer Return / Shade Adjustment';
+            let originalInvoiceNo = 'Direct Counter Return';
+            let condition: 'Restocked' | 'Damaged / Write-off' = 'Restocked';
+
+            if (rawRemarks.includes('Reason:')) {
+              const parts = rawRemarks.split('Reason:');
+              originalInvoiceNo = parts[0].replace('Orig:', '').trim() || originalInvoiceNo;
+              reason = parts[1].trim() || reason;
+            } else if (rawRemarks.startsWith('INV-')) {
+              originalInvoiceNo = rawRemarks;
+            } else if (rawRemarks.trim()) {
+              reason = rawRemarks.trim();
+            }
+
+            const lowerReason = reason.toLowerCase();
+            if (lowerReason.includes('damage') || lowerReason.includes('defect') || lowerReason.includes('wrong shade') || lowerReason.includes('faulty')) {
+              condition = 'Damaged / Write-off';
+            } else {
+              condition = 'Restocked';
+            }
+
             return {
               id: inv.id,
               returnNumber: inv.invoice_no || `RET-${inv.id}`,
-              originalInvoiceNo: inv.remarks || 'Direct Return',
+              originalInvoiceNo,
               date: inv.date || (inv.created_at ? inv.created_at.split('T')[0] : ''),
               time: inv.created_at ? new Date(inv.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '12:00 PM',
               customerName: inv.client_name || 'Walk-in Customer',
-              reason: 'Customer Return / Shade Adjustment',
-              condition: 'Restocked',
-              refundMode: inv.payment_type === 'credit' ? 'Credit Note' : 'Cash Refund',
+              reason,
+              condition,
+              refundMode: inv.payment_type === 'credit' ? 'Credit Note' : (inv.payment_type === 'bank' || inv.payment_type === 'card' ? 'Bank/Card Reversal' : 'Cash Refund'),
               totalAmount: Number(inv.net_total || 0),
               processedBy: inv.created_by || 'Counter Staff',
               items: rawItems.map((it: any) => ({

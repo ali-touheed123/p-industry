@@ -43,29 +43,63 @@ export default function ShiftDrawer({
   const [closedShiftData, setClosedShiftData] = useState<any | null>(null);
 
   const [purchases, setPurchases] = useState<any[]>([]);
+  const [dbInvoices, setDbInvoices] = useState<any[]>([]);
+  const [dbExpenses, setDbExpenses] = useState<PettyExpense[]>([]);
 
-  // Fetch today's purchases for tenant
+  // Fetch today's purchases, invoices and expenses for current shift/tenant
   React.useEffect(() => {
     if (!tenantId) return;
-    const fetchPurchases = async () => {
+    const fetchShiftData = async () => {
       try {
-        const res = await fetch(`/api/purchases?tenant_id=${tenantId}`);
-        const data = await res.json();
-        if (data.success) {
-          setPurchases(data.purchases || []);
+        const todayIso = new Date().toISOString().split('T')[0];
+        const [purchasesRes, invoicesRes, expensesRes] = await Promise.all([
+          fetch(`/api/purchases?tenant_id=${tenantId}`),
+          fetch(`/api/invoices?tenant_id=${tenantId}${shift?.id ? `&shift_id=${shift.id}` : `&start_date=${todayIso}`}`),
+          fetch(`/api/expenses?tenant_id=${tenantId}${shift?.id ? `&shift_id=${shift.id}` : ''}`),
+        ]);
+
+        const [purchasesData, invoicesData, expensesData] = await Promise.all([
+          purchasesRes.json(),
+          invoicesRes.json(),
+          expensesRes.json(),
+        ]);
+
+        if (purchasesData.success) {
+          setPurchases(purchasesData.purchases || []);
+        }
+        if (invoicesData.success && invoicesData.invoices && invoicesData.invoices.length > 0) {
+          setDbInvoices(invoicesData.invoices);
+        }
+        if (expensesData.success && expensesData.expenses && expensesData.expenses.length > 0) {
+          setDbExpenses(expensesData.expenses);
         }
       } catch (err) {
-        console.error('Error fetching purchases for shift drawer', err);
+        console.error('Error fetching shift drawer data', err);
       }
     };
-    fetchPurchases();
-  }, [tenantId]);
+    fetchShiftData();
+  }, [tenantId, shift?.id]);
+
+  // Combine passed props with DB records (deduplicating by id)
+  const activeInvoices = React.useMemo(() => {
+    const map = new Map<string, any>();
+    dbInvoices.forEach(inv => map.set(inv.id, inv));
+    (invoices || []).forEach(inv => map.set(inv.id, inv));
+    return Array.from(map.values());
+  }, [dbInvoices, invoices]);
+
+  const activeExpenses = React.useMemo(() => {
+    const map = new Map<string, PettyExpense>();
+    dbExpenses.forEach(exp => map.set(exp.id, exp));
+    (expenses || []).forEach(exp => map.set(exp.id, exp));
+    return Array.from(map.values());
+  }, [dbExpenses, expenses]);
 
   // Dynamic Sales & Returns breakdown from live invoices
   const openingCash = shift?.opening_cash || 0;
   
-  const salesInvoices = invoices.filter(i => (i.invoice_type || 'sales') !== 'return');
-  const returnInvoices = invoices.filter(i => (i.invoice_type || 'sales') === 'return');
+  const salesInvoices = activeInvoices.filter(i => (i.invoice_type || 'sales') !== 'return');
+  const returnInvoices = activeInvoices.filter(i => (i.invoice_type || 'sales') === 'return');
 
   const grossSales = salesInvoices.length > 0
     ? salesInvoices.reduce((s, i) => s + Number(i.grandTotal || i.net_total || 0), 0)
@@ -100,7 +134,7 @@ export default function ShiftDrawer({
     .reduce((s, p) => s + Number(p.paid_amount || (p.payment_type === 'cash' ? p.net_total : 0) || 0), 0);
 
   const totalSalesAggregate = grossSales;
-  const currentExpenses = expenses || [];
+  const currentExpenses = activeExpenses;
   const totalExpenses = currentExpenses.reduce((sum, exp) => sum + exp.amount, 0);
 
   // Exact Daraz Reconciliation Formula:
@@ -147,9 +181,10 @@ export default function ShiftDrawer({
         const data = await res.json();
         if (data.success && data.expense) {
           onAddExpense(data.expense);
+          setDbExpenses(prev => [data.expense, ...prev]);
         } else {
           // Fallback local
-          onAddExpense({
+          const fallbackExp = {
             id: Date.now().toString(),
             tenant_id: tenantId,
             shift_id: shift?.id || 'shift-1',
@@ -157,7 +192,9 @@ export default function ShiftDrawer({
             title: expenseTitle,
             amount: parseFloat(expenseAmount) || 0,
             created_at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          });
+          };
+          onAddExpense(fallbackExp);
+          setDbExpenses(prev => [fallbackExp, ...prev]);
         }
       } else {
         onAddExpense({

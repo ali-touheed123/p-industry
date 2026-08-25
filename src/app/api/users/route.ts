@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { hashPassword } from '@/lib/auth-passwords';
+import { getSession } from '@/lib/session';
 
 // GET: Fetch all users or users by tenant
 export async function GET(req: NextRequest) {
@@ -25,7 +27,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST: Create a new user
+// POST: Create a new user (with bcrypt password hashing)
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -36,19 +38,20 @@ export async function POST(req: NextRequest) {
     }
 
     const cleanUsername = username.trim().toLowerCase();
+    const secureHash = await hashPassword(password);
 
     const { data: newUser, error } = await supabaseAdmin
       .from('app_users')
       .insert({
         username: cleanUsername,
-        password_hash: password,
+        password_hash: secureHash,
         full_name: full_name || cleanUsername,
         email: email || null,
         role,
         tenant_id: tenant_id || null,
         is_active: true,
       })
-      .select()
+      .select('id, username, full_name, email, role, tenant_id, is_active, created_at')
       .single();
 
     if (error) {
@@ -65,6 +68,43 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ success: true, user: newUser });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
+
+// PUT: Update an existing user
+export async function PUT(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { id, username, password, full_name, role, tenant_id, email, is_active } = body;
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'User ID is required' }, { status: 400 });
+    }
+
+    const updatePayload: any = {};
+    if (username) updatePayload.username = username.trim().toLowerCase();
+    if (full_name !== undefined) updatePayload.full_name = full_name;
+    if (role) updatePayload.role = role;
+    if (tenant_id !== undefined) updatePayload.tenant_id = tenant_id || null;
+    if (email !== undefined) updatePayload.email = email || null;
+    if (is_active !== undefined) updatePayload.is_active = is_active;
+
+    if (password && password.trim()) {
+      updatePayload.password_hash = await hashPassword(password.trim());
+    }
+
+    const { data: updatedUser, error } = await supabaseAdmin
+      .from('app_users')
+      .update(updatePayload)
+      .eq('id', id)
+      .select('id, username, full_name, email, role, tenant_id, is_active, created_at')
+      .single();
+
+    if (error) throw error;
+
+    return NextResponse.json({ success: true, user: updatedUser });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

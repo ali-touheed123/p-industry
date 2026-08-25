@@ -186,35 +186,6 @@ export interface AuditLog {
   created_at: string;
 }
 
-export interface StockTransfer {
-  id: string;
-  from_tenant_id: string;
-  to_tenant_id: string;
-  transfer_no: string;
-  date: string;
-  transporter_name?: string;
-  vehicle_no?: string;
-  bilty_no?: string;
-  driver_name?: string;
-  driver_phone?: string;
-  status: 'in_transit' | 'received' | 'cancelled';
-  notes?: string;
-  created_by?: string;
-  created_at: string;
-  from_tenant?: Tenant;
-  to_tenant?: Tenant;
-  items?: StockTransferItem[];
-}
-
-export interface StockTransferItem {
-  id?: string;
-  transfer_id?: string;
-  item_id?: string;
-  item_code?: string;
-  item_name: string;
-  unit?: string;
-  qty: number;
-}
 
 export interface BranchOrder {
   id: string;

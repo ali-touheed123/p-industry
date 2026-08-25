@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Branch, Customer } from '@/types/ceo';
 import { formatCurrency } from '@/data/ceoMockData';
-import { Search, ChevronRight, Users } from 'lucide-react';
+import { Search, ChevronRight } from 'lucide-react';
 import { CustomerDetailModal } from './CustomerDetailModal';
 
 interface CustomersViewProps {
@@ -23,33 +23,146 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ branch }) => {
       setLoading(true);
       try {
         const tenantId = branch.id.includes('-b') ? branch.id.split('-b')[0] : branch.id;
-        const res = await fetch(`/api/clients?tenant_id=${tenantId}`);
-        const data = await res.json();
-        if (isMounted && data.success && data.clients) {
-          const mapped: Customer[] = data.clients.map((c: any) => {
-            const debt = Number(c.current_balance || c.balance || 0);
-            return {
-              id: c.id,
-              name: c.name || 'Client',
-              phone: c.phone || '—',
-              city: c.address || branch.city || 'Karachi',
-              category: c.category || 'Contractor',
-              creditLimit: Number(c.credit_limit || 100000),
-              totalDebt: debt,
-              amountPaidToDate: 0,
-              lifetimePurchases: debt,
-              riskLevel: debt > 100000 ? 'High' : debt > 30000 ? 'Medium' : 'Low',
-              lastTransactionDate: c.created_at ? c.created_at.split('T')[0] : 'Recent',
-              aging: {
-                current: debt,
-                days30to60: 0,
-                days60plus: 0,
-              },
-              transactions: [],
-            };
+
+        // Fetch clients, all invoices, and all receipt vouchers in parallel
+        const [clientsRes, invoicesRes, vouchersRes] = await Promise.all([
+          fetch(`/api/clients?tenant_id=${tenantId}`),
+          fetch(`/api/invoices?tenant_id=${tenantId}&limit=5000`),
+          fetch(`/api/vouchers?tenant_id=${tenantId}&party_type=client`),
+        ]);
+
+        const [clientsData, invoicesData, vouchersData] = await Promise.all([
+          clientsRes.json(),
+          invoicesRes.json(),
+          vouchersRes.json(),
+        ]);
+
+        if (!isMounted) return;
+        if (!clientsData.success || !clientsData.clients) return;
+
+        const allInvoices: any[] = invoicesData.success ? (invoicesData.invoices || []) : [];
+        const allVouchers: any[] = vouchersData.success ? (vouchersData.vouchers || []) : [];
+
+        // Helper: days since a date string
+        const daysSince = (dateStr: string) => {
+          const d = new Date(dateStr);
+          return isNaN(d.getTime()) ? 9999 : Math.floor((Date.now() - d.getTime()) / 86400000);
+        };
+
+        const mapped: Customer[] = clientsData.clients.map((c: any) => {
+          const debt = Number(c.current_balance || c.balance || 0);
+
+          // --- invoices for this client ---
+          const clientInvoices = allInvoices.filter(
+            (inv: any) => inv.client_id === c.id && inv.invoice_type === 'sales'
+          );
+          const lifetimePurchases = clientInvoices.reduce(
+            (sum: number, inv: any) => sum + Number(inv.net_total || 0), 0
+          );
+
+          // --- vouchers (receipts) for this client ---
+          const clientVouchers = allVouchers.filter((v: any) => v.party_id === c.id && v.voucher_type === 'receipt');
+          const amountPaidToDate = clientVouchers.reduce(
+            (sum: number, v: any) => sum + Number(v.amount || 0), 0
+          );
+
+          // --- real aging: bucket invoices by date of creation ---
+          let agingCurrent = 0;    // 0–30 days
+          let aging30to60 = 0;     // 31–60 days
+          let aging60plus = 0;     // 61+ days
+
+          clientInvoices.forEach((inv: any) => {
+            const unpaid = Number(inv.due_amount || 0);
+            if (unpaid <= 0) return;
+            const age = daysSince(inv.date || inv.created_at || '');
+            if (age <= 30) agingCurrent += unpaid;
+            else if (age <= 60) aging30to60 += unpaid;
+            else aging60plus += unpaid;
           });
-          setCustomers(mapped);
-        }
+
+          // If no invoice-level aging data, fall back to current_balance in current bucket
+          if (agingCurrent === 0 && aging30to60 === 0 && aging60plus === 0 && debt > 0) {
+            agingCurrent = debt;
+          }
+
+          // --- build transactions ledger (invoices + vouchers combined, sorted by date desc) ---
+          const transactions: Customer['transactions'] = [];
+
+          // Running balance for ledger
+          let runningBalance = 0;
+          const allEntries = [
+            ...clientInvoices.map((inv: any) => ({
+              id: inv.id,
+              date: inv.date || inv.created_at?.split('T')[0] || '',
+              time: inv.created_at?.split('T')[1]?.slice(0, 5) || '',
+              type: 'Invoice' as const,
+              referenceNo: inv.invoice_no,
+              description: `Sales Invoice — ${inv.invoice_no}`,
+              debit: Number(inv.net_total || 0),
+              credit: 0,
+              sortTs: new Date(inv.created_at || inv.date || 0).getTime(),
+            })),
+            ...clientVouchers.map((v: any) => ({
+              id: v.id,
+              date: v.date || v.created_at?.split('T')[0] || '',
+              time: v.created_at?.split('T')[1]?.slice(0, 5) || '',
+              type: 'Payment' as const,
+              referenceNo: v.voucher_no,
+              description: `Receipt — ${v.remarks || v.voucher_no}`,
+              debit: 0,
+              credit: Number(v.amount || 0),
+              sortTs: new Date(v.created_at || v.date || 0).getTime(),
+            })),
+          ].sort((a, b) => a.sortTs - b.sortTs); // oldest first for running balance
+
+          allEntries.forEach((entry) => {
+            runningBalance = runningBalance + entry.debit - entry.credit;
+            transactions.push({
+              id: entry.id,
+              date: entry.date,
+              time: entry.time,
+              type: entry.type,
+              referenceNo: entry.referenceNo,
+              description: entry.description,
+              debit: entry.debit,
+              credit: entry.credit,
+              balanceAfter: Math.max(0, runningBalance),
+            });
+          });
+
+          transactions.reverse(); // show newest first in UI
+
+          // --- risk level using correct type ---
+          const riskLevel: Customer['riskLevel'] =
+            debt > 100000 ? 'High' : debt > 30000 ? 'Moderate' : 'Low';
+
+          // --- last transaction date ---
+          const lastTx = allEntries[allEntries.length - 1];
+          const lastTransactionDate = lastTx?.date || (c.created_at ? c.created_at.split('T')[0] : 'N/A');
+
+          return {
+            id: c.id,
+            name: c.name || 'Client',
+            phone: c.phone || '—',
+            city: c.city || c.address || branch.city || 'Karachi',
+            address: c.address || '',
+            category: c.category || 'Contractor',
+            creditLimit: Number(c.credit_limit || 100000),
+            totalDebt: debt,
+            amountPaidToDate,
+            lifetimePurchases,
+            riskLevel,
+            lastTransactionDate,
+            aging: {
+              current: agingCurrent,
+              days30to60: aging30to60,
+              days60plus: aging60plus,
+            },
+            transactions,
+          };
+        });
+
+        setCustomers(mapped);
       } catch (err) {
         console.error('Failed to load clients', err);
       } finally {
@@ -62,6 +175,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ branch }) => {
       isMounted = false;
     };
   }, [branch.id, branch.city]);
+
 
   const filteredCustomers = useMemo(() => {
     return customers.filter((c) => {

@@ -8,8 +8,6 @@ interface DevPinLoginProps {
   onSuccess: () => void;
 }
 
-const SECRET_DEV_PIN = 'dev2026';
-
 export const DevPinLogin: React.FC<DevPinLoginProps> = ({ onSuccess }) => {
   const [mode, setMode] = useState<'pin' | 'credentials'>('pin');
   const [pin, setPin] = useState('');
@@ -18,13 +16,30 @@ export const DevPinLogin: React.FC<DevPinLoginProps> = ({ onSuccess }) => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handlePinSubmit = (e: React.FormEvent) => {
+  const handlePinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (pin.trim() === SECRET_DEV_PIN) {
-      sessionStorage.setItem('aura_dev_auth', 'true');
-      onSuccess();
-    } else {
-      setError('Invalid developer PIN. Access denied.');
+    setError('');
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/dev-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        sessionStorage.setItem('aura_dev_auth', 'true');
+        if (data.token) {
+          sessionStorage.setItem('aura_dev_token', data.token);
+        }
+        onSuccess();
+      } else {
+        setError(data.error || 'Invalid developer PIN. Access denied.');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Connection to authentication server failed');
+    } finally {
+      setLoading(false);
     }
   };
 

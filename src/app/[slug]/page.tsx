@@ -4,7 +4,6 @@ import React, { useState, useEffect, use } from 'react';
 import { Item, Tenant, Shift, PettyExpense, AuditLog } from '@/types';
 import PosBilling from '@/components/PosBilling';
 import StockInventory from '@/components/StockInventory';
-import GodownTransfers from '@/components/GodownTransfers';
 import ShiftDrawer from '@/components/ShiftDrawer';
 import CeoDashboard from '@/components/CeoDashboard';
 import FinancialLedgers from '@/components/FinancialLedgers';
@@ -25,7 +24,6 @@ import {
   Scale,
   BarChart3,
   CalendarCheck,
-  Truck,
   BookOpen,
   ChevronLeft,
   ChevronRight,
@@ -59,7 +57,7 @@ export default function TenantAppPage({ params }: PageProps) {
   const [loginRoleTab, setLoginRoleTab] = useState<'staff' | 'ceo'>('staff');
   const [loginError, setLoginError] = useState('');
   const [activeTab, setActiveTab] = useState<
-    'pos' | 'inventory' | 'purchases' | 'sales' | 'customers' | 'returns' | 'orders' | 'hold_invoices' | 'credit_recovery' | 'reports' | 'day_close' | 'stock' | 'ledgers' | 'credit' | 'transfers' | 'shift' | 'ceo_reports'
+    'pos' | 'inventory' | 'purchases' | 'sales' | 'customers' | 'returns' | 'orders' | 'hold_invoices' | 'credit_recovery' | 'reports' | 'day_close' | 'stock' | 'ledgers' | 'credit' | 'shift' | 'ceo_reports'
   >('pos');
   const [pendingOrdersCount, setPendingOrdersCount] = useState<number>(0);
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
@@ -646,14 +644,6 @@ export default function TenantAppPage({ params }: PageProps) {
               tenantId={tenant.id}
               tenantName={tenant.name}
               staffName={currentUser?.full_name || currentUser?.username || 'Staff'}
-            />
-          )}
-          {activeTab === 'transfers' && (
-            <GodownTransfers
-              items={items}
-              tenantId={tenant.id}
-              staffName={currentUser?.full_name || currentUser?.username || 'Staff'}
-              onStockDispatched={refreshItems}
             />
           )}
           {(activeTab === 'day_close' || activeTab === 'shift') && (
