@@ -21,7 +21,7 @@ export const PurchaseView: React.FC<PurchaseViewProps> = ({ branch }) => {
     let isMounted = true;
     const fetchPurchases = async () => {
       const tenantId = branch?.id
-        ? (branch.id.includes('-b') ? branch.id.split('-b')[0] : branch.id)
+        ? (/-b\d+$/.test(branch.id) ? branch.id.replace(/-b\d+$/, '') : branch.id)
         : (branch?.slug || '');
 
       if (!tenantId) return;

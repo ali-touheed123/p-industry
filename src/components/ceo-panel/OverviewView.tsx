@@ -47,12 +47,13 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
   const [itemsCostMap, setItemsCostMap] = useState<Record<string, number>>({});
   const [commissionConfig, setCommissionConfig] = useState<{ enabled: boolean; rate: number }>({ enabled: false, rate: 2.0 });
   const [loading, setLoading] = useState<boolean>(true);
+  const [refreshTick, setRefreshTick] = useState<number>(0);
 
   useEffect(() => {
     let isMounted = true;
     const fetchOverviewData = async () => {
       const tenantId = branch?.id
-        ? (branch.id.includes('-b') ? branch.id.split('-b')[0] : branch.id)
+        ? (/-b\d+$/.test(branch.id) ? branch.id.replace(/-b\d+$/, '') : branch.id)
         : (branch?.slug || '');
 
       if (!tenantId) return;
@@ -117,7 +118,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
     return () => {
       isMounted = false;
     };
-  }, [branch?.id, branch?.slug]);
+  }, [branch?.id, branch?.slug, refreshTick]);
 
   const allDailyRecords = useMemo(() => {
     if (!invoices || invoices.length === 0) return [];
@@ -297,6 +298,14 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
               <span className="ceo-font-mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '9999px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', color: '#C6A15B' }}>
                 {totals.daysCount} Operating Days
               </span>
+              <button
+                onClick={() => setRefreshTick(t => t + 1)}
+                disabled={loading}
+                title="Refresh data"
+                style={{ background: 'none', border: '1px solid #2A2F38', borderRadius: '6px', color: loading ? '#4B5563' : '#C6A15B', cursor: loading ? 'not-allowed' : 'pointer', padding: '3px 8px', fontSize: '11px' }}
+              >
+                {loading ? '⟳ Loading...' : '⟳ Refresh'}
+              </button>
             </div>
             <p style={{ fontSize: '12px', color: '#8B93A1', margin: '4px 0 0' }}>
               {branch.name} • Live gross margin, COGS, operating expense, net profits and daily accounting

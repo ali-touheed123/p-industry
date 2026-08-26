@@ -18,7 +18,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
     let isMounted = true;
     const fetchShiftsAndExpenses = async () => {
       const tenantId = branch?.id
-        ? (branch.id.includes('-b') ? branch.id.split('-b')[0] : branch.id)
+        ? (/-b\d+$/.test(branch.id) ? branch.id.replace(/-b\d+$/, '') : branch.id)
         : (branch?.slug || '');
 
       if (!tenantId) return;

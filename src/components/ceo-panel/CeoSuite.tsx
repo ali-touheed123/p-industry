@@ -188,12 +188,12 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
             boxSizing: 'border-box',
           }}
         >
-          {currentSection === 'overview'  && <OverviewView branch={selectedBranch} />}
-          {currentSection === 'sales'     && <SalesView branch={selectedBranch} />}
-          {currentSection === 'returns'   && <ReturnsView branch={selectedBranch} />}
-          {currentSection === 'day-close' && <DayCloseView branch={selectedBranch} />}
-          {currentSection === 'customers' && <CustomersView branch={selectedBranch} />}
-          {currentSection === 'purchase'  && <PurchaseView branch={selectedBranch} />}
+          {currentSection === 'overview'  && <OverviewView key={selectedBranch.id} branch={selectedBranch} />}
+          {currentSection === 'sales'     && <SalesView key={selectedBranch.id} branch={selectedBranch} />}
+          {currentSection === 'returns'   && <ReturnsView key={selectedBranch.id} branch={selectedBranch} />}
+          {currentSection === 'day-close' && <DayCloseView key={selectedBranch.id} branch={selectedBranch} />}
+          {currentSection === 'customers' && <CustomersView key={selectedBranch.id} branch={selectedBranch} />}
+          {currentSection === 'purchase'  && <PurchaseView key={selectedBranch.id} branch={selectedBranch} />}
           {currentSection === 'settings'  && <SettingsView tenant={tenant} />}
         </main>
       </div>
