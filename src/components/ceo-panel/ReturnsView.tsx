@@ -20,9 +20,13 @@ export const ReturnsView: React.FC<ReturnsViewProps> = ({ branch }) => {
   useEffect(() => {
     let isMounted = true;
     const fetchReturns = async () => {
+      const tenantId = branch?.id
+        ? (branch.id.includes('-b') ? branch.id.split('-b')[0] : branch.id)
+        : (branch?.slug || '');
+
+      if (!tenantId) return;
       setLoading(true);
       try {
-        const tenantId = branch.id.includes('-b') ? branch.id.split('-b')[0] : branch.id;
         const res = await fetch(`/api/invoices?tenant_id=${tenantId}&type=return`);
         const data = await res.json();
         if (isMounted && data.success && data.invoices) {
@@ -86,7 +90,7 @@ export const ReturnsView: React.FC<ReturnsViewProps> = ({ branch }) => {
     return () => {
       isMounted = false;
     };
-  }, [branch.id]);
+  }, [branch?.id, branch?.slug]);
 
   const filteredReturns = useMemo(() => {
     return returns.filter((ret) => {

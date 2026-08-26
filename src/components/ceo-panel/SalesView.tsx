@@ -24,14 +24,22 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
   useEffect(() => {
     let isMounted = true;
     const fetchInvoices = async () => {
+      const tenantId = branch?.id
+        ? (branch.id.includes('-b') ? branch.id.split('-b')[0] : branch.id)
+        : (branch?.slug || '');
+
+      if (!tenantId) return;
       setLoading(true);
       try {
-        const tenantId = branch.id.includes('-b') ? branch.id.split('-b')[0] : branch.id;
         const res = await fetch(`/api/invoices?tenant_id=${tenantId}`);
         const data = await res.json();
         if (isMounted && data.success && data.invoices) {
           const mapped: Invoice[] = data.invoices.map((inv: any) => {
             const rawItems = inv.invoice_items || inv.items || [];
+            let pMode: 'Cash' | 'Credit' | 'Bank/Card' = 'Cash';
+            if (inv.payment_type === 'credit') pMode = 'Credit';
+            else if (inv.payment_type === 'bank' || inv.payment_type === 'card' || inv.payment_type === 'cheque') pMode = 'Bank/Card';
+
             return {
               id: inv.id,
               invoiceNumber: inv.invoice_no || `INV-${inv.id}`,
@@ -40,7 +48,7 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
               customerName: inv.client_name || 'Walk-in Customer',
               customerId: inv.client_id || '',
               customerCategory: inv.client_id ? 'Contractor' : 'Retail',
-              paymentMode: inv.payment_type === 'credit' ? 'Credit' : (inv.payment_type === 'bank' || inv.payment_type === 'cheque') ? 'Bank/Card' : 'Cash',
+              paymentMode: pMode,
               grossAmount: Number(inv.subtotal || inv.net_total || 0),
               discountAmount: Number(inv.discount || 0),
               netAmount: Number(inv.net_total || 0),
@@ -73,7 +81,7 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
     return () => {
       isMounted = false;
     };
-  }, [branch.id]);
+  }, [branch?.id, branch?.slug]);
 
   const filteredInvoices = useMemo(() => {
     return invoices.filter((inv) => {

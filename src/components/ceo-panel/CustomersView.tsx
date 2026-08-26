@@ -20,10 +20,13 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ branch }) => {
   useEffect(() => {
     let isMounted = true;
     const fetchCustomers = async () => {
+      const tenantId = branch?.id
+        ? (branch.id.includes('-b') ? branch.id.split('-b')[0] : branch.id)
+        : (branch?.slug || '');
+
+      if (!tenantId) return;
       setLoading(true);
       try {
-        const tenantId = branch.id.includes('-b') ? branch.id.split('-b')[0] : branch.id;
-
         // Fetch clients, all invoices, and all receipt vouchers in parallel
         const [clientsRes, invoicesRes, vouchersRes] = await Promise.all([
           fetch(`/api/clients?tenant_id=${tenantId}`),
@@ -174,7 +177,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ branch }) => {
     return () => {
       isMounted = false;
     };
-  }, [branch.id, branch.city]);
+  }, [branch?.id, branch?.slug, branch?.city]);
 
 
   const filteredCustomers = useMemo(() => {

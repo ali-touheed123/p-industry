@@ -51,31 +51,41 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
   useEffect(() => {
     let isMounted = true;
     const fetchOverviewData = async () => {
+      const tenantId = branch?.id
+        ? (branch.id.includes('-b') ? branch.id.split('-b')[0] : branch.id)
+        : (branch?.slug || '');
+
+      if (!tenantId) return;
       setLoading(true);
+
       try {
-        const tenantId = branch.id.includes('-b') ? branch.id.split('-b')[0] : branch.id;
-        const [invoicesRes, expensesRes, itemsRes, tenantsRes] = await Promise.all([
-          fetch(`/api/invoices?tenant_id=${tenantId}`),
-          fetch(`/api/expenses?tenant_id=${tenantId}`),
-          fetch(`/api/items?tenant_id=${tenantId}`),
-          fetch(`/api/tenants`),
-        ]);
-
-        const [invoicesData, expensesData, itemsData, tenantsData] = await Promise.all([
-          invoicesRes.json(),
-          expensesRes.json(),
-          itemsRes.json(),
-          tenantsRes.json(),
-        ]);
-
-        if (isMounted) {
-          if (invoicesData.success && invoicesData.invoices) {
-            setInvoices(invoicesData.invoices);
+        // 1. Fetch Invoices
+        try {
+          const invRes = await fetch(`/api/invoices?tenant_id=${tenantId}`);
+          const invData = await invRes.json();
+          if (isMounted && invData.success && invData.invoices) {
+            setInvoices(invData.invoices);
           }
-          if (expensesData.success && expensesData.expenses) {
-            setExpensesList(expensesData.expenses);
+        } catch (err) {
+          console.error('Failed to load invoices for overview', err);
+        }
+
+        // 2. Fetch Expenses
+        try {
+          const expRes = await fetch(`/api/expenses?tenant_id=${tenantId}`);
+          const expData = await expRes.json();
+          if (isMounted && expData.success && expData.expenses) {
+            setExpensesList(expData.expenses);
           }
-          if (itemsData.success && itemsData.items) {
+        } catch (err) {
+          console.error('Failed to load expenses for overview', err);
+        }
+
+        // 3. Fetch Items
+        try {
+          const itemsRes = await fetch(`/api/items?tenant_id=${tenantId}`);
+          const itemsData = await itemsRes.json();
+          if (isMounted && itemsData.success && itemsData.items) {
             const map: Record<string, number> = {};
             itemsData.items.forEach((it: any) => {
               if (it.id) map[it.id] = Number(it.cost_price || 0);
@@ -83,18 +93,21 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
             });
             setItemsCostMap(map);
           }
-          if (tenantsData.success && tenantsData.tenants) {
-            const currentTenant = tenantsData.tenants.find((t: any) => t.id === tenantId || t.slug === branch.slug);
-            if (currentTenant) {
-              setCommissionConfig({
-                enabled: Boolean(currentTenant.commission_enabled),
-                rate: Number(currentTenant.commission_rate || 2.0),
-              });
-            }
-          }
+        } catch (err) {
+          console.error('Failed to load items for overview', err);
         }
-      } catch (err) {
-        console.error('Failed to load overview data', err);
+
+        // 4. Fetch Tenant commission config
+        try {
+          const tenantsRes = await fetch(`/api/tenants?slug=${branch?.slug || ''}`);
+          const tenantsData = await tenantsRes.json();
+          if (isMounted && tenantsData.success && tenantsData.tenant) {
+            setCommissionConfig({
+              enabled: Boolean(tenantsData.tenant.commission_enabled),
+              rate: Number(tenantsData.tenant.commission_rate || 2.0),
+            });
+          }
+        } catch {}
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -104,7 +117,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
     return () => {
       isMounted = false;
     };
-  }, [branch.id, branch.slug]);
+  }, [branch?.id, branch?.slug]);
 
   const allDailyRecords = useMemo(() => {
     if (!invoices || invoices.length === 0) return [];

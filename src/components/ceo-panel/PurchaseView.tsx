@@ -20,9 +20,13 @@ export const PurchaseView: React.FC<PurchaseViewProps> = ({ branch }) => {
   useEffect(() => {
     let isMounted = true;
     const fetchPurchases = async () => {
+      const tenantId = branch?.id
+        ? (branch.id.includes('-b') ? branch.id.split('-b')[0] : branch.id)
+        : (branch?.slug || '');
+
+      if (!tenantId) return;
       setLoading(true);
       try {
-        const tenantId = branch.id.includes('-b') ? branch.id.split('-b')[0] : branch.id;
         const [purchasesRes, suppliersRes] = await Promise.all([
           fetch(`/api/purchases?tenant_id=${tenantId}`),
           fetch(`/api/suppliers?tenant_id=${tenantId}`),
@@ -91,7 +95,7 @@ export const PurchaseView: React.FC<PurchaseViewProps> = ({ branch }) => {
     return () => {
       isMounted = false;
     };
-  }, [branch.id]);
+  }, [branch?.id, branch?.slug]);
 
   const filteredPurchases = useMemo(() => {
     return purchases.filter((p) => {

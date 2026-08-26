@@ -60,7 +60,9 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
         };
       });
       setBranches(multiBranches);
-      setSelectedBranch(null);
+      if (!selectedBranch) {
+        setSelectedBranch(multiBranches[0]);
+      }
     } else {
       const singleBranch: Branch = {
         id: tenant.id || tenant.slug,

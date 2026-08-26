@@ -17,30 +17,38 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
   useEffect(() => {
     let isMounted = true;
     const fetchShiftsAndExpenses = async () => {
+      const tenantId = branch?.id
+        ? (branch.id.includes('-b') ? branch.id.split('-b')[0] : branch.id)
+        : (branch?.slug || '');
+
+      if (!tenantId) return;
       setLoading(true);
       try {
-        const tenantId = branch.id.includes('-b') ? branch.id.split('-b')[0] : branch.id;
-        const [shiftsRes, expensesRes, invoicesRes, tenantsRes] = await Promise.all([
+        const [shiftsRes, expensesRes, invoicesRes] = await Promise.all([
           fetch(`/api/shifts?tenant_id=${tenantId}`),
           fetch(`/api/expenses?tenant_id=${tenantId}`),
           fetch(`/api/invoices?tenant_id=${tenantId}`),
-          fetch(`/api/tenants`),
         ]);
 
-        const [shiftsData, expensesData, invoicesData, tenantsData] = await Promise.all([
+        const [shiftsData, expensesData, invoicesData] = await Promise.all([
           shiftsRes.json(),
           expensesRes.json(),
           invoicesRes.json(),
-          tenantsRes.json(),
         ]);
 
         if (!isMounted) return;
 
+        let currentTenant: any = null;
+        try {
+          const tenantsRes = await fetch(`/api/tenants?slug=${branch?.slug || ''}`);
+          const tenantsData = await tenantsRes.json();
+          if (tenantsData.success && tenantsData.tenant) {
+            currentTenant = tenantsData.tenant;
+          }
+        } catch {}
+
         const allExpenses: any[] = expensesData.success ? (expensesData.expenses || []) : [];
         const allInvoices: any[] = invoicesData.success ? (invoicesData.invoices || []) : [];
-        const currentTenant = tenantsData.success && tenantsData.tenants
-          ? tenantsData.tenants.find((t: any) => t.id === tenantId || t.slug === branch.slug)
-          : null;
 
         const commEnabled = Boolean(currentTenant?.commission_enabled);
         const commRate = Number(currentTenant?.commission_rate || 2.0);
@@ -169,7 +177,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
     return () => {
       isMounted = false;
     };
-  }, [branch.id, branch.slug, selectedRecordId]);
+  }, [branch?.id, branch?.slug, selectedRecordId]);
 
   const activeRecord: DayCloseRecord | undefined = useMemo(() => {
     return shifts.find((r) => r.id === selectedRecordId) || shifts[0];
