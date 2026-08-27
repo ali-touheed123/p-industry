@@ -7,6 +7,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const tenantId = searchParams.get('tenant_id');
     const shiftId = searchParams.get('shift_id');
+    const clientId = searchParams.get('client_id');
     const invoiceType = searchParams.get('type');
     const startDate = searchParams.get('start_date');
     const endDate = searchParams.get('end_date');
@@ -25,6 +26,9 @@ export async function GET(req: NextRequest) {
       .order('created_at', { ascending: false })
       .limit(limit);
 
+    if (clientId) {
+      query = query.eq('client_id', clientId);
+    }
     if (shiftId) {
       query = query.eq('shift_id', shiftId);
     }
@@ -89,12 +93,60 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // 0. Ensure unique collision-safe invoice number
+    let finalInvoiceNo = invoice_no;
+    const { data: existingInv } = await supabaseAdmin
+      .from('invoices')
+      .select('id')
+      .eq('tenant_id', tenant_id)
+      .eq('invoice_no', finalInvoiceNo)
+      .maybeSingle();
+
+    if (existingInv) {
+      finalInvoiceNo = `${invoice_no}-${Date.now().toString().slice(-4)}`;
+    }
+
+    // 0.1 Backend Safeguard: Block credit sales for walk-in (no account) customers
+    const parsedDue = Number(due_amount) || 0;
+    if (!client_id && parsedDue > 0) {
+      return NextResponse.json(
+        { success: false, error: 'Cannot record a credit sale without a customer account' },
+        { status: 400 }
+      );
+    }
+
+    // 0.2 Backend Hard-Stop Credit Limit Validation
+    if (client_id && invoice_type !== 'return' && parsedDue > 0) {
+      const { data: clientRecord } = await supabaseAdmin
+        .from('clients')
+        .select('credit_limit, current_balance')
+        .eq('id', client_id)
+        .maybeSingle();
+
+      if (clientRecord) {
+        const currentBal = Number(clientRecord.current_balance) || 0;
+        const limit = Number(clientRecord.credit_limit) || 0;
+        const projectedBalance = currentBal + parsedDue;
+
+        if (limit > 0 && projectedBalance > limit) {
+          const availableLimit = Math.max(0, limit - currentBal);
+          return NextResponse.json(
+            {
+              success: false,
+              error: `Insufficient credit limit. Available limit: Rs. ${availableLimit.toLocaleString()}`,
+            },
+            { status: 400 }
+          );
+        }
+      }
+    }
+
     // 1. Insert Invoice Record
     const { data: invoice, error: invoiceErr } = await supabaseAdmin
       .from('invoices')
       .insert({
         tenant_id,
-        invoice_no,
+        invoice_no: finalInvoiceNo,
         client_id: client_id || null,
         client_name,
         shift_id: shift_id || null,
@@ -146,24 +198,27 @@ export async function POST(req: NextRequest) {
     // 3. Stock Adjustment
     const isReturn = invoice_type === 'return';
     for (const lineItem of invoiceItemsToInsert) {
+      let itemQuery = supabaseAdmin.from('items').select('id, stock_qty');
       if (lineItem.item_id) {
-        const { data: currentItem } = await supabaseAdmin
+        itemQuery = itemQuery.eq('id', lineItem.item_id);
+      } else if (lineItem.item_code) {
+        itemQuery = itemQuery.eq('tenant_id', tenant_id).eq('code', lineItem.item_code);
+      } else {
+        continue;
+      }
+
+      const { data: currentItem } = await itemQuery.maybeSingle();
+
+      if (currentItem) {
+        const currentQty = currentItem.stock_qty || 0;
+        const newQty = isReturn
+          ? currentQty + lineItem.qty
+          : Math.max(0, currentQty - lineItem.qty);
+
+        await supabaseAdmin
           .from('items')
-          .select('stock_qty')
-          .eq('id', lineItem.item_id)
-          .single();
-
-        if (currentItem) {
-          const currentQty = currentItem.stock_qty || 0;
-          const newQty = isReturn
-            ? currentQty + lineItem.qty
-            : Math.max(0, currentQty - lineItem.qty);
-
-          await supabaseAdmin
-            .from('items')
-            .update({ stock_qty: newQty })
-            .eq('id', lineItem.item_id);
-        }
+          .update({ stock_qty: newQty })
+          .eq('id', currentItem.id);
       }
     }
 
@@ -173,7 +228,7 @@ export async function POST(req: NextRequest) {
         .from('clients')
         .select('current_balance')
         .eq('id', client_id)
-        .single();
+        .maybeSingle();
 
       if (client) {
         const currentBal = client.current_balance || 0;
@@ -204,7 +259,7 @@ export async function POST(req: NextRequest) {
         entity_type: 'invoice',
         entity_id: invoice.id,
         details: {
-          invoice_no,
+          invoice_no: finalInvoiceNo,
           net_total,
           paid_amount,
           due_amount,

@@ -83,10 +83,10 @@ export default function PosBilling({
   pendingOrdersCount = 0,
   onNavigateToOrders,
 }: Props) {
-  // Mode toggle: Sales Invoice vs Credit Note (Return)
+  // Mode toggle: Sales Invoice vs Return
   const [invoiceType, setInvoiceType] = useState<'sales' | 'return'>('sales');
   const [invoiceNo, setInvoiceNo] = useState<string>(
-    () => `INV-${Math.floor(10000 + Math.random() * 90000)}`
+    () => `INV-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`
   );
   const [invoiceDate, setInvoiceDate] = useState<string>(
     () => new Date().toISOString().split('T')[0]
@@ -102,6 +102,12 @@ export default function PosBilling({
   const [newClientPhone, setNewClientPhone] = useState<string>('');
   const [remarks, setRemarks] = useState<string>('');
 
+  // Customer History Real Data State
+  const [clientHistory, setClientHistory] = useState<{ lastPurchase: string; totalSales: string }>({
+    lastPurchase: '—',
+    totalSales: '—',
+  });
+
   // Cart / Line items
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
 
@@ -115,8 +121,9 @@ export default function PosBilling({
   const [invoiceDiscount, setInvoiceDiscount] = useState<number>(0);
   const [deliveryCharge, setDeliveryCharge] = useState<number>(0);
 
-  // Payment Breakdown
+  // Payment Breakdown & Cash edit tracking
   const [cashPayment, setCashPayment] = useState<number>(0);
+  const [isCashManuallyEdited, setIsCashManuallyEdited] = useState<boolean>(false);
   const [cardPayment, setCardPayment] = useState<number>(0);
   const [bankPayment, setBankPayment] = useState<number>(0);
   const [othersPayment, setOthersPayment] = useState<number>(0);
@@ -131,6 +138,7 @@ export default function PosBilling({
   const [printReceiptData, setPrintReceiptData] = useState<any | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const prevLineItemsCountRef = useRef<number>(0);
 
   const showFeedback = (msg: string) => {
     setNotification(msg);
@@ -153,6 +161,53 @@ export default function PosBilling({
     };
     fetchClients();
   }, [tenantId]);
+
+  // Fetch real client invoice history when a client is selected
+  useEffect(() => {
+    if (!selectedClient || !tenantId) {
+      setClientHistory({ lastPurchase: '—', totalSales: '—' });
+      return;
+    }
+
+    const fetchClientHistory = async () => {
+      try {
+        const res = await fetch(`/api/invoices?tenant_id=${tenantId}&client_id=${selectedClient.id}&limit=100`);
+        const data = await res.json();
+        if (data.success && Array.isArray(data.invoices) && data.invoices.length > 0) {
+          const invoices = data.invoices;
+          const mostRecent = invoices[0];
+          let formattedDate = '—';
+          if (mostRecent?.date) {
+            const parsed = new Date(mostRecent.date);
+            formattedDate = isNaN(parsed.getTime())
+              ? mostRecent.date
+              : parsed.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+          }
+
+          const completedSales = invoices.filter((inv: any) => inv.status !== 'cancelled');
+          const sumSales = completedSales.reduce((acc: number, inv: any) => {
+            const net = Number(inv.net_total) || 0;
+            return inv.invoice_type === 'return' ? acc - net : acc + net;
+          }, 0);
+
+          setClientHistory({
+            lastPurchase: formattedDate,
+            totalSales: `Rs. ${Math.max(0, sumSales).toLocaleString()}`,
+          });
+        } else {
+          setClientHistory({
+            lastPurchase: 'No purchases yet',
+            totalSales: 'Rs. 0',
+          });
+        }
+      } catch (err) {
+        console.error('Failed to fetch client history', err);
+        setClientHistory({ lastPurchase: '—', totalSales: '—' });
+      }
+    };
+
+    fetchClientHistory();
+  }, [selectedClient, tenantId]);
 
   // 2. Fetch Persistent Parked Invoices from Supabase
   useEffect(() => {
@@ -209,6 +264,7 @@ export default function PosBilling({
       if (restoringHeldOrder.remarks) {
         setRemarks(restoringHeldOrder.remarks);
       }
+      setIsCashManuallyEdited(false);
       showFeedback(`Restored parked order ${restoringHeldOrder.hold_no || ''}.`);
       onClearRestoringHeldOrder?.();
     }
@@ -230,15 +286,18 @@ export default function PosBilling({
   const totalPaid = cashPayment + cardPayment + bankPayment + othersPayment;
   const balanceDue = netTotal - totalPaid;
 
-  // Auto-sync cash payment with netTotal when user adds/removes items if other payments are 0
+  // Auto-sync cash payment continuously whenever netTotal changes if not manually edited & no card/bank/others
   useEffect(() => {
-    if (cardPayment === 0 && bankPayment === 0 && othersPayment === 0) {
-      setCashPayment(netTotal);
+    if (cardPayment === 0 && bankPayment === 0 && othersPayment === 0 && !isCashManuallyEdited) {
+      if (lineItems.length > 0) {
+        setCashPayment(netTotal);
+      } else {
+        setCashPayment(0);
+      }
     }
-  }, [netTotal]);
+  }, [netTotal, lineItems.length, isCashManuallyEdited, cardPayment, bankPayment, othersPayment]);
 
   // Helper for shade info — always use the product's own shade_code from DB.
-  // No silent overrides: if shade_code is set, use it exactly as stored.
   const getShadeInfo = (item: Item) => {
     if (item.shade_code) {
       return { shadeCode: item.shade_code, shadeColorHex: item.shade_hex || '#94A3B8' };
@@ -246,23 +305,38 @@ export default function PosBilling({
     return { shadeCode: '—', shadeColorHex: '#94A3B8' };
   };
 
-  // Add Item to table
+  // Add Item to table with stock validation and immutable state updates
   const handleAddItem = (specificItem?: Item) => {
     const prod = specificItem || selectedProduct;
     if (!prod) {
-      if (filteredCatalog.length > 0) {
+      if (filteredCatalog.length === 1) {
         handleAddItem(filteredCatalog[0]);
       }
       return;
     }
 
-    const { shadeCode, shadeColorHex } = getShadeInfo(prod);
+    const requestedQty = Math.max(1, inputQty);
     const existingIndex = lineItems.findIndex((li) => li.item?.id === prod.id || li.code === prod.code);
+    const currentQtyInCart = existingIndex >= 0 ? lineItems[existingIndex].qty : 0;
+    const totalQtyRequested = currentQtyInCart + requestedQty;
+
+    // Stock validation for normal sales
+    if (invoiceType === 'sales') {
+      const availableStock = prod.stock_qty ?? 0;
+      if (totalQtyRequested > availableStock) {
+        showFeedback(`Insufficient stock! Available: ${availableStock} ${prod.unit || 'PCS'}`);
+        return;
+      }
+    }
+
+    const { shadeCode, shadeColorHex } = getShadeInfo(prod);
 
     if (existingIndex >= 0) {
-      const updated = [...lineItems];
-      updated[existingIndex].qty += Math.max(1, inputQty);
-      setLineItems(updated);
+      setLineItems((prev) =>
+        prev.map((li, idx) =>
+          idx === existingIndex ? { ...li, qty: li.qty + requestedQty } : li
+        )
+      );
     } else {
       const newLineItem: InvoiceLineItem = {
         id: `li-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
@@ -272,7 +346,7 @@ export default function PosBilling({
         shadeCode,
         shadeColorHex,
         packSize: prod.pack_size || prod.unit || 'Can',
-        qty: Math.max(1, inputQty),
+        qty: requestedQty,
         unit: prod.unit || 'PCS',
         rate: prod.retail_price || 0,
         discountPercent: 0,
@@ -287,7 +361,7 @@ export default function PosBilling({
   };
 
   const handleRemoveItem = (id: string) => {
-    setLineItems(lineItems.filter((i) => i.id !== id));
+    setLineItems((prev) => prev.filter((i) => i.id !== id));
   };
 
   const handleUpdateQty = (id: string, newQty: number) => {
@@ -295,7 +369,22 @@ export default function PosBilling({
       handleRemoveItem(id);
       return;
     }
-    setLineItems(lineItems.map((i) => (i.id === id ? { ...i, qty: newQty } : i)));
+
+    const targetItem = lineItems.find((i) => i.id === id);
+    if (!targetItem) return;
+
+    if (invoiceType === 'sales' && newQty > targetItem.qty) {
+      const productRecord = liveItems.find(
+        (p) => p.id === targetItem.item?.id || p.code === targetItem.code
+      ) || targetItem.item;
+      const availableStock = productRecord?.stock_qty ?? 0;
+      if (newQty > availableStock) {
+        showFeedback(`Cannot exceed available stock (${availableStock} ${targetItem.unit})`);
+        return;
+      }
+    }
+
+    setLineItems((prev) => prev.map((i) => (i.id === id ? { ...i, qty: newQty } : i)));
   };
 
   // Persistent Hold / Park Cart Mechanism
@@ -343,6 +432,7 @@ export default function PosBilling({
       setHeldOrders((prev) => [newHeld, ...prev]);
       setLineItems([]);
       setCashPayment(0);
+      setIsCashManuallyEdited(false);
       setCardPayment(0);
       setBankPayment(0);
       setOthersPayment(0);
@@ -361,6 +451,7 @@ export default function PosBilling({
     setCustomerSearch(order.customerName);
     setInvoiceType(order.invoiceType);
     setHeldOrders((prev) => prev.filter((o) => o.id !== order.id));
+    setIsCashManuallyEdited(false);
     setShowHeldModal(false);
 
     if (order.dbId) {
@@ -389,6 +480,7 @@ export default function PosBilling({
     if (lineItems.length === 0) return;
     setLineItems([]);
     setCashPayment(0);
+    setIsCashManuallyEdited(false);
     setCardPayment(0);
     setBankPayment(0);
     setOthersPayment(0);
@@ -406,10 +498,47 @@ export default function PosBilling({
     }
     setSubmitting(true);
 
-    const isCreditSale = balanceDue > 0;
-    const finalPaid = totalPaid;
-    const finalDue = Math.max(0, netTotal - finalPaid);
+    const roundedNetTotal = Math.round(netTotal * 100) / 100;
+    const computedTotalPaid = Math.round((cashPayment + cardPayment + bankPayment + othersPayment) * 100) / 100;
+    const rawDue = roundedNetTotal - computedTotalPaid;
+    const finalDue = rawDue > 0.01 ? Math.round(rawDue * 100) / 100 : 0;
+    const finalPaid = finalDue === 0 ? roundedNetTotal : computedTotalPaid;
+    const isCreditSale = finalDue > 0;
+
+    // Hard Stop: Block credit/debt sales for walk-in (no account) customers
+    if (!selectedClient && isCreditSale) {
+      showFeedback('Cannot sell on credit to a walk-in customer. Please select a registered customer account, or collect full payment before completing this sale.');
+      setSubmitting(false);
+      return;
+    }
+
+    // Hard Stop: Enforce Credit Limit for Client Sales on Credit
+    if (selectedClient && invoiceType === 'sales' && isCreditSale) {
+      const currentBal = Number(selectedClient.current_balance) || 0;
+      const limit = Number(selectedClient.credit_limit) || 0;
+      const projectedBalance = currentBal + finalDue;
+
+      if (limit > 0 && projectedBalance > limit) {
+        const availableLimit = Math.max(0, limit - currentBal);
+        showFeedback(`Insufficient credit limit. Available limit: Rs. ${availableLimit.toLocaleString()}`);
+        setSubmitting(false);
+        return;
+      }
+    }
+
     const customerDisplayName = selectedClient ? selectedClient.name : customerSearch || 'Walk-in Customer';
+
+    // Determine clean payment_type
+    let determinedPaymentType = 'cash';
+    if (isCreditSale) {
+      determinedPaymentType = finalPaid === 0 ? 'credit' : 'credit';
+    } else {
+      if (cardPayment > 0 && cardPayment >= finalPaid) determinedPaymentType = 'card';
+      else if (bankPayment > 0 && bankPayment >= finalPaid) determinedPaymentType = 'bank';
+      else if (othersPayment > 0 && othersPayment >= finalPaid) determinedPaymentType = 'others';
+      else if (cardPayment > 0 || bankPayment > 0 || othersPayment > 0) determinedPaymentType = 'split';
+      else determinedPaymentType = 'cash';
+    }
 
     const invoicePayload = {
       tenant_id: tenantId,
@@ -418,14 +547,14 @@ export default function PosBilling({
       client_name: customerDisplayName,
       shift_id: shiftId || null,
       subtotal: itemSubtotal,
-      discount: invoiceDiscount + totalItemDiscount,
+      discount: invoiceDiscount,
       delivery_charge: deliveryCharge,
       remarks: remarks || null,
       invoice_type: invoiceType,
-      net_total: netTotal,
+      net_total: roundedNetTotal,
       paid_amount: finalPaid,
       due_amount: finalDue,
-      payment_type: cardPayment > 0 ? 'card' : bankPayment > 0 ? 'bank' : othersPayment > 0 ? 'others' : isCreditSale ? 'credit' : 'cash',
+      payment_type: determinedPaymentType,
       cash_paid: cashPayment,
       card_paid: cardPayment,
       bank_paid: bankPayment,
@@ -456,11 +585,13 @@ export default function PosBilling({
 
       const data = await res.json();
       if (data.success) {
+        const finalServerInvoiceNo = data.invoice?.invoice_no || invoiceNo;
         const completedInvoice = {
           ...data.invoice,
+          invoice_no: finalServerInvoiceNo,
           grandTotal: netTotal,
           subTotal: itemSubtotal,
-          discount: invoiceDiscount + totalItemDiscount,
+          discount: invoiceDiscount,
           delivery_charge: deliveryCharge,
           paid_amount: finalPaid,
           due_amount: finalDue,
@@ -475,9 +606,9 @@ export default function PosBilling({
         onCompleteSale(completedInvoice);
         if (openPrint) {
           setPrintReceiptData(completedInvoice);
-          showFeedback(`Invoice ${invoiceNo} finalized & sent to thermal printer.`);
+          showFeedback(`Invoice ${finalServerInvoiceNo} finalized & sent to thermal printer.`);
         } else {
-          showFeedback(`Invoice ${invoiceNo} saved to database.`);
+          showFeedback(`Invoice ${finalServerInvoiceNo} saved to database.`);
         }
 
         // Reset state for next customer
@@ -485,13 +616,14 @@ export default function PosBilling({
         setSelectedClient(null);
         setCustomerSearch('Walk-in Customer');
         setCashPayment(0);
+        setIsCashManuallyEdited(false);
         setCardPayment(0);
         setBankPayment(0);
         setOthersPayment(0);
         setInvoiceDiscount(0);
         setDeliveryCharge(0);
         setRemarks('');
-        setInvoiceNo(`INV-${Math.floor(10000 + Math.random() * 90000)}`);
+        setInvoiceNo(`INV-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`);
       } else {
         alert(`Failed to save invoice: ${data.error || 'Unknown error'}`);
       }
@@ -528,7 +660,11 @@ export default function PosBilling({
         searchInputRef.current?.focus();
       } else if (e.key === 'F4') {
         e.preventDefault();
-        handleAddItem();
+        if (selectedProduct) {
+          handleAddItem(selectedProduct);
+        } else if (filteredCatalog.length === 1) {
+          handleAddItem(filteredCatalog[0]);
+        }
       } else if (e.key === 'F7') {
         e.preventDefault();
         handleHoldInvoice();
@@ -548,7 +684,7 @@ export default function PosBilling({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [lineItems, selectedClient, customerSearch, invoiceDiscount, deliveryCharge, cashPayment, cardPayment, bankPayment, othersPayment, submitting]);
+  }, [lineItems, selectedClient, customerSearch, invoiceDiscount, deliveryCharge, cashPayment, cardPayment, bankPayment, othersPayment, submitting, selectedProduct, filteredCatalog]);
 
   return (
     <section className="pos-screen">
@@ -622,9 +758,9 @@ export default function PosBilling({
 
         {/* Left Scrollable Work Area */}
         <div className="pos-workspace-body pos-workspace-scroll">
-          {/* Top Row: Segmented Toggle (Sales Invoice / Credit Note) + Invoice # / Date / Hold Button */}
+          {/* Top Row: Segmented Toggle (Sales Invoice / Return) + Invoice # / Date / Hold Button */}
           <div className="pos-card-box pos-row-between">
-            {/* Sales Invoice / Credit Note Toggle */}
+            {/* Sales Invoice / Return Toggle */}
             <div className="pos-segment-toggle">
               <button
                 type="button"
@@ -638,7 +774,7 @@ export default function PosBilling({
                 onClick={() => setInvoiceType('return')}
                 className={`pos-segment-btn ${invoiceType === 'return' ? 'active-return' : ''}`}
               >
-                Credit Note (Return)
+                Return
               </button>
             </div>
 
@@ -713,24 +849,24 @@ export default function PosBilling({
                   Customer History
                 </span>
                 <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#94A3B8' }}>
-                  {selectedClient ? 'NTN Verified' : 'Walk-in'}
+                  {selectedClient ? (selectedClient.code || '') : 'Walk-in'}
                 </span>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', paddingTop: '6px', borderTop: '1px solid #F1F5F9', fontSize: '12px' }}>
                 <div>
                   <div style={{ fontSize: '9px', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>Last Purchase</div>
                   <div style={{ fontWeight: 600, color: '#1E293B', fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {selectedClient ? '18 Oct 2026' : '—'}
+                    {selectedClient ? clientHistory.lastPurchase : '—'}
                   </div>
                 </div>
                 <div>
                   <div style={{ fontSize: '9px', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>Total Sales</div>
                   <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {selectedClient ? `Rs. ${(selectedClient.credit_limit || 125850).toLocaleString()}` : '—'}
+                    {selectedClient ? clientHistory.totalSales : '—'}
                   </div>
                 </div>
                 <div>
-                  <div style={{ fontSize: '9px', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>Outstanding</div>
+                  <div style={{ fontSize: '9px', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>Prior Outstanding</div>
                   <div style={{ fontWeight: 600, fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: selectedClient && selectedClient.current_balance > 0 ? '#DC2626' : '#16A34A' }}>
                     {selectedClient && selectedClient.current_balance > 0 ? `Rs. ${selectedClient.current_balance.toLocaleString()}` : 'Clear / No Overdue'}
                   </div>
@@ -769,7 +905,13 @@ export default function PosBilling({
                     setShowProductDropdown(true);
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleAddItem();
+                    if (e.key === 'Enter') {
+                      if (selectedProduct) {
+                        handleAddItem(selectedProduct);
+                      } else if (filteredCatalog.length === 1) {
+                        handleAddItem(filteredCatalog[0]);
+                      }
+                    }
                   }}
                   placeholder="Search product by name, code, barcode or shade... (F3)"
                   className="pos-text-input"
@@ -779,40 +921,50 @@ export default function PosBilling({
               </div>
 
               {/* Product Autocomplete Dropdown */}
-              {showProductDropdown && productQuery && filteredCatalog.length > 0 && (
+              {showProductDropdown && productQuery && (
                 <div className="pos-dropdown-panel">
-                  {filteredCatalog.map((prod) => {
-                    const { shadeCode, shadeColorHex } = getShadeInfo(prod);
-                    return (
-                      <div
-                        key={prod.id}
-                        onClick={() => {
-                          setSelectedProduct(prod);
-                          setProductQuery(`${prod.name} (${shadeCode})`);
-                          setShowProductDropdown(false);
-                          handleAddItem(prod);
-                        }}
-                        className="pos-dropdown-item"
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <div>
-                            <div style={{ fontWeight: 700, color: '#0F172A' }}>{prod.name}</div>
-                            <div style={{ fontSize: '11px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
-                              {prod.code} · {prod.pack_size || prod.unit || 'Can'} · {shadeCode}
+                  {liveItems.length === 0 ? (
+                    <div style={{ padding: '12px 14px', fontSize: '11px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', textAlign: 'center' }}>
+                      Loading catalog...
+                    </div>
+                  ) : filteredCatalog.length === 0 ? (
+                    <div style={{ padding: '12px 14px', fontSize: '11px', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace', textAlign: 'center' }}>
+                      No matching products found
+                    </div>
+                  ) : (
+                    filteredCatalog.map((prod) => {
+                      const { shadeCode, shadeColorHex } = getShadeInfo(prod);
+                      return (
+                        <div
+                          key={prod.id}
+                          onClick={() => {
+                            setSelectedProduct(prod);
+                            setProductQuery(`${prod.name} (${shadeCode})`);
+                            setShowProductDropdown(false);
+                            handleAddItem(prod);
+                          }}
+                          className="pos-dropdown-item"
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div>
+                              <div style={{ fontWeight: 700, color: '#0F172A' }}>{prod.name}</div>
+                              <div style={{ fontSize: '11px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
+                                {prod.code} · {prod.pack_size || prod.unit || 'Can'} · {shadeCode}
+                              </div>
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontWeight: 700, fontFamily: 'JetBrains Mono, monospace', color: '#0F172A' }}>
+                              Rs. {prod.retail_price.toLocaleString()}
+                            </div>
+                            <div style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B' }}>
+                              Stock: {prod.stock_qty} {prod.unit || 'PCS'}
                             </div>
                           </div>
                         </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontWeight: 700, fontFamily: 'JetBrains Mono, monospace', color: '#0F172A' }}>
-                            Rs. {prod.retail_price.toLocaleString()}
-                          </div>
-                          <div style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B' }}>
-                            Stock: {prod.stock_qty} {prod.unit || 'PCS'}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  )}
                 </div>
               )}
             </div>
@@ -834,7 +986,13 @@ export default function PosBilling({
             {/* Add Item Button */}
             <button
               type="button"
-              onClick={() => handleAddItem()}
+              onClick={() => {
+                if (selectedProduct) {
+                  handleAddItem(selectedProduct);
+                } else if (filteredCatalog.length === 1) {
+                  handleAddItem(filteredCatalog[0]);
+                }
+              }}
               style={{ padding: '8px 18px', background: '#F97316', color: '#ffffff', fontWeight: 700, fontSize: '12px', borderRadius: '8px', border: 'none', boxShadow: '0 2px 6px rgba(249,115,22,0.3)', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', flexShrink: 0 }}
             >
               <Plus style={{ width: 16, height: 16 }} />
@@ -921,27 +1079,39 @@ export default function PosBilling({
                             {item.rate.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                           </td>
                           <td style={{ textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', color: '#475569', whiteSpace: 'nowrap' }}>
-                            {item.discountPercent.toFixed(2)}
+                            <input
+                              type="number"
+                              min={0}
+                              max={100}
+                              step="any"
+                              value={item.discountPercent === 0 ? '' : item.discountPercent}
+                              placeholder="0"
+                              onChange={(e) => {
+                                const val = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
+                                setLineItems((prev) =>
+                                  prev.map((i) => (i.id === item.id ? { ...i, discountPercent: val } : i))
+                                );
+                              }}
+                              style={{
+                                width: '52px',
+                                textAlign: 'right',
+                                fontFamily: 'JetBrains Mono, monospace',
+                                color: '#1E293B',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                background: '#F8FAFC',
+                                border: '1px solid #E2E8F0',
+                                borderRadius: '4px',
+                                padding: '2px 4px',
+                                outline: 'none',
+                              }}
+                            />
                           </td>
                           <td style={{ textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A', whiteSpace: 'nowrap' }}>
                             {lineNet.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                           </td>
                           <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const newDisc = prompt('Enter Discount % for this item:', String(item.discountPercent));
-                                  if (newDisc !== null) {
-                                    const discNum = parseFloat(newDisc) || 0;
-                                    setLineItems(lineItems.map((i) => (i.id === item.id ? { ...i, discountPercent: discNum } : i)));
-                                  }
-                                }}
-                                style={{ padding: '4px', color: '#94A3B8', background: 'none', border: 'none', cursor: 'pointer', borderRadius: '4px' }}
-                                title="Edit Line Discount"
-                              >
-                                <Edit2 style={{ width: 14, height: 14 }} />
-                              </button>
                               <button
                                 type="button"
                                 onClick={() => handleRemoveItem(item.id)}
@@ -1048,7 +1218,10 @@ export default function PosBilling({
                 <input
                   type="number"
                   value={cashPayment}
-                  onChange={(e) => setCashPayment(Number(e.target.value) || 0)}
+                  onChange={(e) => {
+                    setIsCashManuallyEdited(true);
+                    setCashPayment(Number(e.target.value) || 0);
+                  }}
                 />
               </div>
 
@@ -1096,7 +1269,7 @@ export default function PosBilling({
                 </span>
               ) : (
                 <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#DC2626', background: '#FEE2E2', padding: '2px 8px', borderRadius: '6px', border: '1px solid #FECACA', fontSize: '11px' }}>
-                  Rs. {balanceDue.toLocaleString(undefined, { minimumFractionDigits: 2 })} (Credit)
+                  Rs. {balanceDue.toLocaleString(undefined, { minimumFractionDigits: 2 })} (Due)
                 </span>
               )}
             </div>
@@ -1203,37 +1376,43 @@ export default function PosBilling({
                   </span>
                 </div>
 
-                {clients
-                  .filter((c) =>
-                    c.name.toLowerCase().includes(clientSearchQuery.toLowerCase()) ||
-                    (c.phone && c.phone.includes(clientSearchQuery))
-                  )
-                  .map((client) => (
-                    <div
-                      key={client.id}
-                      onClick={() => {
-                        setSelectedClient(client);
-                        setCustomerSearch(client.name);
-                        setShowCustomerModal(false);
-                      }}
-                      style={{ padding: '10px 12px', borderBottom: '1px solid #F1F5F9', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px' }}
-                    >
-                      <div>
-                        <div style={{ fontWeight: 700, color: '#0F172A' }}>{client.name}</div>
-                        <div style={{ fontSize: '11px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
-                          {client.phone || 'No phone'} · {client.city || 'Pakistan'}
+                {clients.length === 0 ? (
+                  <div style={{ padding: '16px', textAlign: 'center', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', fontSize: '11px' }}>
+                    Loading customers...
+                  </div>
+                ) : (
+                  clients
+                    .filter((c) =>
+                      c.name.toLowerCase().includes(clientSearchQuery.toLowerCase()) ||
+                      (c.phone && c.phone.includes(clientSearchQuery))
+                    )
+                    .map((client) => (
+                      <div
+                        key={client.id}
+                        onClick={() => {
+                          setSelectedClient(client);
+                          setCustomerSearch(client.name);
+                          setShowCustomerModal(false);
+                        }}
+                        style={{ padding: '10px 12px', borderBottom: '1px solid #F1F5F9', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px' }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 700, color: '#0F172A' }}>{client.name}</div>
+                          <div style={{ fontSize: '11px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
+                            {client.phone || 'No phone'} · {client.city || 'Pakistan'}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A' }}>
+                            Limit: Rs. {(client.credit_limit || 0).toLocaleString()}
+                          </div>
+                          <div style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600, color: client.current_balance > 0 ? '#DC2626' : '#16A34A' }}>
+                            Balance: Rs. {(client.current_balance || 0).toLocaleString()}
+                          </div>
                         </div>
                       </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A' }}>
-                          Limit: Rs. {(client.credit_limit || 0).toLocaleString()}
-                        </div>
-                        <div style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600, color: client.current_balance > 0 ? '#DC2626' : '#16A34A' }}>
-                          Balance: Rs. {(client.current_balance || 0).toLocaleString()}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                    ))
+                )}
               </div>
 
               {/* Quick Add Client */}

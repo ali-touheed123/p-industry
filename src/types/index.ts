@@ -78,11 +78,12 @@ export interface Item {
   shade_hex?: string;
   cost_price: number;
   retail_price: number;
-  wholesale_price: number;
-  trade_price: number;
+  wholesale_price?: number;
+  trade_price?: number;
   stock_qty: number;
   min_stock_alert?: number;
   min_stock?: number;
+  location?: string;
   is_active?: boolean;
   created_at?: string;
 }
@@ -138,6 +139,7 @@ export interface Invoice {
   created_by?: string;
   created_at: string;
   items?: InvoiceItem[];
+  invoice_items?: InvoiceItem[];
 }
 
 export interface InvoiceItem {

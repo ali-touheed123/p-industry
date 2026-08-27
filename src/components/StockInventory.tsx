@@ -78,11 +78,10 @@ export default function StockInventory({
   const [formName, setFormName] = useState<string>('');
   const [formCategory, setFormCategory] = useState<string>('Interior Emulsion');
   const [formUnit, setFormUnit] = useState<string>('4L Gallon');
+  const [formLocation, setFormLocation] = useState<string>('Main Godown');
   const [formShadeCode, setFormShadeCode] = useState<string>('Off-White 101');
   const [formCostPrice, setFormCostPrice] = useState<string>('');
   const [formRetailPrice, setFormRetailPrice] = useState<string>('');
-  const [formWholesalePrice, setFormWholesalePrice] = useState<string>('');
-  const [formTradePrice, setFormTradePrice] = useState<string>('');
   const [formStockQty, setFormStockQty] = useState<string>('20');
   const [formMinAlert, setFormMinAlert] = useState<string>('5');
 
@@ -124,13 +123,14 @@ export default function StockInventory({
   const totalStockUnits = items.reduce((acc, p) => acc + (Number(p.stock_qty) || 0), 0);
   const lowStockCount = items.filter((p) => (p.stock_qty || 0) <= (p.min_stock_alert || p.min_stock || 5)).length;
   const totalValuation = items.reduce(
-    (acc, p) => acc + (Number(p.stock_qty) || 0) * (Number(p.wholesale_price || p.retail_price) || 0),
+    (acc, p) => acc + (Number(p.stock_qty) || 0) * (Number(p.cost_price) || 0),
     0
   );
 
   // Filter products
   const filteredProducts = items.filter((p) => {
     if (selectedCategory !== 'All' && p.category !== selectedCategory) return false;
+    if (selectedLocation !== 'All' && (p.location || 'Main Godown') !== selectedLocation) return false;
     const minAlert = p.min_stock_alert || p.min_stock || 5;
     if (stockStatus === 'low_stock' && p.stock_qty > minAlert) return false;
     if (stockStatus === 'in_stock' && p.stock_qty <= minAlert) return false;
@@ -177,11 +177,10 @@ export default function StockInventory({
     setFormName('');
     setFormCategory(allCategories[0] || 'Interior Emulsion');
     setFormUnit(allUnits[0] || '4L Gallon');
+    setFormLocation('Main Godown');
     setFormShadeCode('Off-White 101');
     setFormCostPrice('');
     setFormRetailPrice('');
-    setFormWholesalePrice('');
-    setFormTradePrice('');
     setFormStockQty('20');
     setFormMinAlert('5');
     setIsAddingNewCategory(false);
@@ -196,11 +195,10 @@ export default function StockInventory({
     setFormName(item.name);
     setFormCategory(item.category || allCategories[0]);
     setFormUnit(item.pack_size || item.unit || allUnits[0]);
+    setFormLocation(item.location || 'Main Godown');
     setFormShadeCode(item.shade_code || 'Standard');
     setFormCostPrice(item.cost_price?.toString() || '');
     setFormRetailPrice(item.retail_price?.toString() || '');
-    setFormWholesalePrice(item.wholesale_price?.toString() || '');
-    setFormTradePrice(item.trade_price?.toString() || '');
     setFormStockQty(item.stock_qty?.toString() || '0');
     setFormMinAlert((item.min_stock_alert || item.min_stock || 5).toString());
     setIsAddingNewCategory(false);
@@ -246,24 +244,32 @@ export default function StockInventory({
       return;
     }
 
+    const normalizedCode = formCode.trim().toUpperCase();
+
+    // Check duplicate SKU / Product Code
+    const duplicate = items.find(
+      (it) => it.code?.trim().toUpperCase() === normalizedCode && it.id !== editingItemId
+    );
+    if (duplicate) {
+      alert('A product with this code already exists.');
+      return;
+    }
+
     setSubmitting(true);
     const retail = Number(formRetailPrice) || 0;
     const cost = Number(formCostPrice) || Math.round(retail * 0.75);
-    const wholesale = Number(formWholesalePrice) || Math.round(retail * 0.9);
-    const trade = Number(formTradePrice) || Math.round(retail * 0.85);
 
     const payload = {
       tenant_id: tenantId,
-      code: formCode.trim().toUpperCase(),
+      code: normalizedCode,
       name: formName.trim(),
       category: formCategory,
       unit: formUnit,
       pack_size: formUnit,
+      location: formLocation || 'Main Godown',
       shade_code: formShadeCode.trim() || 'Standard',
       cost_price: cost,
       retail_price: retail,
-      wholesale_price: wholesale,
-      trade_price: trade,
       stock_qty: Number(formStockQty) || 0,
       min_stock_alert: Number(formMinAlert) || 5,
     };
@@ -309,22 +315,31 @@ export default function StockInventory({
 
   // Confirm Inward Goods Receipt (GRN)
   const handleConfirmReceive = async () => {
-    if (!selectedProdForReceive || receiveQty <= 0) return;
+    if (!selectedProdForReceive || receiveQty <= 0 || !tenantId) return;
     setSubmitting(true);
 
     const prod = items.find((i) => i.id === selectedProdForReceive);
-    if (!prod) return;
+    if (!prod) {
+      setSubmitting(false);
+      return;
+    }
 
     try {
-      const newStock = (prod.stock_qty || 0) + receiveQty;
-      const res = await fetch('/api/items', {
-        method: 'PATCH',
+      const res = await fetch('/api/items/receive', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: prod.id, stock_qty: newStock }),
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          item_id: prod.id,
+          qty: receiveQty,
+          batch_no: receiveBatchNo.trim(),
+          supplier_bill_ref: supplierBillRef.trim(),
+          received_by: tenantName || 'Inventory Staff',
+        }),
       });
       const data = await res.json();
       if (data.success) {
-        showToast(`Received ${receiveQty} units of ${prod.name}! (Batch: ${receiveBatchNo})`);
+        showToast(`Received ${receiveQty} units of ${prod.name}! (${data.grn_no || 'GRN Saved'})`);
         setShowReceiveModal(false);
         onStockUpdated?.();
       } else {
@@ -340,7 +355,7 @@ export default function StockInventory({
   // Export CSV
   const handleExportCSV = () => {
     if (items.length === 0) return;
-    const headers = ['Code', 'Product Name', 'Category', 'Pack Size', 'Shade', 'Stock Qty', 'Retail Price', 'Wholesale Price'];
+    const headers = ['Code', 'Product Name', 'Category', 'Pack Size', 'Shade', 'Stock Qty', 'Retail Price'];
     const rows = items.map((i) => [
       i.code,
       `"${i.name.replace(/"/g, '""')}"`,
@@ -349,7 +364,6 @@ export default function StockInventory({
       i.shade_code || 'Standard',
       i.stock_qty,
       i.retail_price,
-      i.wholesale_price,
     ]);
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
     const encodedUri = encodeURI(csvContent);
@@ -394,7 +408,7 @@ export default function StockInventory({
 
         <div className="inv-kpi-card">
           <p className="inv-kpi-label">
-            Stock Valuation (Wholesale)
+            Stock Valuation (Cost)
           </p>
           <p className="inv-kpi-val">
             Rs. {(totalValuation / 100000).toFixed(2)} Lac
@@ -597,7 +611,7 @@ export default function StockInventory({
                   <th onClick={() => handleSort('stock_qty')} style={{ textAlign: 'right', cursor: 'pointer' }}>
                     Stock {sortField === 'stock_qty' && (sortAsc ? '▲' : '▼')}
                   </th>
-                  <th style={{ textAlign: 'right' }}>Retail / WS / Trade</th>
+                  <th style={{ textAlign: 'right' }}>Retail Price</th>
                   <th style={{ textAlign: 'center' }}>Status</th>
                   <th style={{ textAlign: 'center' }}>Edit</th>
                 </tr>
@@ -645,16 +659,10 @@ export default function StockInventory({
                             Min: {minAlert}
                           </span>
                         </td>
-                        {/* Prices stacked */}
-                        <td style={{ textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', lineHeight: 1.55 }}>
-                          <span style={{ fontWeight: 700, color: '#0F172A', display: 'block', fontSize: '12px' }}>
-                            {Number(prod.retail_price).toLocaleString()}
-                          </span>
-                          <span style={{ color: '#64748B', display: 'block', fontSize: '11px' }}>
-                            {Number(prod.wholesale_price || prod.retail_price).toLocaleString()}
-                          </span>
-                          <span style={{ color: '#94A3B8', display: 'block', fontSize: '11px' }}>
-                            {Number(prod.trade_price || prod.retail_price).toLocaleString()}
+                        {/* Retail Price only */}
+                        <td style={{ textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>
+                          <span style={{ fontWeight: 700, color: '#0F172A', fontSize: '12px' }}>
+                            Rs. {Number(prod.retail_price).toLocaleString()}
                           </span>
                         </td>
                         {/* Status */}
@@ -868,12 +876,31 @@ export default function StockInventory({
                 />
               </div>
 
-              {/* 3-Tier Price Matrix */}
+              {/* Godown Location */}
+              <div>
+                <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  Godown / Location
+                </label>
+                <select
+                  value={formLocation}
+                  onChange={(e) => setFormLocation(e.target.value)}
+                  className="pos-text-input"
+                  style={{ fontWeight: 500 }}
+                >
+                  {locations.filter((l) => l !== 'All').map((loc) => (
+                    <option key={loc} value={loc}>
+                      {loc}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Price Matrix (Cost & Retail only, 2 columns) */}
               <div>
                 <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
                   Price Matrix (PKR)
                 </label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
                   <div>
                     <label style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B', display: 'block', marginBottom: '2px' }}>Cost</label>
                     <input
@@ -882,7 +909,7 @@ export default function StockInventory({
                       onChange={(e) => setFormCostPrice(e.target.value)}
                       placeholder="0.00"
                       className="pos-text-input"
-                      style={{ textAlign: 'right', fontWeight: 700 }}
+                      style={{ fontWeight: 700 }}
                     />
                   </div>
                   <div>
@@ -894,35 +921,13 @@ export default function StockInventory({
                       onChange={(e) => setFormRetailPrice(e.target.value)}
                       placeholder="0.00"
                       className="pos-text-input"
-                      style={{ textAlign: 'right', fontWeight: 700, borderColor: '#F97316' }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B', display: 'block', marginBottom: '2px' }}>Wholesale</label>
-                    <input
-                      type="number"
-                      value={formWholesalePrice}
-                      onChange={(e) => setFormWholesalePrice(e.target.value)}
-                      placeholder="0.00"
-                      className="pos-text-input"
-                      style={{ textAlign: 'right', fontWeight: 700 }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B', display: 'block', marginBottom: '2px' }}>Trade</label>
-                    <input
-                      type="number"
-                      value={formTradePrice}
-                      onChange={(e) => setFormTradePrice(e.target.value)}
-                      placeholder="0.00"
-                      className="pos-text-input"
-                      style={{ textAlign: 'right', fontWeight: 700 }}
+                      style={{ fontWeight: 700 }}
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Stock Qty & Low Alert */}
+              {/* Stock Qty & Low Alert with min="0" validation */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                 <div>
                   <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
@@ -930,6 +935,7 @@ export default function StockInventory({
                   </label>
                   <input
                     type="number"
+                    min="0"
                     value={formStockQty}
                     onChange={(e) => setFormStockQty(e.target.value)}
                     className="pos-text-input"
@@ -942,6 +948,7 @@ export default function StockInventory({
                   </label>
                   <input
                     type="number"
+                    min="0"
                     value={formMinAlert}
                     onChange={(e) => setFormMinAlert(e.target.value)}
                     className="pos-text-input"
@@ -983,7 +990,7 @@ export default function StockInventory({
                   Inward Goods Receipt (GRN)
                 </h3>
                 <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B' }}>
-                  GRN-{new Date().getFullYear()}-891
+                  GRN Reference (Auto-Sequenced on Save)
                 </span>
               </div>
               <button

@@ -34,6 +34,11 @@ export default function FinancialLedgers({
   const [searchQuery, setSearchQuery] = useState('');
   const [dateFilter, setDateFilter] = useState('All Transactions');
 
+  // Edit Credit Limit State
+  const [isEditingLimit, setIsEditingLimit] = useState(false);
+  const [editLimitValue, setEditLimitValue] = useState('');
+  const [savingLimit, setSavingLimit] = useState(false);
+
   // Record Receipt Modal State
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [receiptAmount, setReceiptAmount] = useState('');
@@ -59,8 +64,12 @@ export default function FinancialLedgers({
         const data = await res.json();
         if (data.success) {
           setClients(data.clients || []);
-          if (data.clients?.length > 0 && !selectedParty) {
-            setSelectedParty(data.clients[0]);
+          if (data.clients?.length > 0) {
+            setSelectedParty((prev: any) => {
+              if (!prev) return data.clients[0];
+              const updated = data.clients.find((c: any) => c.id === prev.id);
+              return updated || data.clients[0];
+            });
           }
         }
       } else {
@@ -69,7 +78,11 @@ export default function FinancialLedgers({
         if (data.success) {
           setSuppliers(data.suppliers || []);
           if (data.suppliers?.length > 0) {
-            setSelectedParty(data.suppliers[0]);
+            setSelectedParty((prev: any) => {
+              if (!prev) return data.suppliers[0];
+              const updated = data.suppliers.find((s: any) => s.id === prev.id);
+              return updated || data.suppliers[0];
+            });
           }
         }
       }
@@ -107,10 +120,11 @@ export default function FinancialLedgers({
   useEffect(() => {
     if (selectedParty?.id) {
       fetchLedgerStatement(selectedParty.id);
+      setIsEditingLimit(false);
     }
-  }, [selectedParty, activeTab]);
+  }, [selectedParty?.id, activeTab]);
 
-  // Record Payment Receipt
+  // Record Payment Receipt / Payment with structured payment_mode
   const handleRecordReceipt = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!receiptAmount || !selectedParty || !tenantId) return;
@@ -128,7 +142,8 @@ export default function FinancialLedgers({
           party_id: selectedParty.id,
           party_name: selectedParty.name,
           amount: parseFloat(receiptAmount) || 0,
-          remarks: `${paymentMode} ${refNotes ? `— ${refNotes}` : ''}`,
+          payment_mode: paymentMode,
+          remarks: refNotes || null,
           created_by: staffName,
         }),
       });
@@ -151,6 +166,36 @@ export default function FinancialLedgers({
     }
   };
 
+  // Update Client Credit Limit
+  const handleUpdateCreditLimit = async () => {
+    if (!selectedParty || !tenantId || activeTab !== 'clients') return;
+    setSavingLimit(true);
+    try {
+      const newLimit = parseFloat(editLimitValue) || 0;
+      const res = await fetch('/api/clients', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: selectedParty.id,
+          tenant_id: tenantId,
+          credit_limit: newLimit,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.client) {
+        setSelectedParty((prev: any) => ({ ...prev, credit_limit: newLimit }));
+        setClients((prev) =>
+          prev.map((c) => (c.id === selectedParty.id ? { ...c, credit_limit: newLimit } : c))
+        );
+        setIsEditingLimit(false);
+      }
+    } catch (err) {
+      console.error('Failed to update credit limit', err);
+    } finally {
+      setSavingLimit(false);
+    }
+  };
+
   // Create New Client / Supplier
   const handleCreateParty = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -165,6 +210,7 @@ export default function FinancialLedgers({
             name: newPartyName,
             phone: newPartyPhone,
             address: newPartyAddress,
+            city: newPartyAddress,
             credit_limit: parseFloat(newPartyLimit) || 50000,
           }
         : {
@@ -172,6 +218,7 @@ export default function FinancialLedgers({
             name: newPartyName,
             phone: newPartyPhone,
             address: newPartyAddress,
+            city: newPartyAddress,
           };
 
       const res = await fetch(endpoint, {
@@ -197,19 +244,28 @@ export default function FinancialLedgers({
     }
   };
 
-  // WhatsApp Statement Reminder
+  // WhatsApp Statement Reminder (Respecting Clients vs Suppliers)
   const handleSendWhatsAppLedger = () => {
     if (!selectedParty) return;
     const balance = selectedParty.current_balance || 0;
-    const message = `*${tenantName} — Account Statement Summary*\n` +
-      `Party: ${selectedParty.name} (${selectedParty.code || ''})\n` +
-      `Date: ${new Date().toLocaleDateString()}\n` +
-      `--------------------------------\n` +
-      `*Total Outstanding Balance:* Rs. ${balance.toLocaleString()}\n` +
-      (activeTab === 'clients' ? `Credit Limit: Rs. ${(selectedParty.credit_limit || 50000).toLocaleString()}\n` : '') +
-      `--------------------------------\n` +
-      `Please clear the outstanding balance at your earliest convenience.\n` +
-      `Thank you!`;
+    const message = activeTab === 'clients'
+      ? `*${tenantName} — Account Statement Summary*\n` +
+        `Party: ${selectedParty.name} (${selectedParty.code || '—'})\n` +
+        `Date: ${new Date().toLocaleDateString()}\n` +
+        `--------------------------------\n` +
+        `*Total Outstanding Balance:* Rs. ${balance.toLocaleString()}\n` +
+        (selectedParty.credit_limit ? `Credit Limit: Rs. ${selectedParty.credit_limit.toLocaleString()}\n` : '') +
+        `--------------------------------\n` +
+        `Please clear the outstanding balance at your earliest convenience.\n` +
+        `Thank you!`
+      : `*${tenantName} — Supplier Statement Summary*\n` +
+        `Party: ${selectedParty.name} (${selectedParty.code || '—'})\n` +
+        `Date: ${new Date().toLocaleDateString()}\n` +
+        `--------------------------------\n` +
+        `*Our Current Payable Balance:* Rs. ${balance.toLocaleString()}\n` +
+        `--------------------------------\n` +
+        `Please find our current outstanding balance with your business above.\n` +
+        `Thank you for your continued partnership!`;
 
     const phone = selectedParty.phone?.replace(/[^0-9]/g, '') || '';
     const url = phone
@@ -226,15 +282,73 @@ export default function FinancialLedgers({
     p.phone?.includes(searchQuery)
   );
 
-  const totalDebit = statement.reduce((s, t) => s + t.debit, 0);
-  const totalCredit = statement.reduce((s, t) => s + t.credit, 0);
+  // Date Filter Logic (All Transactions / Last 30 Days / This Quarter)
+  const filteredStatement = statement.filter((t) => {
+    if (dateFilter === 'All Transactions') return true;
+    if (!t.date) return true;
+    const tDate = new Date(t.date);
+    if (isNaN(tDate.getTime())) return true;
+    const now = new Date();
+    if (dateFilter === 'Last 30 Days') {
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      return tDate >= thirtyDaysAgo;
+    }
+    if (dateFilter === 'This Quarter') {
+      const quarterMonth = Math.floor(now.getMonth() / 3) * 3;
+      const startOfQuarter = new Date(now.getFullYear(), quarterMonth, 1);
+      return tDate >= startOfQuarter;
+    }
+    return true;
+  });
+
+  const totalDebit = filteredStatement.reduce((s, t) => s + t.debit, 0);
+  const totalCredit = filteredStatement.reduce((s, t) => s + t.credit, 0);
+
+  // Balance & Reconciliation
   const currentPartyBalance = selectedParty?.current_balance || 0;
-  const creditLimit = selectedParty?.credit_limit || 50000;
-  const utilizationPct = Math.min(100, Math.round((currentPartyBalance / creditLimit) * 100));
+  const fullDebit = statement.reduce((s, t) => s + t.debit, 0);
+  const fullCredit = statement.reduce((s, t) => s + t.credit, 0);
+  const calculatedStatementNet = fullDebit - fullCredit;
+  const hasReconciliationVariance = statement.length > 0 && Math.abs(currentPartyBalance - calculatedStatementNet) > 0.01;
+
+  // Consistent 80% threshold
+  const OVERDUE_THRESHOLD = 0.8;
+  const creditLimit = selectedParty?.credit_limit || 0;
+  const hasCreditLimit = activeTab === 'clients' && creditLimit > 0;
+  const utilizationPct = hasCreditLimit ? Math.min(100, Math.round((currentPartyBalance / creditLimit) * 100)) : 0;
+  const exceedsThreshold = hasCreditLimit && currentPartyBalance >= creditLimit * OVERDUE_THRESHOLD;
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr 320px', gap: '1.25rem', height: 'calc(100vh - var(--topbar-height) - 2 * var(--gutter))', overflow: 'hidden' }}>
       
+      {/* Print Styles for Isolated Ledger Statement */}
+      <style>{`
+        @media print {
+          body * {
+            visibility: hidden !important;
+          }
+          #printable-ledger-statement, #printable-ledger-statement * {
+            visibility: visible !important;
+          }
+          #printable-ledger-statement {
+            position: fixed !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            height: auto !important;
+            background: #ffffff !important;
+            color: #0f172a !important;
+            padding: 24px !important;
+            margin: 0 !important;
+            z-index: 999999 !important;
+            overflow: visible !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+        }
+      `}</style>
+
       {/* ── Left Col: Directory Panel ── */}
       <div className="card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ padding: '1rem', borderBottom: '1px solid var(--outline-variant)', background: 'var(--surface)' }}>
@@ -282,8 +396,8 @@ export default function FinancialLedgers({
           {filteredParties.map(party => {
             const isSelected = selectedParty?.id === party.id;
             const bal = party.current_balance || 0;
-            const partyLimit = 'credit_limit' in party ? ((party as any).credit_limit || 50000) : 50000;
-            const isOverdue = activeTab === 'clients' && bal > partyLimit * 0.8;
+            const partyLimit = 'credit_limit' in party ? (party as any).credit_limit : null;
+            const isOverdue = activeTab === 'clients' && partyLimit && partyLimit > 0 && bal > partyLimit * OVERDUE_THRESHOLD;
             return (
               <div
                 key={party.id}
@@ -313,7 +427,7 @@ export default function FinancialLedgers({
                   </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--on-surface-variant)' }}>
-                  <span>ID: {party.code || 'ID-001'}</span>
+                  <span>ID: {party.code || '—'}</span>
                   <span className="font-mono font-bold" style={{ color: isOverdue ? 'var(--error)' : 'inherit', fontSize: '12px' }}>
                     Rs. {bal.toLocaleString()}
                   </span>
@@ -332,7 +446,7 @@ export default function FinancialLedgers({
       {/* ── Middle Col: Statement of Account Table ── */}
       <div className="card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {selectedParty ? (
-          <>
+          <div id="printable-ledger-statement" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
             {/* Party Details Header */}
             <div style={{ padding: '1.25rem', borderBottom: '1px solid var(--outline-variant)', background: 'var(--surface-container-lowest)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
@@ -341,19 +455,19 @@ export default function FinancialLedgers({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '12px', color: 'var(--on-surface-variant)', flexWrap: 'wrap' }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <span className="material-symbols-outlined" style={{ fontSize: 16 }}>location_on</span>
-                      {selectedParty.address || selectedParty.city || 'Commercial Market'}
+                      {selectedParty.address || selectedParty.city || '—'}
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <span className="material-symbols-outlined" style={{ fontSize: 16 }}>call</span>
-                      {selectedParty.phone || '0300-1234567'}
+                      {selectedParty.phone || '—'}
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <span className="material-symbols-outlined" style={{ fontSize: 16 }}>fingerprint</span>
-                      Code: {selectedParty.code}
+                      Code: {selectedParty.code || '—'}
                     </span>
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <span className="badge badge-premium">{activeTab === 'clients' ? 'CLIENT ACCOUNT' : 'SUPPLIER'}</span>
                   <button onClick={() => window.print()} className="btn btn-secondary-outline btn-icon" title="Print Ledger Statement">
                     <span className="material-symbols-outlined" style={{ fontSize: 18 }}>picture_as_pdf</span>
@@ -368,7 +482,7 @@ export default function FinancialLedgers({
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '0.75rem', borderTop: '1px solid var(--outline-variant)' }}>
                 <span style={{ fontWeight: 600, fontSize: '13px' }}>Statement of Account</span>
                 <select
-                  className="form-select"
+                  className="form-select no-print"
                   value={dateFilter}
                   onChange={e => setDateFilter(e.target.value)}
                   style={{ height: '32px', fontSize: '12px', width: '150px' }}
@@ -387,10 +501,10 @@ export default function FinancialLedgers({
                   <div className="spinner" style={{ margin: '0 auto 0.5rem' }} />
                   Loading transactions...
                 </div>
-              ) : statement.length === 0 ? (
+              ) : filteredStatement.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--on-surface-variant)', fontSize: '13px' }}>
                   <span className="material-symbols-outlined" style={{ fontSize: 36, marginBottom: '0.5rem', display: 'block', color: 'var(--outline-variant)' }}>receipt_long</span>
-                  No transaction history recorded yet for this account.
+                  No transaction history recorded for this selection.
                 </div>
               ) : (
                 <table className="data-table">
@@ -405,7 +519,7 @@ export default function FinancialLedgers({
                     </tr>
                   </thead>
                   <tbody>
-                    {statement.map((t, idx) => (
+                    {filteredStatement.map((t, idx) => (
                       <tr key={idx}>
                         <td className="font-mono text-muted" style={{ fontSize: '12px' }}>{t.date}</td>
                         <td><span className={`badge ${t.typeClass}`}>{t.type}</span></td>
@@ -437,7 +551,7 @@ export default function FinancialLedgers({
                 <strong className="font-mono" style={{ color: '#065f46', marginLeft: '4px' }}>Rs. {totalCredit.toLocaleString()}</strong>
               </div>
             </div>
-          </>
+          </div>
         ) : (
           <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--on-surface-variant)' }}>
             Select a client or supplier from the directory.
@@ -480,10 +594,16 @@ export default function FinancialLedgers({
               <div className="font-mono" style={{ fontSize: '26px', fontWeight: 800, color: currentPartyBalance > 0 ? 'var(--error)' : '#065f46' }}>
                 Rs. {currentPartyBalance.toLocaleString()}
               </div>
-              {activeTab === 'clients' && currentPartyBalance >= creditLimit * 0.9 && (
+              {hasReconciliationVariance && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#b45309', background: '#fef3c7', border: '1px solid #fde68a', padding: '4px 8px', borderRadius: 'var(--radius-sm)', fontSize: '11px', fontWeight: 600, marginTop: '6px' }} title={`Calculated statement balance: Rs. ${calculatedStatementNet.toLocaleString()}`}>
+                  <span className="material-symbols-outlined" style={{ fontSize: 14 }}>info</span>
+                  Statement balance: Rs. {calculatedStatementNet.toLocaleString()}
+                </div>
+              )}
+              {exceedsThreshold && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--error)', fontSize: '12px', marginTop: '4px', fontWeight: 600 }}>
                   <span className="material-symbols-outlined" style={{ fontSize: 16 }}>warning</span>
-                  Exceeds credit threshold
+                  Exceeds credit threshold (80%)
                 </div>
               )}
             </div>
@@ -493,20 +613,71 @@ export default function FinancialLedgers({
               <div style={{ marginBottom: '1.25rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--on-surface-variant)', marginBottom: '6px' }}>
                   <span>CREDIT UTILIZATION</span>
-                  <strong className="font-mono">{utilizationPct}%</strong>
+                  <strong className="font-mono">{hasCreditLimit ? `${utilizationPct}%` : '—'}</strong>
                 </div>
-                <div style={{ height: '8px', background: 'var(--surface-container-high)', borderRadius: 'var(--radius-full)', overflow: 'hidden' }}>
-                  <div
-                    style={{
-                      height: '100%',
-                      width: `${utilizationPct}%`,
-                      background: utilizationPct > 85 ? 'var(--error)' : 'var(--secondary)',
-                      borderRadius: 'var(--radius-full)',
-                    }}
-                  />
-                </div>
-                <div style={{ fontSize: '11px', color: 'var(--on-surface-variant)', marginTop: '4px', textAlign: 'right' }}>
-                  Limit: Rs. {creditLimit.toLocaleString()}
+                {hasCreditLimit ? (
+                  <div style={{ height: '8px', background: 'var(--surface-container-high)', borderRadius: 'var(--radius-full)', overflow: 'hidden' }}>
+                    <div
+                      style={{
+                        height: '100%',
+                        width: `${utilizationPct}%`,
+                        background: utilizationPct > 80 ? 'var(--error)' : 'var(--secondary)',
+                        borderRadius: 'var(--radius-full)',
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '11px', color: 'var(--on-surface-variant)', fontStyle: 'italic' }}>
+                    No credit limit set
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--on-surface-variant)', marginTop: '6px' }}>
+                  {isEditingLimit ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', width: '100%' }}>
+                      <input
+                        type="number"
+                        className="form-input"
+                        style={{ height: '26px', fontSize: '11px', padding: '2px 6px', flex: 1 }}
+                        value={editLimitValue}
+                        onChange={(e) => setEditLimitValue(e.target.value)}
+                        placeholder="Enter limit"
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        onClick={handleUpdateCreditLimit}
+                        disabled={savingLimit}
+                        className="btn btn-primary"
+                        style={{ padding: '2px 6px', fontSize: '11px', height: '26px' }}
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingLimit(false)}
+                        className="btn btn-secondary-outline"
+                        style={{ padding: '2px 6px', fontSize: '11px', height: '26px' }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <span>Limit: Rs. {hasCreditLimit ? creditLimit.toLocaleString() : '0'}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditLimitValue(String(creditLimit || ''));
+                          setIsEditingLimit(true);
+                        }}
+                        style={{ background: 'none', border: 'none', color: 'var(--secondary)', cursor: 'pointer', fontSize: '11px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '2px', padding: 0 }}
+                        title="Edit Credit Limit"
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: 14 }}>edit</span>
+                        Edit Limit
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             )}
@@ -515,15 +686,15 @@ export default function FinancialLedgers({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem', borderTop: '1px solid var(--outline-variant)', paddingTop: '1rem', fontSize: '13px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span className="text-muted">Account Code:</span>
-                <strong className="font-mono">{selectedParty.code || 'CL-001'}</strong>
+                <strong className="font-mono">{selectedParty.code || '—'}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span className="text-muted">Phone Contact:</span>
-                <strong className="font-mono">{selectedParty.phone || '0300-1234567'}</strong>
+                <strong className="font-mono">{selectedParty.phone || '—'}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span className="text-muted">City / Location:</span>
-                <strong>{selectedParty.city || 'Lahore'}</strong>
+                <strong>{selectedParty.city || selectedParty.address || '—'}</strong>
               </div>
             </div>
           </div>

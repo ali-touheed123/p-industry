@@ -40,20 +40,34 @@ export default function SalesHistory({
   onNavigateToPos,
 }: Props) {
   // Date Helpers
-  const getTodayStr = () => new Date().toISOString().split('T')[0];
+  const getTodayStr = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
   const getYesterdayStr = () => {
     const d = new Date();
     d.setDate(d.getDate() - 1);
-    return d.toISOString().split('T')[0];
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   };
   const getSevenDaysAgoStr = () => {
     const d = new Date();
     d.setDate(d.getDate() - 6);
-    return d.toISOString().split('T')[0];
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   };
   const getMonthStartStr = () => {
     const d = new Date();
-    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}-01`;
   };
 
   // Filter States (Prominent Date Range Filter From / To above tables)
@@ -144,7 +158,8 @@ export default function SalesHistory({
         const matchNo = inv.invoice_no?.toLowerCase().includes(q);
         const matchClient = inv.client_name?.toLowerCase().includes(q);
         const matchRemarks = inv.remarks?.toLowerCase().includes(q);
-        const matchItem = inv.items?.some((it) =>
+        const invoiceItems = inv.invoice_items || inv.items;
+        const matchItem = invoiceItems?.some((it) =>
           it.item_name?.toLowerCase().includes(q) ||
           it.item_code?.toLowerCase().includes(q) ||
           it.shade_code?.toLowerCase().includes(q)
@@ -184,8 +199,9 @@ export default function SalesHistory({
         creditAmount += due;
       }
 
-      if (inv.items && inv.items.length) {
-        inv.items.forEach((it) => {
+      const invItems = inv.invoice_items || inv.items;
+      if (invItems && invItems.length) {
+        invItems.forEach((it) => {
           totalItemsCount += Number(it.qty || 0);
         });
       }
@@ -243,7 +259,7 @@ export default function SalesHistory({
         `"${inv.invoice_type === 'return' ? 'RETURN' : 'SALE'}"`,
         `"${inv.client_name || 'Walk-in Customer'}"`,
         `"${inv.payment_type?.toUpperCase() || 'CASH'}"`,
-        inv.items?.length || 0,
+        (inv.invoice_items || inv.items)?.length || 0,
         inv.subtotal || 0,
         inv.discount || 0,
         inv.delivery_charge || 0,
@@ -275,7 +291,7 @@ export default function SalesHistory({
     msg += `Date: ${inv.date}\n`;
     msg += `Customer: ${inv.client_name || 'Walk-in Customer'}\n\n`;
     msg += `*Items:*\n`;
-    (inv.items || []).forEach((it, idx) => {
+    ((inv.invoice_items || inv.items) || []).forEach((it, idx) => {
       msg += `${idx + 1}. ${it.item_name} ${it.shade_code ? `(${it.shade_code})` : ''} - ${it.qty} x Rs. ${it.unit_price} = Rs. ${it.total_price}\n`;
     });
     msg += `\n*Net Total:* Rs. ${Number(inv.net_total).toLocaleString()}\n`;
@@ -1024,14 +1040,14 @@ export default function SalesHistory({
                                     : '#6B21A8',
                               }}
                             >
-                              {inv.payment_type || 'cash'}
+                              {inv.payment_type === 'credit' ? 'ON ACCOUNT' : (inv.payment_type || 'cash')}
                             </span>
                           </td>
 
                           {/* Items Count */}
                           <td style={{ padding: '10px 14px', textAlign: 'center', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>
                             <span style={{ background: '#F1F5F9', padding: '2px 7px', borderRadius: '4px', border: '1px solid #E2E8F0' }}>
-                              {inv.items?.length || 0}
+                              {(inv.invoice_items || inv.items)?.length || 0}
                             </span>
                           </td>
 
@@ -1099,7 +1115,7 @@ export default function SalesHistory({
                                   : '#166534',
                               }}
                             >
-                              {isReturn ? 'RETURN' : Number(inv.due_amount) > 0 ? 'DUE / CREDIT' : 'PAID'}
+                              {isReturn ? 'RETURN' : Number(inv.due_amount) > 0 ? 'DUE' : 'PAID'}
                             </span>
                           </td>
 
@@ -1177,7 +1193,7 @@ export default function SalesHistory({
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                     <ShoppingBag style={{ width: 14, height: 14, color: '#F97316' }} />
                                     <span style={{ fontSize: '12px', fontWeight: 800, color: '#0F172A', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-                                      Purchased Items in {inv.invoice_no} ({inv.items?.length || 0} items)
+                                      Purchased Items in {inv.invoice_no} ({(inv.invoice_items || inv.items)?.length || 0} items)
                                     </span>
                                   </div>
                                   {inv.remarks && (
@@ -1200,8 +1216,8 @@ export default function SalesHistory({
                                     </tr>
                                   </thead>
                                   <tbody>
-                                    {inv.items && inv.items.length > 0 ? (
-                                      inv.items.map((item: InvoiceItem, itemIdx: number) => (
+                                    {(inv.invoice_items || inv.items) && (inv.invoice_items || inv.items)!.length > 0 ? (
+                                      (inv.invoice_items || inv.items)!.map((item: InvoiceItem, itemIdx: number) => (
                                         <tr key={item.id || itemIdx} style={{ borderBottom: '1px solid #F1F5F9' }}>
                                           <td style={{ padding: '6px 10px', fontWeight: 600, color: '#0F172A' }}>
                                             <span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#64748B', marginRight: '6px', fontSize: '11px' }}>
@@ -1379,7 +1395,7 @@ export default function SalesHistory({
                     Payment Mode
                   </span>
                   <div style={{ fontSize: '13px', fontWeight: 700, color: '#0F172A', textTransform: 'uppercase', marginTop: '2px' }}>
-                    {selectedInvoice.payment_type}
+                    {selectedInvoice.payment_type === 'credit' ? 'ON ACCOUNT' : selectedInvoice.payment_type}
                   </div>
                 </div>
 
@@ -1410,7 +1426,7 @@ export default function SalesHistory({
                       </tr>
                     </thead>
                     <tbody>
-                      {selectedInvoice.items?.map((it, idx) => (
+                      {(selectedInvoice.invoice_items || selectedInvoice.items)?.map((it, idx) => (
                         <tr key={idx} style={{ borderBottom: '1px solid #F1F5F9' }}>
                           <td style={{ padding: '8px 12px', fontWeight: 600, color: '#0F172A' }}>
                             {it.item_name} <span style={{ color: '#64748B', fontSize: '11px' }}>({it.pack_size || it.unit || 'Can'})</span>
@@ -1486,7 +1502,7 @@ export default function SalesHistory({
                 </div>
                 {Number(selectedInvoice.due_amount) > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#D97706', fontWeight: 700 }}>
-                    <span>Balance Due (Udhar):</span>
+                    <span>Invoice Balance Due:</span>
                     <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {Number(selectedInvoice.due_amount).toLocaleString()}</span>
                   </div>
                 )}
@@ -1612,7 +1628,7 @@ export default function SalesHistory({
 
             {/* Receipt Items */}
             <div style={{ borderBottom: '1px dashed #000', paddingBottom: '0.75rem', marginBottom: '0.75rem' }}>
-              {thermalPrintInvoice.items?.map((it, idx) => (
+              {(thermalPrintInvoice.invoice_items || thermalPrintInvoice.items)?.map((it, idx) => (
                 <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
                   <span>
                     {it.item_name} {it.shade_code ? `(${it.shade_code})` : ''} x{it.qty}

@@ -42,6 +42,7 @@ export async function POST(req: NextRequest) {
       party_id,
       party_name,
       amount,
+      payment_mode = 'Cash',
       remarks,
       created_by,
     } = body;
@@ -53,25 +54,40 @@ export async function POST(req: NextRequest) {
     const voucher_no = `${voucher_type === 'receipt' ? 'RCP' : 'PMT'}-${Math.floor(1000 + Math.random() * 9000)}`;
     const parsedAmt = Number(amount);
 
-    // 1. Insert Voucher
-    const { data: voucher, error: voucherErr } = await supabaseAdmin
+    // 1. Insert Voucher with resilient payment_mode handling
+    const voucherData: Record<string, any> = {
+      tenant_id,
+      voucher_no,
+      voucher_type,
+      party_type,
+      party_id,
+      party_name: party_name || '',
+      amount: parsedAmt,
+      payment_mode: payment_mode || 'Cash',
+      remarks: remarks || `${voucher_type === 'receipt' ? 'Payment Received' : 'Supplier Payment'}`,
+      created_by: created_by || null,
+      date: new Date().toISOString().split('T')[0],
+    };
+
+    let voucherInsertRes = await supabaseAdmin
       .from('vouchers')
-      .insert({
-        tenant_id,
-        voucher_no,
-        voucher_type,
-        party_type,
-        party_id,
-        party_name: party_name || '',
-        amount: parsedAmt,
-        remarks: remarks || `${voucher_type === 'receipt' ? 'Cash/Online Receipt' : 'Supplier Payment'}`,
-        created_by: created_by || null,
-        date: new Date().toISOString().split('T')[0],
-      })
+      .insert(voucherData)
       .select()
       .single();
 
-    if (voucherErr) throw voucherErr;
+    if (voucherInsertRes.error && voucherInsertRes.error.message.includes('payment_mode')) {
+      // In case column does not exist on table, fallback without payment_mode column
+      delete voucherData.payment_mode;
+      voucherData.remarks = `${payment_mode} ${remarks ? `— ${remarks}` : ''}`;
+      voucherInsertRes = await supabaseAdmin
+        .from('vouchers')
+        .insert(voucherData)
+        .select()
+        .single();
+    }
+
+    if (voucherInsertRes.error) throw voucherInsertRes.error;
+    const voucher = voucherInsertRes.data;
 
     // 2. Adjust Balance
     if (party_type === 'client') {

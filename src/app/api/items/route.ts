@@ -45,10 +45,28 @@ export async function POST(req: NextRequest) {
       shade_code,
       shade_hex,
       pack_size,
+      location = 'Main Godown',
     } = body;
 
     if (!tenant_id || !name || !code) {
       return NextResponse.json({ success: false, error: 'Tenant ID, Name and Item Code are required' }, { status: 400 });
+    }
+
+    const normalizedCode = code.trim().toUpperCase();
+
+    // 0. Uniqueness check for product code within this tenant
+    const { data: existingItem } = await supabaseAdmin
+      .from('items')
+      .select('id')
+      .eq('tenant_id', tenant_id)
+      .eq('code', normalizedCode)
+      .maybeSingle();
+
+    if (existingItem) {
+      return NextResponse.json(
+        { success: false, error: 'A product with this code already exists.' },
+        { status: 400 }
+      );
     }
 
     // 1. Insert item for the active branch
@@ -56,8 +74,8 @@ export async function POST(req: NextRequest) {
       .from('items')
       .insert({
         tenant_id,
-        code: code.trim().toUpperCase(),
-        name,
+        code: normalizedCode,
+        name: name.trim(),
         category: category || 'General',
         item_type,
         unit,
@@ -70,6 +88,7 @@ export async function POST(req: NextRequest) {
         trade_price: Number(trade_price) || 0,
         stock_qty: Number(stock_qty) || 0,
         min_stock_alert: Number(min_stock_alert) || 5,
+        location: location || 'Main Godown',
       })
       .select()
       .single();
@@ -104,14 +123,14 @@ export async function POST(req: NextRequest) {
             .from('items')
             .select('id')
             .eq('tenant_id', sister.id)
-            .eq('code', code.trim().toUpperCase())
+            .eq('code', normalizedCode)
             .maybeSingle();
 
           if (!existing) {
             await supabaseAdmin.from('items').insert({
               tenant_id: sister.id,
-              code: code.trim().toUpperCase(),
-              name,
+              code: normalizedCode,
+              name: name.trim(),
               category: category || 'General',
               item_type,
               unit,
@@ -124,6 +143,7 @@ export async function POST(req: NextRequest) {
               trade_price: Number(trade_price) || 0,
               stock_qty: 0, // Other branches start with 0 stock
               min_stock_alert: Number(min_stock_alert) || 5,
+              location: location || 'Main Godown',
             });
           }
         }
@@ -146,6 +166,25 @@ export async function PATCH(req: NextRequest) {
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Item ID required' }, { status: 400 });
+    }
+
+    if (updateFields.code && updateFields.tenant_id) {
+      const normalizedCode = updateFields.code.trim().toUpperCase();
+      const { data: existingItem } = await supabaseAdmin
+        .from('items')
+        .select('id')
+        .eq('tenant_id', updateFields.tenant_id)
+        .eq('code', normalizedCode)
+        .neq('id', id)
+        .maybeSingle();
+
+      if (existingItem) {
+        return NextResponse.json(
+          { success: false, error: 'A product with this code already exists.' },
+          { status: 400 }
+        );
+      }
+      updateFields.code = normalizedCode;
     }
 
     const { data: item, error } = await supabaseAdmin

@@ -69,3 +69,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
+
+// PATCH: Update client details (e.g. credit_limit, phone, address)
+export async function PATCH(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { id, tenant_id, credit_limit, name, phone, address, city } = body;
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Client ID is required' }, { status: 400 });
+    }
+
+    const updates: Record<string, any> = {};
+    if (credit_limit !== undefined) updates.credit_limit = Number(credit_limit);
+    if (name !== undefined) updates.name = name;
+    if (phone !== undefined) updates.phone = phone || null;
+    if (address !== undefined) updates.address = address || null;
+    if (city !== undefined) updates.city = city || null;
+
+    let query = supabaseAdmin.from('clients').update(updates).eq('id', id);
+    if (tenant_id) query = query.eq('tenant_id', tenant_id);
+
+    const { data: client, error } = await query.select().single();
+    if (error) throw error;
+
+    return NextResponse.json({ success: true, client });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
+
