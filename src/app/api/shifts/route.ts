@@ -7,9 +7,25 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const tenantId = searchParams.get('tenant_id');
     const status = searchParams.get('status');
+    const lastClosed = searchParams.get('last_closed'); // NEW: get last closed shift
 
     if (!tenantId) {
       return NextResponse.json({ success: false, error: 'Tenant ID required' }, { status: 400 });
+    }
+
+    // Special: return only last closed shift (for handover pre-fill)
+    if (lastClosed === '1') {
+      const { data: lastShift, error } = await supabaseAdmin
+        .from('shifts')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'closed')
+        .order('end_time', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) throw error;
+      return NextResponse.json({ success: true, lastClosedShift: lastShift || null });
     }
 
     let query = supabaseAdmin
@@ -35,11 +51,19 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST: Open a new shift
+// POST: Open a new shift (with handover tracking)
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { tenant_id, opened_by, opening_cash = 0, notes } = body;
+    const {
+      tenant_id,
+      opened_by,
+      opening_cash = 0,
+      previous_closing_cash = 0,
+      handover_variance = 0,
+      handover_notes,
+      notes,
+    } = body;
 
     if (!tenant_id) {
       return NextResponse.json({ success: false, error: 'Tenant ID required' }, { status: 400 });
@@ -51,6 +75,9 @@ export async function POST(req: NextRequest) {
         tenant_id,
         opened_by: opened_by || null,
         opening_cash: Number(opening_cash) || 0,
+        previous_closing_cash: Number(previous_closing_cash) || 0,
+        handover_variance: Number(handover_variance) || 0,
+        handover_notes: handover_notes || null,
         start_time: new Date().toISOString(),
         status: 'open',
         notes: notes || 'Counter Shift Opened',

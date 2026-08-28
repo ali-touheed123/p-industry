@@ -62,13 +62,15 @@ export default function TenantAppPage({ params }: PageProps) {
   const [pendingOrdersCount, setPendingOrdersCount] = useState<number>(0);
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
   const [showOpenShiftModal, setShowOpenShiftModal] = useState(false);
-  const [openingCashInput, setOpeningCashInput] = useState('15000');
+  const [openingCashInput, setOpeningCashInput] = useState('');
+  const [lastClosedShift, setLastClosedShift] = useState<any | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<PettyExpense[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<any | null>(null);
   const [restoringHeldOrder, setRestoringHeldOrder] = useState<any | null>(null);
+  const [editingInvoice, setEditingInvoice] = useState<any | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   useEffect(() => {
@@ -124,6 +126,22 @@ export default function TenantAppPage({ params }: PageProps) {
         setCurrentUser(data.user);
         if (data.user.role !== 'ceo' && data.user.role !== 'developer') {
           if (!activeShift) {
+            // Fetch last closed shift for handover display
+            try {
+              const tenantRes = await fetch(`/api/shifts?tenant_id=${data.user.tenant_id || slug}&last_closed=1`);
+              const tenantData = await tenantRes.json();
+              if (tenantData.success && tenantData.lastClosedShift) {
+                setLastClosedShift(tenantData.lastClosedShift);
+                // Pre-fill with previous closing cash
+                setOpeningCashInput(String(tenantData.lastClosedShift.actual_cash || ''));
+              } else {
+                setLastClosedShift(null);
+                setOpeningCashInput('');
+              }
+            } catch {
+              setLastClosedShift(null);
+              setOpeningCashInput('');
+            }
             setShowOpenShiftModal(true);
           }
           setActiveTab('pos');
@@ -136,8 +154,13 @@ export default function TenantAppPage({ params }: PageProps) {
 
   const handleOpenShift = async () => {
     if (!tenant) return;
-    const openingAmt = parseFloat(openingCashInput) || 15000;
-    
+    const openingAmt = parseFloat(openingCashInput) || 0;
+    const prevClosing = lastClosedShift ? Number(lastClosedShift.actual_cash || 0) : 0;
+    const handoverVariance = openingAmt - prevClosing;
+    const handoverNotes = lastClosedShift
+      ? `Handover: Prev shift closed Rs.${prevClosing.toLocaleString()}, Counted Rs.${openingAmt.toLocaleString()}, Variance ${handoverVariance >= 0 ? '+' : ''}Rs.${handoverVariance.toLocaleString()}`
+      : 'First shift of the day';
+
     try {
       const res = await fetch('/api/shifts', {
         method: 'POST',
@@ -146,6 +169,9 @@ export default function TenantAppPage({ params }: PageProps) {
           tenant_id: tenant.id,
           opened_by: currentUser?.id,
           opening_cash: openingAmt,
+          previous_closing_cash: prevClosing,
+          handover_variance: handoverVariance,
+          handover_notes: handoverNotes,
           notes: `Opened by ${currentUser?.full_name || currentUser?.username}`,
         }),
       });
@@ -158,6 +184,8 @@ export default function TenantAppPage({ params }: PageProps) {
           tenant_id: tenant.id,
           staff_id: currentUser?.id,
           opening_cash: openingAmt,
+          previous_closing_cash: prevClosing,
+          handover_variance: handoverVariance,
           status: 'open',
           opened_at: new Date().toISOString(),
         });
@@ -168,6 +196,8 @@ export default function TenantAppPage({ params }: PageProps) {
         tenant_id: tenant.id,
         staff_id: currentUser?.id,
         opening_cash: openingAmt,
+        previous_closing_cash: prevClosing,
+        handover_variance: handoverVariance,
         status: 'open',
         opened_at: new Date().toISOString(),
       });
@@ -212,7 +242,15 @@ export default function TenantAppPage({ params }: PageProps) {
   };
 
   const handleCompleteSale = async (inv: any) => {
-    setInvoices(p => [inv, ...p]);
+    setInvoices(p => {
+      const existingIdx = p.findIndex(existing => (inv.id && existing.id === inv.id) || (inv.invoice_no && existing.invoice_no === inv.invoice_no));
+      if (existingIdx >= 0) {
+        const updated = [...p];
+        updated[existingIdx] = inv;
+        return updated;
+      }
+      return [inv, ...p];
+    });
     setSelectedInvoiceForPrint(inv);
     await refreshItems();
   };
@@ -596,6 +634,10 @@ export default function TenantAppPage({ params }: PageProps) {
               tenantName={tenant.name}
               staffName={currentUser?.full_name || currentUser?.username || 'Staff'}
               onNavigateToPos={() => setActiveTab('pos')}
+              onEditInvoiceInPos={(inv) => {
+                setEditingInvoice(inv);
+                setActiveTab('pos');
+              }}
             />
           )}
           {activeTab === 'hold_invoices' && (
@@ -619,6 +661,8 @@ export default function TenantAppPage({ params }: PageProps) {
               staffName={currentUser?.full_name || 'Staff'}
               restoringHeldOrder={restoringHeldOrder}
               onClearRestoringHeldOrder={() => setRestoringHeldOrder(null)}
+              editingInvoice={editingInvoice}
+              onClearEditingInvoice={() => setEditingInvoice(null)}
               onCompleteSale={handleCompleteSale}
               pendingOrdersCount={pendingOrdersCount}
               onNavigateToOrders={() => setActiveTab('orders')}
@@ -667,35 +711,106 @@ export default function TenantAppPage({ params }: PageProps) {
         </main>
       </div>
 
-      {/* ── Subah Ka Daraz Cash (Open Shift Modal) ── */}
-      {showOpenShiftModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem', zIndex: 2000 }}>
-          <div className="login-card" style={{ maxWidth: '400px' }}>
-            <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-              <div style={{ width: 48, height: 48, borderRadius: 'var(--radius-md)', background: 'var(--secondary-fixed)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.875rem', color: 'var(--secondary)' }}>
-                <span className="material-symbols-outlined filled" style={{ fontSize: 26 }}>payments</span>
+      {/* ── Shift Handover / Open Shift Modal ── */}
+      {showOpenShiftModal && (() => {
+        const prevClosing = lastClosedShift ? Number(lastClosedShift.actual_cash || 0) : 0;
+        const currentInput = parseFloat(openingCashInput) || 0;
+        const liveVariance = currentInput - prevClosing;
+        const isShort = liveVariance < 0;
+        const isOver = liveVariance > 0;
+        const isFirstShift = !lastClosedShift;
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem', zIndex: 2000 }}>
+            <div className="login-card" style={{ maxWidth: '440px', width: '100%' }}>
+              {/* Header */}
+              <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+                <div style={{ width: 52, height: 52, borderRadius: 'var(--radius-md)', background: 'var(--secondary-fixed)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.875rem', color: 'var(--secondary)' }}>
+                  <span className="material-symbols-outlined filled" style={{ fontSize: 28 }}>account_balance_wallet</span>
+                </div>
+                <h3 className="headline-sm" style={{ marginBottom: '4px' }}>
+                  {isFirstShift ? 'Shift Open — Opening Cash' : `Shift ${(lastClosedShift?.shift_number || 2)} — Handover Verification`}
+                </h3>
+                <p className="text-muted" style={{ fontSize: '12px' }}>
+                  {isFirstShift ? 'Pehli shift hai — counter mein kitne paise hain?' : 'Pichli shift se daraz mein kitne paise rehne chahiye the?'}
+                </p>
               </div>
-              <h3 className="headline-sm" style={{ marginBottom: '4px' }}>Subah Ka Daraz Cash</h3>
-              <p className="text-muted" style={{ fontSize: '13px' }}>Aaj subah counter mein kitne khulay paise hain?</p>
+
+              {/* Previous Shift Info (if exists) */}
+              {!isFirstShift && (
+                <div style={{ marginBottom: '1.25rem', padding: '12px 14px', borderRadius: 'var(--radius-sm)', background: 'rgba(0,0,0,0.04)', border: '1px solid var(--outline-variant)' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--on-surface-variant)', marginBottom: '10px' }}>
+                    📋 Pichli Shift ka Hisaab
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
+                    <span style={{ color: 'var(--on-surface-variant)' }}>Closed by</span>
+                    <span style={{ fontWeight: 600 }}>{lastClosedShift?.closed_by || 'Staff'}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
+                    <span style={{ color: 'var(--on-surface-variant)' }}>Shift Close Time</span>
+                    <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px' }}>
+                      {lastClosedShift?.end_time ? new Date(lastClosedShift.end_time).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', fontWeight: 700, borderTop: '1px solid var(--outline-variant)', paddingTop: '8px', marginTop: '4px' }}>
+                    <span>Daraz mein rehna chahiye tha</span>
+                    <span style={{ color: 'var(--secondary)', fontFamily: 'JetBrains Mono, monospace' }}>
+                      Rs. {prevClosing.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Cash Input */}
+              <div style={{ marginBottom: '1rem' }}>
+                <label className="form-label">
+                  {isFirstShift ? 'Opening Cash (Rs.)' : 'Ab daraz mein actual kitne hain? (Rs.)'}
+                </label>
+                <input
+                  type="number"
+                  className="form-input"
+                  placeholder="0"
+                  value={openingCashInput}
+                  onChange={e => setOpeningCashInput(e.target.value)}
+                  style={{ fontSize: '22px', height: '56px', fontWeight: '700', textAlign: 'center', fontFamily: 'JetBrains Mono, monospace', color: 'var(--secondary)' }}
+                  autoFocus
+                />
+              </div>
+
+              {/* Live Variance (only if previous shift exists and user has typed) */}
+              {!isFirstShift && openingCashInput !== '' && (
+                <div style={{
+                  marginBottom: '1.25rem',
+                  padding: '10px 14px',
+                  borderRadius: 'var(--radius-sm)',
+                  background: isShort ? 'rgba(239,68,68,0.08)' : isOver ? 'rgba(34,197,94,0.08)' : 'rgba(34,197,94,0.08)',
+                  border: `1px solid ${isShort ? '#FCA5A5' : '#86EFAC'}`,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}>
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: isShort ? '#DC2626' : '#16A34A' }}>
+                    {isShort ? '⚠️ SHORT — Farq hai!' : isOver ? '✅ OVER — Extra cash' : '✅ MATCHED — Sab theek'}
+                  </span>
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: '15px', color: isShort ? '#DC2626' : '#16A34A' }}>
+                    {isShort ? '-' : '+'}Rs. {Math.abs(liveVariance).toLocaleString()}
+                  </span>
+                </div>
+              )}
+
+              {isShort && !isFirstShift && openingCashInput !== '' && (
+                <div style={{ marginBottom: '1rem', padding: '8px 12px', background: 'rgba(239,68,68,0.06)', borderRadius: 'var(--radius-sm)', fontSize: '11px', color: '#DC2626', border: '1px solid rgba(239,68,68,0.2)' }}>
+                  ⚠️ Yeh Rs. {Math.abs(liveVariance).toLocaleString()} ka farq CEO report mein <strong>Handover Variance</strong> ke tor par record hoga.
+                </div>
+              )}
+
+              <button onClick={handleOpenShift} className="btn btn-primary btn-lg btn-full">
+                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>lock_open</span>
+                {isShort && !isFirstShift ? `Shift Open Karo (${Math.abs(liveVariance).toLocaleString()} short noted)` : 'Shift Open & POS Unlock'}
+              </button>
             </div>
-            <div style={{ marginBottom: '1.25rem' }}>
-              <label className="form-label">Opening Cash (Rs.)</label>
-              <input
-                type="number"
-                className="form-input"
-                value={openingCashInput}
-                onChange={e => setOpeningCashInput(e.target.value)}
-                style={{ fontSize: '20px', height: '52px', fontWeight: '700', textAlign: 'center', fontFamily: 'JetBrains Mono, monospace', color: 'var(--secondary)' }}
-                autoFocus
-              />
-            </div>
-            <button onClick={handleOpenShift} className="btn btn-primary btn-lg btn-full">
-              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>lock_open</span>
-              Start Shift &amp; Unlock POS
-            </button>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── Print Receipt Modal ── */}
       {selectedInvoiceForPrint && (

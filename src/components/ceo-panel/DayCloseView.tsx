@@ -4,12 +4,18 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Branch, DayCloseRecord } from '@/types/ceo';
 import { formatCurrency } from '@/data/ceoMockData';
 import { CheckCircle2, AlertTriangle, Users, Coffee, CalendarCheck } from 'lucide-react';
+import { DatePeriodFilter } from './DatePeriodFilter';
 
 interface DayCloseViewProps {
   branch: Branch;
 }
 
 export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
+  const todayIso = new Date().toISOString().split('T')[0];
+  const firstOfMonthIso = todayIso.substring(0, 8) + '01';
+
+  const [startDate, setStartDate] = useState<string>(firstOfMonthIso);
+  const [endDate, setEndDate] = useState<string>(todayIso);
   const [shifts, setShifts] = useState<DayCloseRecord[]>([]);
   const [selectedRecordId, setSelectedRecordId] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
@@ -57,7 +63,25 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
         const splitReserve = Number(currentTenant?.commission_split_reserve || 30.0);
 
         if (shiftsData.success && shiftsData.shifts) {
-          const mapped: DayCloseRecord[] = shiftsData.shifts.map((s: any) => {
+          // Filter shifts for this specific branch/counter if multi-branch
+          const branchShifts = shiftsData.shifts.filter((s: any) => {
+            if (branch?.userId || branch?.counterUsername) {
+              const matchUserId = Boolean(branch.userId && (s.opened_by === branch.userId || s.closed_by === branch.userId));
+              const matchUsername = Boolean(branch.counterUsername && (
+                (s.notes && s.notes.toLowerCase().includes(branch.counterUsername.toLowerCase())) ||
+                (s.opened_by && typeof s.opened_by === 'string' && s.opened_by.toLowerCase().includes(branch.counterUsername.toLowerCase())) ||
+                (s.closed_by && typeof s.closed_by === 'string' && s.closed_by.toLowerCase().includes(branch.counterUsername.toLowerCase()))
+              ));
+              const matchManager = Boolean(branch.manager && (
+                (s.notes && s.notes.toLowerCase().includes(branch.manager.toLowerCase())) ||
+                (s.closed_by && typeof s.closed_by === 'string' && s.closed_by.toLowerCase().includes(branch.manager.toLowerCase()))
+              ));
+              return matchUserId || matchUsername || matchManager;
+            }
+            return true;
+          });
+
+          const mapped: DayCloseRecord[] = branchShifts.map((s: any) => {
             const shiftDate = s.created_at ? s.created_at.split('T')[0] : 'Recent';
             
             // Match expenses for this shift or date
@@ -133,6 +157,12 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
               amount: Number(e.amount || 0),
             }));
 
+            // Handover data (from previous shift close)
+            const prevClosingCash = Number(s.previous_closing_cash || 0);
+            const handoverVarianceAmt = Number(s.handover_variance || 0);
+            const handoverStatus: 'MATCHED' | 'SHORT' | 'EXCESS' =
+              handoverVarianceAmt === 0 ? 'MATCHED' : (handoverVarianceAmt < 0 ? 'SHORT' : 'EXCESS');
+
             return {
               id: s.id,
               shiftTitle: `Register Shift #${s.id.substring(0, 4)}`,
@@ -158,6 +188,15 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
                 staffShares,
               },
               pettyCashLogs: pettyLogs,
+              ...(prevClosingCash > 0 || handoverVarianceAmt !== 0 ? {
+                handover: {
+                  previousClosingCash: prevClosingCash,
+                  openingCountedCash: openAmt,
+                  handoverVariance: handoverVarianceAmt,
+                  handoverStatus,
+                  handoverNotes: s.handover_notes || undefined,
+                },
+              } : {}),
             };
           });
 
@@ -179,9 +218,17 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
     };
   }, [branch?.id, branch?.slug, selectedRecordId]);
 
+  const filteredShifts = useMemo(() => {
+    return shifts.filter((s) => {
+      if (startDate && s.date && s.date < startDate) return false;
+      if (endDate && s.date && s.date > endDate) return false;
+      return true;
+    });
+  }, [shifts, startDate, endDate]);
+
   const activeRecord: DayCloseRecord | undefined = useMemo(() => {
-    return shifts.find((r) => r.id === selectedRecordId) || shifts[0];
-  }, [shifts, selectedRecordId]);
+    return filteredShifts.find((r) => r.id === selectedRecordId) || filteredShifts[0] || shifts[0];
+  }, [filteredShifts, shifts, selectedRecordId]);
 
   if (!activeRecord) {
     return (
@@ -230,24 +277,80 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
           </div>
         </div>
 
-        {/* Historical Shift Picker */}
-        {shifts.length > 1 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', borderRadius: '8px', padding: '6px 12px' }}>
-            <span style={{ fontSize: '12px', color: '#8B93A1', fontWeight: 600 }}>Audit History:</span>
-            <select
-              value={activeRecord.id}
-              onChange={(e) => setSelectedRecordId(e.target.value)}
-              style={{ backgroundColor: '#12151B', border: '1px solid #2A2F38', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', color: '#E5E7EB', outline: 'none', cursor: 'pointer' }}
-            >
-              {shifts.map((r) => (
-                <option key={r.id} value={r.id} style={{ backgroundColor: '#1C2128', color: '#E5E7EB' }}>
-                  {r.date} — {r.shiftTime} ({r.financialSummary.varianceStatus})
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+        {/* Historical Shift Picker + Date Period */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <DatePeriodFilter
+            startDate={startDate}
+            endDate={endDate}
+            onChangeStartDate={setStartDate}
+            onChangeEndDate={setEndDate}
+          />
+
+          {filteredShifts.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', borderRadius: '8px', padding: '6px 12px' }}>
+              <span style={{ fontSize: '12px', color: '#8B93A1', fontWeight: 600 }}>Shift:</span>
+              <select
+                value={activeRecord.id}
+                onChange={(e) => setSelectedRecordId(e.target.value)}
+                style={{ backgroundColor: '#12151B', border: '1px solid #2A2F38', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', color: '#E5E7EB', outline: 'none', cursor: 'pointer' }}
+              >
+                {filteredShifts.map((r) => (
+                  <option key={r.id} value={r.id} style={{ backgroundColor: '#1C2128', color: '#E5E7EB' }}>
+                    {r.date} — {r.shiftTime} ({r.financialSummary.varianceStatus})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* ── Handover Variance Alert (only when previous shift closing data exists) ── */}
+      {activeRecord.handover && (
+        <div style={{
+          border: `1px solid ${activeRecord.handover.handoverStatus === 'SHORT' ? '#EF4444' : activeRecord.handover.handoverStatus === 'EXCESS' ? '#F59E0B' : '#34D399'}`,
+          borderRadius: '10px',
+          padding: '16px 20px',
+          backgroundColor: activeRecord.handover.handoverStatus === 'SHORT' ? 'rgba(239,68,68,0.07)' : activeRecord.handover.handoverStatus === 'EXCESS' ? 'rgba(245,158,11,0.07)' : 'rgba(52,211,153,0.07)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '20px',
+          flexWrap: 'wrap',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ fontSize: '22px' }}>
+              {activeRecord.handover.handoverStatus === 'SHORT' ? '⚠️' : activeRecord.handover.handoverStatus === 'EXCESS' ? '🔶' : '✅'}
+            </div>
+            <div>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: activeRecord.handover.handoverStatus === 'SHORT' ? '#EF4444' : activeRecord.handover.handoverStatus === 'EXCESS' ? '#F59E0B' : '#34D399' }}>
+                Shift Handover — {activeRecord.handover.handoverStatus === 'SHORT' ? 'Cash Shortage Detected' : activeRecord.handover.handoverStatus === 'EXCESS' ? 'Excess Cash Found' : 'Cash Matched'}
+              </div>
+              <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '2px' }}>
+                Prev shift closed with {formatCurrency(activeRecord.handover.previousClosingCash)} →
+                This shift opened with {formatCurrency(activeRecord.handover.openingCountedCash)}
+              </div>
+              {activeRecord.handover.handoverStatus === 'SHORT' && (
+                <div style={{ fontSize: '11px', color: '#FCA5A5', marginTop: '4px' }}>
+                  🔒 Security Note: Rs. {Math.abs(activeRecord.handover.handoverVariance).toLocaleString()} missing between shift handover. Requires investigation.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: '11px', color: '#8B93A1', marginBottom: '2px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Handover Variance</div>
+            <div className="ceo-font-mono" style={{
+              fontSize: '22px',
+              fontWeight: 800,
+              color: activeRecord.handover.handoverStatus === 'SHORT' ? '#EF4444' : activeRecord.handover.handoverStatus === 'EXCESS' ? '#F59E0B' : '#34D399',
+            }}>
+              {activeRecord.handover.handoverVariance >= 0 ? '+' : ''}
+              {formatCurrency(activeRecord.handover.handoverVariance)}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 3-Column Reconciliation Layout */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>

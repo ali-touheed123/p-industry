@@ -34,18 +34,13 @@ export async function POST(req: NextRequest) {
       code,
       name,
       category,
-      item_type = 'finish_goods',
       unit = 'Can',
       cost_price = 0,
       retail_price = 0,
-      wholesale_price = 0,
-      trade_price = 0,
       stock_qty = 0,
       min_stock_alert = 5,
       shade_code,
-      shade_hex,
       pack_size,
-      location = 'Main Godown',
     } = body;
 
     if (!tenant_id || !name || !code) {
@@ -77,18 +72,13 @@ export async function POST(req: NextRequest) {
         code: normalizedCode,
         name: name.trim(),
         category: category || 'General',
-        item_type,
         unit,
         pack_size: pack_size || unit,
         shade_code: shade_code || null,
-        shade_hex: shade_hex || null,
         cost_price: Number(cost_price) || 0,
         retail_price: Number(retail_price) || 0,
-        wholesale_price: Number(wholesale_price) || 0,
-        trade_price: Number(trade_price) || 0,
         stock_qty: Number(stock_qty) || 0,
         min_stock_alert: Number(min_stock_alert) || 5,
-        location: location || 'Main Godown',
       })
       .select()
       .single();
@@ -132,18 +122,13 @@ export async function POST(req: NextRequest) {
               code: normalizedCode,
               name: name.trim(),
               category: category || 'General',
-              item_type,
               unit,
               pack_size: pack_size || unit,
               shade_code: shade_code || null,
-              shade_hex: shade_hex || null,
               cost_price: Number(cost_price) || 0,
               retail_price: Number(retail_price) || 0,
-              wholesale_price: Number(wholesale_price) || 0,
-              trade_price: Number(trade_price) || 0,
               stock_qty: 0, // Other branches start with 0 stock
               min_stock_alert: Number(min_stock_alert) || 5,
-              location: location || 'Main Godown',
             });
           }
         }

@@ -31,6 +31,7 @@ interface Props {
   tenantName?: string;
   staffName?: string;
   onNavigateToPos?: () => void;
+  onEditInvoiceInPos?: (invoice: Invoice) => void;
 }
 
 export default function SalesHistory({
@@ -38,6 +39,7 @@ export default function SalesHistory({
   tenantName = 'PaintERP Branch',
   staffName = 'Counter Staff',
   onNavigateToPos,
+  onEditInvoiceInPos,
 }: Props) {
   // Date Helpers
   const getTodayStr = () => {
@@ -1005,9 +1007,16 @@ export default function SalesHistory({
                               >
                                 {inv.client_name ? inv.client_name.charAt(0).toUpperCase() : 'W'}
                               </div>
-                              <span style={{ fontWeight: 600, color: '#0F172A', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {inv.client_name || 'Walk-in Customer'}
-                              </span>
+                              <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                                <span style={{ fontWeight: 600, color: '#0F172A', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {inv.client_name || 'Walk-in Customer'}
+                                </span>
+                                {inv.created_by && (
+                                  <span style={{ fontSize: '10.5px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
+                                    By: {inv.created_by}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </td>
 
@@ -1172,6 +1181,30 @@ export default function SalesHistory({
                               >
                                 <Share2 style={{ width: 14, height: 14 }} />
                               </button>
+
+                              {onEditInvoiceInPos && !isReturn && (
+                                <button
+                                  type="button"
+                                  onClick={() => onEditInvoiceInPos(inv)}
+                                  title="Open in POS & Add More Items"
+                                  style={{
+                                    padding: '4px 8px',
+                                    background: '#FEF3C7',
+                                    color: '#B45309',
+                                    border: '1px solid #FDE68A',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  <ShoppingBag style={{ width: 13, height: 13 }} />
+                                  <span>POS Edit</span>
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -1226,23 +1259,9 @@ export default function SalesHistory({
                                             {item.item_name}
                                           </td>
                                           <td style={{ padding: '6px 10px' }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                              {item.shade_hex && (
-                                                <span
-                                                  style={{
-                                                    width: '12px',
-                                                    height: '12px',
-                                                    borderRadius: '3px',
-                                                    background: item.shade_hex,
-                                                    border: '1px solid #CBD5E1',
-                                                    display: 'inline-block',
-                                                  }}
-                                                />
-                                              )}
-                                              <span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#334155' }}>
-                                                {item.shade_code || 'Standard'}
-                                              </span>
-                                            </div>
+                                            <span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#334155' }}>
+                                              {item.shade_code || 'Standard'}
+                                            </span>
                                           </td>
                                           <td style={{ padding: '6px 10px', color: '#64748B' }}>
                                             {item.pack_size || item.unit || 'Can'}
@@ -1540,7 +1559,33 @@ export default function SalesHistory({
                 Share WhatsApp
               </button>
 
-              <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                {onEditInvoiceInPos && selectedInvoice.invoice_type !== 'return' && (
+                  <button
+                    onClick={() => {
+                      const invToEdit = selectedInvoice;
+                      setSelectedInvoice(null);
+                      onEditInvoiceInPos(invToEdit);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '8px 14px',
+                      background: '#FEF3C7',
+                      color: '#B45309',
+                      border: '1px solid #FDE68A',
+                      borderRadius: '8px',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <ShoppingBag style={{ width: 14, height: 14 }} />
+                    Edit / Add in POS
+                  </button>
+                )}
+
                 <button
                   onClick={() => {
                     setThermalPrintInvoice(selectedInvoice);

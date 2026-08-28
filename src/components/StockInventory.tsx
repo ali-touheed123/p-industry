@@ -52,7 +52,7 @@ export default function StockInventory({
 }: Props) {
   // Filters state (Matching painterp InventoryView.tsx)
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  const [selectedLocation, setSelectedLocation] = useState<string>('All');
+
   const [stockStatus, setStockStatus] = useState<'all' | 'in_stock' | 'low_stock' | 'out_of_stock'>('all');
   const [tableSearch, setTableSearch] = useState<string>('');
   const [sortField, setSortField] = useState<keyof Item>('name');
@@ -78,7 +78,7 @@ export default function StockInventory({
   const [formName, setFormName] = useState<string>('');
   const [formCategory, setFormCategory] = useState<string>('Interior Emulsion');
   const [formUnit, setFormUnit] = useState<string>('4L Gallon');
-  const [formLocation, setFormLocation] = useState<string>('Main Godown');
+
   const [formShadeCode, setFormShadeCode] = useState<string>('Off-White 101');
   const [formCostPrice, setFormCostPrice] = useState<string>('');
   const [formRetailPrice, setFormRetailPrice] = useState<string>('');
@@ -116,12 +116,12 @@ export default function StockInventory({
     return Array.from(set);
   }, [items, customUnits]);
 
-  const locations = ['All', 'Main Godown', 'Retail Shop Front', 'Rack A', 'Rack B', 'Solvent Vault'];
+
 
   // Inventory stats calculations (Matching painterp top row)
   const totalSKUs = items.length;
   const totalStockUnits = items.reduce((acc, p) => acc + (Number(p.stock_qty) || 0), 0);
-  const lowStockCount = items.filter((p) => (p.stock_qty || 0) <= (p.min_stock_alert || p.min_stock || 5)).length;
+  const lowStockCount = items.filter((p) => (p.stock_qty || 0) <= (p.min_stock_alert || 5)).length;
   const totalValuation = items.reduce(
     (acc, p) => acc + (Number(p.stock_qty) || 0) * (Number(p.cost_price) || 0),
     0
@@ -130,8 +130,8 @@ export default function StockInventory({
   // Filter products
   const filteredProducts = items.filter((p) => {
     if (selectedCategory !== 'All' && p.category !== selectedCategory) return false;
-    if (selectedLocation !== 'All' && (p.location || 'Main Godown') !== selectedLocation) return false;
-    const minAlert = p.min_stock_alert || p.min_stock || 5;
+
+    const minAlert = p.min_stock_alert || 5;
     if (stockStatus === 'low_stock' && p.stock_qty > minAlert) return false;
     if (stockStatus === 'in_stock' && p.stock_qty <= minAlert) return false;
     if (stockStatus === 'out_of_stock' && p.stock_qty > 0) return false;
@@ -177,7 +177,7 @@ export default function StockInventory({
     setFormName('');
     setFormCategory(allCategories[0] || 'Interior Emulsion');
     setFormUnit(allUnits[0] || '4L Gallon');
-    setFormLocation('Main Godown');
+
     setFormShadeCode('Off-White 101');
     setFormCostPrice('');
     setFormRetailPrice('');
@@ -195,12 +195,12 @@ export default function StockInventory({
     setFormName(item.name);
     setFormCategory(item.category || allCategories[0]);
     setFormUnit(item.pack_size || item.unit || allUnits[0]);
-    setFormLocation(item.location || 'Main Godown');
+
     setFormShadeCode(item.shade_code || 'Standard');
     setFormCostPrice(item.cost_price?.toString() || '');
     setFormRetailPrice(item.retail_price?.toString() || '');
     setFormStockQty(item.stock_qty?.toString() || '0');
-    setFormMinAlert((item.min_stock_alert || item.min_stock || 5).toString());
+    setFormMinAlert((item.min_stock_alert || 5).toString());
     setIsAddingNewCategory(false);
     setIsAddingNewUnit(false);
     setShowAddProductModal(true);
@@ -266,7 +266,7 @@ export default function StockInventory({
       category: formCategory,
       unit: formUnit,
       pack_size: formUnit,
-      location: formLocation || 'Main Godown',
+
       shade_code: formShadeCode.trim() || 'Standard',
       cost_price: cost,
       retail_price: retail,
@@ -435,23 +435,7 @@ export default function StockInventory({
               Filters &amp; Grouping
             </h3>
 
-            {/* Godown Location Dropdown */}
-            <div style={{ marginBottom: '14px' }}>
-              <label style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', color: '#64748B', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
-                Godown / Location
-              </label>
-              <select
-                value={selectedLocation}
-                onChange={(e) => setSelectedLocation(e.target.value)}
-                style={{ width: '100%', fontSize: '12px', background: '#F8FAFC', border: '1px solid #E2E8F0', padding: '6px 8px', color: '#0F172A', fontWeight: 500, borderRadius: '8px', outline: 'none' }}
-              >
-                {locations.map((loc) => (
-                  <option key={loc} value={loc}>
-                    {loc === 'All' ? 'All Godowns & Vaults' : loc}
-                  </option>
-                ))}
-              </select>
-            </div>
+
 
             {/* Stock Status Radio Buttons */}
             <div style={{ marginBottom: '14px' }}>
@@ -625,7 +609,7 @@ export default function StockInventory({
                   </tr>
                 ) : (
                   sortedProducts.map((prod) => {
-                    const minAlert = prod.min_stock_alert || prod.min_stock || 5;
+                    const minAlert = prod.min_stock_alert || 5;
                     const isCritical = prod.stock_qty <= minAlert;
                     return (
                       <tr key={prod.id}>
@@ -876,24 +860,7 @@ export default function StockInventory({
                 />
               </div>
 
-              {/* Godown Location */}
-              <div>
-                <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
-                  Godown / Location
-                </label>
-                <select
-                  value={formLocation}
-                  onChange={(e) => setFormLocation(e.target.value)}
-                  className="pos-text-input"
-                  style={{ fontWeight: 500 }}
-                >
-                  {locations.filter((l) => l !== 'All').map((loc) => (
-                    <option key={loc} value={loc}>
-                      {loc}
-                    </option>
-                  ))}
-                </select>
-              </div>
+
 
               {/* Price Matrix (Cost & Retail only, 2 columns) */}
               <div>

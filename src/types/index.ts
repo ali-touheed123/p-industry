@@ -48,6 +48,9 @@ export interface Shift {
   expected_cash?: number;
   actual_cash?: number;
   difference?: number;
+  previous_closing_cash?: number;
+  handover_variance?: number;
+  handover_notes?: string;
   notes?: string;
   status: 'open' | 'closed';
   created_at?: string;
@@ -71,20 +74,13 @@ export interface Item {
   code: string;
   name: string;
   category?: string;
-  item_type?: 'finish_goods' | 'raw_material';
   unit: string;
   pack_size?: string;
   shade_code?: string;
-  shade_hex?: string;
   cost_price: number;
   retail_price: number;
-  wholesale_price?: number;
-  trade_price?: number;
   stock_qty: number;
   min_stock_alert?: number;
-  min_stock?: number;
-  location?: string;
-  is_active?: boolean;
   created_at?: string;
 }
 
@@ -149,7 +145,6 @@ export interface InvoiceItem {
   item_code?: string;
   item_name: string;
   shade_code?: string;
-  shade_hex?: string;
   pack_size?: string;
   unit?: string;
   qty: number;

@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
       party_name,
       amount,
       payment_mode = 'Cash',
+      reference_no,
       remarks,
       created_by,
     } = body;
@@ -54,7 +55,7 @@ export async function POST(req: NextRequest) {
     const voucher_no = `${voucher_type === 'receipt' ? 'RCP' : 'PMT'}-${Math.floor(1000 + Math.random() * 9000)}`;
     const parsedAmt = Number(amount);
 
-    // 1. Insert Voucher with resilient payment_mode handling
+    // 1. Insert Voucher
     const voucherData: Record<string, any> = {
       tenant_id,
       voucher_no,
@@ -64,6 +65,7 @@ export async function POST(req: NextRequest) {
       party_name: party_name || '',
       amount: parsedAmt,
       payment_mode: payment_mode || 'Cash',
+      reference_no: reference_no || null,
       remarks: remarks || `${voucher_type === 'receipt' ? 'Payment Received' : 'Supplier Payment'}`,
       created_by: created_by || null,
       date: new Date().toISOString().split('T')[0],

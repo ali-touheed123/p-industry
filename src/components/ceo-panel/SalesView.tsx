@@ -5,6 +5,7 @@ import { Branch, Invoice } from '@/types/ceo';
 import { formatCurrency } from '@/data/ceoMockData';
 import { Search, ChevronRight } from 'lucide-react';
 import { InvoiceDetailModal } from './InvoiceDetailModal';
+import { DatePeriodFilter } from './DatePeriodFilter';
 
 interface SalesViewProps {
   branch: Branch;
@@ -14,6 +15,11 @@ type QuickFilter = 'Today' | 'Yesterday' | 'Last 7 Days' | 'This Month' | 'All T
 type PaymentFilter = 'All Modes' | 'Cash' | 'Credit' | 'Bank/Card';
 
 export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
+  const todayIso = new Date().toISOString().split('T')[0];
+  const firstOfMonthIso = todayIso.substring(0, 8) + '01';
+
+  const [startDate, setStartDate] = useState<string>(firstOfMonthIso);
+  const [endDate, setEndDate] = useState<string>(todayIso);
   const [quickFilter, setQuickFilter] = useState<QuickFilter>('This Month');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('All Modes');
@@ -40,6 +46,7 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
             if (inv.payment_type === 'credit') pMode = 'Credit';
             else if (inv.payment_type === 'bank' || inv.payment_type === 'card' || inv.payment_type === 'cheque') pMode = 'Bank/Card';
 
+            const isReturn = (inv.status || '').toLowerCase() === 'return' || (inv.invoice_type || '').toLowerCase() === 'return';
             return {
               id: inv.id,
               invoiceNumber: inv.invoice_no || `INV-${inv.id}`,
@@ -53,7 +60,7 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
               discountAmount: Number(inv.discount || 0),
               netAmount: Number(inv.net_total || 0),
               itemsCount: rawItems.length,
-              status: inv.status || 'Completed',
+              status: isReturn ? 'return' : (inv.status || 'Completed'),
               salesman: inv.created_by || 'Counter Staff',
               items: rawItems.map((it: any) => ({
                 code: it.item_code || it.code || '',
@@ -85,6 +92,8 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
 
   const filteredInvoices = useMemo(() => {
     return invoices.filter((inv) => {
+      if (startDate && inv.date && inv.date < startDate) return false;
+      if (endDate && inv.date && inv.date > endDate) return false;
       if (paymentFilter !== 'All Modes' && inv.paymentMode !== paymentFilter) {
         return false;
       }
@@ -99,27 +108,34 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
       }
       return true;
     });
-  }, [invoices, paymentFilter, searchQuery]);
+  }, [invoices, paymentFilter, searchQuery, startDate, endDate]);
 
   const stats = useMemo(() => {
-    const netSales = filteredInvoices.reduce((acc, inv) => acc + inv.netAmount, 0);
-    const cashInflow = filteredInvoices
+    // Exclude return invoices from financial summaries — only forward sales count
+    const forwardSales = filteredInvoices.filter((inv) => inv.status === 'Completed');
+    const returnInvoices = filteredInvoices.filter((inv) => inv.status === 'Returned' || inv.status === 'Partial Return');
+
+    const netSales = forwardSales.reduce((acc, inv) => acc + inv.netAmount, 0);
+    const cashInflow = forwardSales
       .filter((inv) => inv.paymentMode === 'Cash')
       .reduce((acc, inv) => acc + inv.netAmount, 0);
-    const creditUdhaar = filteredInvoices
+    const creditUdhaar = forwardSales
       .filter((inv) => inv.paymentMode === 'Credit')
       .reduce((acc, inv) => acc + inv.netAmount, 0);
-    const totalUnits = filteredInvoices.reduce(
+    const totalUnits = forwardSales.reduce(
       (acc, inv) => acc + inv.items.reduce((s, it) => s + it.qty, 0),
       0
     );
+    const totalReturnsValue = returnInvoices.reduce((acc, inv) => acc + inv.netAmount, 0);
 
     return {
       netSales,
       cashInflow,
       creditUdhaar,
       totalUnits,
-      completedCount: filteredInvoices.length,
+      completedCount: forwardSales.length,
+      returnsCount: returnInvoices.length,
+      totalReturnsValue,
     };
   }, [filteredInvoices]);
 
@@ -133,7 +149,7 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
               Sales Register &amp; Invoices
             </h2>
             <span className="ceo-font-mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '9999px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', color: '#8B93A1' }}>
-              {stats.completedCount} Invoices
+              {stats.completedCount} Sales{stats.returnsCount > 0 ? ` • ${stats.returnsCount} Returns` : ''}
             </span>
           </div>
           <p style={{ fontSize: '12px', color: '#8B93A1', margin: '4px 0 0' }}>
@@ -150,7 +166,7 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
             {formatCurrency(stats.netSales)}
           </div>
           <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
-            {stats.completedCount} completed sales
+            {stats.completedCount} sales{stats.returnsCount > 0 ? <span style={{ color: '#F87171' }}> • -{formatCurrency(stats.totalReturnsValue)} returns excluded</span> : ''}
           </div>
         </div>
 
@@ -187,38 +203,49 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
 
       {/* Filter Toolbar */}
       <div style={{ padding: '12px 16px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-        {/* Search */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#12151B', border: '1px solid #2A2F38', borderRadius: '6px', padding: '6px 12px', minWidth: '280px' }}>
-          <Search style={{ width: '14px', height: '14px', color: '#8B93A1' }} />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search invoice #, customer, shade..."
-            style={{ background: 'none', border: 'none', color: '#E5E7EB', fontSize: '12px', outline: 'none', width: '100%' }}
-          />
-        </div>
+        {/* Date Period Filter */}
+        <DatePeriodFilter
+          startDate={startDate}
+          endDate={endDate}
+          onChangeStartDate={setStartDate}
+          onChangeEndDate={setEndDate}
+        />
 
-        {/* Payment mode filter */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          {(['All Modes', 'Cash', 'Credit', 'Bank/Card'] as PaymentFilter[]).map((mode) => (
-            <button
-              key={mode}
-              onClick={() => setPaymentFilter(mode)}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                border: paymentFilter === mode ? '1px solid rgba(198, 161, 91, 0.6)' : '1px solid #2A2F38',
-                backgroundColor: paymentFilter === mode ? '#12151B' : '#1C2128',
-                color: paymentFilter === mode ? '#C6A15B' : '#8B93A1',
-              }}
-            >
-              {mode}
-            </button>
-          ))}
+        {/* Right Controls: Search + Payment Filter */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          {/* Search */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#12151B', border: '1px solid #2A2F38', borderRadius: '6px', padding: '6px 12px', minWidth: '240px' }}>
+            <Search style={{ width: '14px', height: '14px', color: '#8B93A1' }} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search invoice #, customer, shade..."
+              style={{ background: 'none', border: 'none', color: '#E5E7EB', fontSize: '12px', outline: 'none', width: '100%' }}
+            />
+          </div>
+
+          {/* Payment mode filter */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {(['All Modes', 'Cash', 'Credit', 'Bank/Card'] as PaymentFilter[]).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setPaymentFilter(mode)}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  border: paymentFilter === mode ? '1px solid rgba(198, 161, 91, 0.6)' : '1px solid #2A2F38',
+                  backgroundColor: paymentFilter === mode ? '#12151B' : '#1C2128',
+                  color: paymentFilter === mode ? '#C6A15B' : '#8B93A1',
+                }}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

@@ -143,7 +143,8 @@ export default function FinancialLedgers({
           party_name: selectedParty.name,
           amount: parseFloat(receiptAmount) || 0,
           payment_mode: paymentMode,
-          remarks: refNotes || null,
+          reference_no: paymentMode !== 'Cash' ? refNotes : null,
+          remarks: `${paymentMode}${refNotes ? ` (${refNotes})` : ''}`,
           created_by: staffName,
         }),
       });
@@ -756,16 +757,21 @@ export default function FinancialLedgers({
                 </select>
               </div>
 
-              <div>
-                <label className="form-label">Reference No / Cheque Details</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. HBL-992810 / TRX-8921"
-                  value={refNotes}
-                  onChange={e => setRefNotes(e.target.value)}
-                />
-              </div>
+              {paymentMode !== 'Cash' && (
+                <div>
+                  <label className="form-label">
+                    {paymentMode === 'Cheque' ? 'Cheque Number / Bank Details *' : 'Reference No / Transaction ID *'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    className="form-input"
+                    placeholder={paymentMode === 'Cheque' ? 'e.g. Cheque #881920 (Meezan Bank)' : 'e.g. HBL-992810 / TRX-8921'}
+                    value={refNotes}
+                    onChange={e => setRefNotes(e.target.value)}
+                  />
+                </div>
+              )}
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
                 <button

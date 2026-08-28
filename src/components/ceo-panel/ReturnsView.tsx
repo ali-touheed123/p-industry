@@ -5,12 +5,18 @@ import { Branch, ReturnRecord } from '@/types/ceo';
 import { formatCurrency } from '@/data/ceoMockData';
 import { Search, ChevronRight, RotateCcw } from 'lucide-react';
 import { ReturnDetailModal } from './ReturnDetailModal';
+import { DatePeriodFilter } from './DatePeriodFilter';
 
 interface ReturnsViewProps {
   branch: Branch;
 }
 
 export const ReturnsView: React.FC<ReturnsViewProps> = ({ branch }) => {
+  const todayIso = new Date().toISOString().split('T')[0];
+  const firstOfMonthIso = todayIso.substring(0, 8) + '01';
+
+  const [startDate, setStartDate] = useState<string>(firstOfMonthIso);
+  const [endDate, setEndDate] = useState<string>(todayIso);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [reasonFilter, setReasonFilter] = useState<string>('All Reasons');
   const [selectedReturn, setSelectedReturn] = useState<ReturnRecord | null>(null);
@@ -94,6 +100,8 @@ export const ReturnsView: React.FC<ReturnsViewProps> = ({ branch }) => {
 
   const filteredReturns = useMemo(() => {
     return returns.filter((ret) => {
+      if (startDate && ret.date && ret.date < startDate) return false;
+      if (endDate && ret.date && ret.date > endDate) return false;
       if (reasonFilter !== 'All Reasons' && ret.reason !== reasonFilter) {
         return false;
       }
@@ -107,7 +115,7 @@ export const ReturnsView: React.FC<ReturnsViewProps> = ({ branch }) => {
       }
       return true;
     });
-  }, [returns, reasonFilter, searchQuery]);
+  }, [returns, reasonFilter, searchQuery, startDate, endDate]);
 
   const stats = useMemo(() => {
     const totalRefundValue = filteredReturns.reduce((acc, ret) => acc + ret.totalAmount, 0);
@@ -188,31 +196,41 @@ export const ReturnsView: React.FC<ReturnsViewProps> = ({ branch }) => {
 
       {/* Filter toolbar */}
       <div style={{ padding: '12px 16px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#12151B', border: '1px solid #2A2F38', borderRadius: '6px', padding: '6px 12px', minWidth: '280px' }}>
-          <Search style={{ width: '14px', height: '14px', color: '#8B93A1' }} />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search return #, original invoice, customer..."
-            style={{ background: 'none', border: 'none', color: '#E5E7EB', fontSize: '12px', outline: 'none', width: '100%' }}
-          />
-        </div>
+        {/* Date Period Filter */}
+        <DatePeriodFilter
+          startDate={startDate}
+          endDate={endDate}
+          onChangeStartDate={setStartDate}
+          onChangeEndDate={setEndDate}
+        />
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '11px', color: '#8B93A1' }}>Reason Filter:</span>
-          <select
-            value={reasonFilter}
-            onChange={(e) => setReasonFilter(e.target.value)}
-            style={{ backgroundColor: '#12151B', border: '1px solid #2A2F38', color: '#E5E7EB', fontSize: '12px', borderRadius: '6px', padding: '6px 10px', outline: 'none', cursor: 'pointer' }}
-          >
-            <option value="All Reasons">All Return Reasons</option>
-            <option value="Customer Return / Shade Adjustment">Customer Return / Shade Adjustment</option>
-            <option value="Wrong Shade Tinted">Wrong Shade Tinted</option>
-            <option value="Defective Batch">Defective Batch</option>
-            <option value="Excess Construction Stock">Excess Construction Stock</option>
-            <option value="Can Damage">Can Damage</option>
-          </select>
+        {/* Right Controls: Search + Reason Filter */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#12151B', border: '1px solid #2A2F38', borderRadius: '6px', padding: '6px 12px', minWidth: '240px' }}>
+            <Search style={{ width: '14px', height: '14px', color: '#8B93A1' }} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search return #, original invoice..."
+              style={{ background: 'none', border: 'none', color: '#E5E7EB', fontSize: '12px', outline: 'none', width: '100%' }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <select
+              value={reasonFilter}
+              onChange={(e) => setReasonFilter(e.target.value)}
+              style={{ backgroundColor: '#12151B', border: '1px solid #2A2F38', color: '#E5E7EB', fontSize: '12px', borderRadius: '6px', padding: '6px 10px', outline: 'none', cursor: 'pointer' }}
+            >
+              <option value="All Reasons">All Return Reasons</option>
+              <option value="Customer Return / Shade Adjustment">Customer Return / Shade Adjustment</option>
+              <option value="Wrong Shade Tinted">Wrong Shade Tinted</option>
+              <option value="Defective Batch">Defective Batch</option>
+              <option value="Excess Construction Stock">Excess Construction Stock</option>
+              <option value="Can Damage">Can Damage</option>
+            </select>
+          </div>
         </div>
       </div>
 

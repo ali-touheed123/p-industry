@@ -11,10 +11,12 @@ import {
   ShoppingBag,
   Settings,
   LogOut,
+  Truck,
+  ShieldCheck,
   X,
 } from 'lucide-react';
 
-export type CEOSection = 'overview' | 'sales' | 'returns' | 'day-close' | 'customers' | 'purchase' | 'settings';
+export type CEOSection = 'overview' | 'sales' | 'returns' | 'day-close' | 'customers' | 'purchase' | 'branch-orders' | 'audit-logs' | 'settings';
 
 interface ExecutiveSidebarProps {
   currentSection: CEOSection;
@@ -26,13 +28,15 @@ interface ExecutiveSidebarProps {
 }
 
 const NAV_ITEMS: { id: CEOSection; label: string; icon: React.ComponentType<{ style?: React.CSSProperties }> }[] = [
-  { id: 'overview',  label: 'Overview & P&L',         icon: LayoutDashboard },
-  { id: 'sales',     label: 'Sales Register',          icon: TrendingUp },
-  { id: 'returns',   label: 'Returns & Tinting Loss',  icon: RotateCcw },
-  { id: 'day-close', label: 'Day Close & Variance',    icon: CalendarCheck },
-  { id: 'customers', label: 'Customers & Udhaar',      icon: Users },
-  { id: 'purchase',  label: 'Procurement & POs',       icon: ShoppingBag },
-  { id: 'settings',  label: 'Branch & Commission',     icon: Settings },
+  { id: 'overview',      label: 'Overview & P&L',         icon: LayoutDashboard },
+  { id: 'sales',         label: 'Sales Register',          icon: TrendingUp },
+  { id: 'returns',       label: 'Returns & Tinting Loss',  icon: RotateCcw },
+  { id: 'day-close',     label: 'Day Close & Variance',    icon: CalendarCheck },
+  { id: 'customers',     label: 'Customers & Udhaar',      icon: Users },
+  { id: 'purchase',      label: 'Procurement & POs',       icon: ShoppingBag },
+  { id: 'branch-orders', label: 'Branch Transfers',        icon: Truck },
+  { id: 'audit-logs',    label: 'Audit & Activity Log',    icon: ShieldCheck },
+  { id: 'settings',      label: 'Branch & Commission',     icon: Settings },
 ];
 
 const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () => void }> = ({

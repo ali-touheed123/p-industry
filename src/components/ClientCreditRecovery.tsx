@@ -19,7 +19,7 @@ export default function ClientCreditRecovery({
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'critical' | 'overdue' | 'pending'>('all');
   const [totalCollected, setTotalCollected] = useState(0);
-  const [totalBilled, setTotalBilled] = useState(0);
+  const [totalCreditBilled, setTotalCreditBilled] = useState(0);
   const [thisMonthCollected, setThisMonthCollected] = useState(0);
 
   // Quick Payment Modal State
@@ -62,12 +62,11 @@ export default function ClientCreditRecovery({
         .reduce((s: number, v: any) => s + Number(v.amount || 0), 0);
       setThisMonthCollected(monthCollected);
 
-      // Total lifetime billed (all sales invoices)
+      // Total credit billed to registered clients (excludes walk-in cash sales)
       const invoices: any[] = invoicesData.success ? (invoicesData.invoices || []) : [];
-      const billed = invoices
-        .filter((inv: any) => inv.invoice_type === 'sales')
-        .reduce((s: number, inv: any) => s + Number(inv.net_total || 0), 0);
-      setTotalBilled(billed);
+      const clientSales = invoices.filter((inv: any) => inv.client_id && inv.invoice_type === 'sales');
+      const creditBilled = clientSales.reduce((s: number, inv: any) => s + Number(inv.net_total || 0), 0);
+      setTotalCreditBilled(creditBilled);
     } catch (err) {
       console.error(err);
     } finally {
@@ -82,9 +81,10 @@ export default function ClientCreditRecovery({
   // Aggregate Calculations
   const totalReceivables = clients.reduce((sum, c) => sum + (c.current_balance || 0), 0);
 
-  // Real recovery rate: collected ÷ total billed × 100
-  const recoveryRate = totalBilled > 0
-    ? Math.min(100, Math.round((totalCollected / totalBilled) * 100 * 10) / 10)
+  // Exact Business Recovery Rate: Total Recovered ÷ (Total Recovered + Outstanding Debt) × 100
+  const totalCreditPortfolio = totalCollected + totalReceivables;
+  const recoveryRate = totalCreditPortfolio > 0
+    ? Math.min(100, Math.round((totalCollected / totalCreditPortfolio) * 100))
     : 100;
 
   // Categorize aging by balance amount vs credit limit
@@ -209,7 +209,9 @@ export default function ClientCreditRecovery({
           party_id: selectedClientForPayment.id,
           party_name: selectedClientForPayment.name,
           amount: parseFloat(paymentAmount) || 0,
-          remarks: `Recovery Collection — ${paymentMode} ${paymentNotes ? `(${paymentNotes})` : ''}`,
+          payment_mode: paymentMode,
+          reference_no: paymentMode !== 'Cash' ? paymentNotes : null,
+          remarks: `Recovery Collection — ${paymentMode}${paymentNotes ? ` (${paymentNotes})` : ''}`,
           created_by: staffName,
         }),
       });
@@ -452,12 +454,16 @@ export default function ClientCreditRecovery({
                 <strong className="font-mono" style={{ color: '#065f46' }}>Rs. {thisMonthCollected.toLocaleString()}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span className="text-muted">Total Ever Collected:</span>
-                <strong className="font-mono">Rs. {totalCollected.toLocaleString()}</strong>
+                <span className="text-muted">Total Ever Recovered:</span>
+                <strong className="font-mono" style={{ color: '#065f46' }}>Rs. {totalCollected.toLocaleString()}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span className="text-muted">Total Ever Billed:</span>
-                <strong className="font-mono">Rs. {totalBilled.toLocaleString()}</strong>
+                <span className="text-muted">Client Credit Invoiced:</span>
+                <strong className="font-mono">Rs. {totalCreditBilled.toLocaleString()}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span className="text-muted">Pending Market Udhaar:</span>
+                <strong className="font-mono" style={{ color: totalReceivables > 0 ? '#b45309' : '#065f46' }}>Rs. {totalReceivables.toLocaleString()}</strong>
               </div>
               <div style={{ borderTop: '1px solid var(--outline-variant)', paddingTop: '0.75rem', marginTop: '0.25rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
@@ -523,16 +529,21 @@ export default function ClientCreditRecovery({
                 </select>
               </div>
 
-              <div>
-                <label className="form-label">Payment Reference / Notes</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. Cleared 50% bill / Cheque #8819"
-                  value={paymentNotes}
-                  onChange={e => setPaymentNotes(e.target.value)}
-                />
-              </div>
+              {paymentMode !== 'Cash' && (
+                <div>
+                  <label className="form-label">
+                    {paymentMode === 'Cheque' ? 'Cheque Number / Bank Details *' : 'Transaction Reference / Trx ID *'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    className="form-input"
+                    placeholder={paymentMode === 'Cheque' ? 'e.g. Cheque #881920 (Meezan Bank)' : 'e.g. TRX-991204 / Online Receipt #'}
+                    value={paymentNotes}
+                    onChange={e => setPaymentNotes(e.target.value)}
+                  />
+                </div>
+              )}
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
                 <button

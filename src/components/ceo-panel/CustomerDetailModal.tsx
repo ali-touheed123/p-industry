@@ -3,20 +3,74 @@
 import React, { useState } from 'react';
 import { Customer } from '@/types/ceo';
 import { formatCurrency } from '@/data/ceoMockData';
-import { X, Users, History, AlertCircle } from 'lucide-react';
+import { X, Users, History, AlertCircle, PlusCircle, CheckCircle2, DollarSign } from 'lucide-react';
 
 interface CustomerDetailModalProps {
   customer: Customer | null;
   onClose: () => void;
   branchName: string;
+  tenantId?: string;
+  onPaymentRecorded?: () => void;
 }
 
 export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
   customer,
   onClose,
   branchName,
+  tenantId,
+  onPaymentRecorded,
 }) => {
   const [activeTab, setActiveTab] = useState<'transactions' | 'aging' | 'info'>('transactions');
+  const [showPayModal, setShowPayModal] = useState<boolean>(false);
+  const [payAmount, setPayAmount] = useState<string>('');
+  const [payMode, setPayMode] = useState<string>('Cash');
+  const [payRefNo, setPayRefNo] = useState<string>('');
+  const [payNotes, setPayNotes] = useState<string>('');
+  const [submitting, setSubmitting] = useState<boolean>(false);
+  const [errorMsg, setErrorMsg] = useState<string>('');
+
+  const handleRecordPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customer || !payAmount || !tenantId) return;
+    setSubmitting(true);
+    setErrorMsg('');
+
+    try {
+      const res = await fetch('/api/vouchers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          voucher_type: 'receipt',
+          party_type: 'client',
+          party_id: customer.id,
+          party_name: customer.name,
+          amount: parseFloat(payAmount) || 0,
+          payment_mode: payMode,
+          reference_no: payMode !== 'Cash' ? payRefNo : null,
+          remarks: `Recovery Collection — ${payMode}${payRefNo ? ` (Ref: ${payRefNo})` : ''}${payNotes ? ` • ${payNotes}` : ''}`,
+          created_by: 'CEO Management',
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setShowPayModal(false);
+        setPayAmount('');
+        setPayRefNo('');
+        setPayNotes('');
+        if (onPaymentRecorded) {
+          onPaymentRecorded();
+        }
+      } else {
+        setErrorMsg(data.error || 'Failed to record payment');
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error recording payment receipt');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   if (!customer) return null;
 
@@ -223,12 +277,215 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div style={{ padding: '14px 24px', backgroundColor: '#10141B', borderTop: '1px solid #2A2F38', display: 'flex', justifyContent: 'flex-end' }}>
+        <div style={{ padding: '14px 24px', backgroundColor: '#10141B', borderTop: '1px solid #2A2F38', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            {customer.totalDebt > 0 ? (
+              <button
+                onClick={() => {
+                  setPayAmount(customer.totalDebt.toString());
+                  setShowPayModal(true);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 14px',
+                  backgroundColor: '#C6A15B',
+                  color: '#10141B',
+                  borderRadius: '6px',
+                  border: 'none',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                <DollarSign style={{ width: '14px', height: '14px' }} />
+                Receive Payment / Record Receipt
+              </button>
+            ) : (
+              <span style={{ fontSize: '11px', color: '#34D399', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <CheckCircle2 style={{ width: '14px', height: '14px' }} />
+                Account Settled (Zero Outstanding Debt)
+              </span>
+            )}
+          </div>
+
           <button onClick={onClose} className="ceo-btn-gold">
             Close Statement
           </button>
         </div>
       </div>
+
+      {/* ── Sub-Modal: CEO Record Payment / Recovery ── */}
+      {showPayModal && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 100, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ width: '100%', maxWidth: '420px', backgroundColor: '#161B22', border: '1px solid #2A2F38', borderRadius: '8px', overflow: 'hidden' }}>
+            <div style={{ padding: '16px', borderBottom: '1px solid #2A2F38', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#10141B' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <DollarSign style={{ width: '18px', height: '18px', color: '#C6A15B' }} />
+                <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#E5E7EB', margin: 0 }}>
+                  Record Payment Receipt
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowPayModal(false)}
+                style={{ background: 'none', border: 'none', color: '#8B93A1', cursor: 'pointer' }}
+              >
+                <X style={{ width: '16px', height: '16px' }} />
+              </button>
+            </div>
+
+            <div style={{ padding: '12px 16px', backgroundColor: '#10141B', borderBottom: '1px solid #2A2F38', fontSize: '12px' }}>
+              <div style={{ color: '#8B93A1' }}>Client: <strong style={{ color: '#E5E7EB' }}>{customer.name}</strong></div>
+              <div style={{ color: '#F87171', fontWeight: 600, marginTop: '2px' }}>
+                Outstanding Debt: {formatCurrency(customer.totalDebt)}
+              </div>
+            </div>
+
+            {errorMsg && (
+              <div style={{ padding: '10px 16px', backgroundColor: 'rgba(239,68,68,0.15)', color: '#FCA5A5', fontSize: '12px', borderBottom: '1px solid rgba(239,68,68,0.3)' }}>
+                {errorMsg}
+              </div>
+            )}
+
+            <form onSubmit={handleRecordPayment} style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#8B93A1', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>
+                  Received Amount (PKR) *
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  required
+                  autoFocus
+                  placeholder="0"
+                  value={payAmount}
+                  onChange={(e) => setPayAmount(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: '#10141B',
+                    border: '1px solid #2A2F38',
+                    borderRadius: '6px',
+                    color: '#E5E7EB',
+                    fontSize: '13px',
+                    fontFamily: 'JetBrains Mono, monospace',
+                    fontWeight: 700,
+                    outline: 'none',
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#8B93A1', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>
+                  Payment Mode
+                </label>
+                <select
+                  value={payMode}
+                  onChange={(e) => setPayMode(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: '#10141B',
+                    border: '1px solid #2A2F38',
+                    borderRadius: '6px',
+                    color: '#E5E7EB',
+                    fontSize: '12px',
+                    outline: 'none',
+                  }}
+                >
+                  <option value="Cash">Cash in Hand</option>
+                  <option value="Online Bank Transfer">Online Bank Transfer (Meezan / HBL)</option>
+                  <option value="Cheque">Bank Cheque</option>
+                  <option value="EasyPaisa / JazzCash">EasyPaisa / JazzCash</option>
+                </select>
+              </div>
+
+              {/* Reference number only when not Cash */}
+              {payMode !== 'Cash' && (
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 700, color: '#8B93A1', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>
+                    {payMode === 'Cheque' ? 'Cheque # / Bank Details *' : 'Transaction Ref # / ID *'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder={payMode === 'Cheque' ? 'e.g. Cheque #881920 (Meezan Bank)' : 'e.g. TRX-991204 / HBL Ref #'}
+                    value={payRefNo}
+                    onChange={(e) => setPayRefNo(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      backgroundColor: '#10141B',
+                      border: '1px solid #2A2F38',
+                      borderRadius: '6px',
+                      color: '#E5E7EB',
+                      fontSize: '12px',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+              )}
+
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#8B93A1', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>
+                  Remarks / Notes (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Cleared Site A overdue invoices"
+                  value={payNotes}
+                  onChange={(e) => setPayNotes(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: '#10141B',
+                    border: '1px solid #2A2F38',
+                    borderRadius: '6px',
+                    color: '#E5E7EB',
+                    fontSize: '12px',
+                    outline: 'none',
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px', paddingTop: '10px', borderTop: '1px solid #2A2F38' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowPayModal(false)}
+                  style={{
+                    padding: '8px 14px',
+                    backgroundColor: '#1E232B',
+                    border: '1px solid #2A2F38',
+                    borderRadius: '6px',
+                    color: '#8B93A1',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: '#C6A15B',
+                    color: '#10141B',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {submitting ? 'Recording...' : 'Confirm Receipt'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

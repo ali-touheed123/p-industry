@@ -30,6 +30,8 @@ interface Props {
   tenantName?: string;
   restoringHeldOrder?: any;
   onClearRestoringHeldOrder?: () => void;
+  editingInvoice?: any;
+  onClearEditingInvoice?: () => void;
   pendingOrdersCount?: number;
   onNavigateToOrders?: () => void;
 }
@@ -80,6 +82,8 @@ export default function PosBilling({
   tenantName = 'Main Godown & Retail Counter #1',
   restoringHeldOrder,
   onClearRestoringHeldOrder,
+  editingInvoice,
+  onClearEditingInvoice,
   pendingOrdersCount = 0,
   onNavigateToOrders,
 }: Props) {
@@ -270,6 +274,47 @@ export default function PosBilling({
     }
   }, [restoringHeldOrder, clients]);
 
+  // Load existing invoice into Cart for editing / adding more items
+  useEffect(() => {
+    if (editingInvoice) {
+      const invItems = editingInvoice.invoice_items || editingInvoice.items || [];
+      const mappedItems: InvoiceLineItem[] = invItems.map((it: any, idx: number) => ({
+        id: it.id || `edit-it-${idx}-${Date.now()}`,
+        item: liveItems.find((li) => li.id === it.item_id || li.code === (it.item_code || it.code)),
+        code: it.item_code || it.code || '',
+        productName: it.item_name || it.productName || it.name || 'Product',
+        shadeCode: it.shade_code || it.shadeCode || '—',
+        shadeColorHex: '#94A3B8',
+        packSize: it.pack_size || it.packSize || 'Can',
+        qty: Number(it.qty) || 1,
+        unit: it.unit || 'PCS',
+        rate: Number(it.unit_price || it.rate || it.price) || 0,
+        discountPercent: Number(it.discount_percent || it.discountPercent) || 0,
+      }));
+
+      setLineItems(mappedItems);
+      setInvoiceNo(editingInvoice.invoice_no);
+      if (editingInvoice.date) {
+        setInvoiceDate(editingInvoice.date.split('T')[0]);
+      }
+      if (editingInvoice.client_name) {
+        setCustomerSearch(editingInvoice.client_name);
+      }
+      if (editingInvoice.client_id && clients.length > 0) {
+        const found = clients.find((c) => c.id === editingInvoice.client_id);
+        if (found) setSelectedClient(found);
+      }
+      if (editingInvoice.invoice_type) {
+        setInvoiceType(editingInvoice.invoice_type);
+      }
+      setInvoiceDiscount(Number(editingInvoice.discount) || 0);
+      setDeliveryCharge(Number(editingInvoice.delivery_charge) || 0);
+      setRemarks(editingInvoice.remarks || '');
+      setIsCashManuallyEdited(false);
+      showFeedback(`Loaded invoice ${editingInvoice.invoice_no} for editing & adding items.`);
+    }
+  }, [editingInvoice, clients, liveItems]);
+
   // Calculations
   const itemSubtotal = lineItems.reduce((sum, item) => {
     const lineGross = item.rate * item.qty;
@@ -300,7 +345,7 @@ export default function PosBilling({
   // Helper for shade info — always use the product's own shade_code from DB.
   const getShadeInfo = (item: Item) => {
     if (item.shade_code) {
-      return { shadeCode: item.shade_code, shadeColorHex: item.shade_hex || '#94A3B8' };
+      return { shadeCode: item.shade_code, shadeColorHex: '#94A3B8' };
     }
     return { shadeCode: '—', shadeColorHex: '#94A3B8' };
   };
@@ -477,7 +522,6 @@ export default function PosBilling({
 
   // Cancel / Clear Cart
   const handleCancelInvoice = () => {
-    if (lineItems.length === 0) return;
     setLineItems([]);
     setCashPayment(0);
     setIsCashManuallyEdited(false);
@@ -487,7 +531,13 @@ export default function PosBilling({
     setInvoiceDiscount(0);
     setDeliveryCharge(0);
     setRemarks('');
-    showFeedback('Invoice cleared.');
+    if (editingInvoice) {
+      onClearEditingInvoice?.();
+      setInvoiceNo(`INV-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`);
+      showFeedback('Exited invoice editing.');
+    } else {
+      showFeedback('Invoice cleared.');
+    }
   };
 
   // Checkout and Database Persistence
@@ -560,12 +610,12 @@ export default function PosBilling({
       bank_paid: bankPayment,
       others_paid: othersPayment,
       status: 'completed',
+      created_by: staffName || 'Counter Staff',
       items: lineItems.map((ci) => ({
         item_id: ci.item?.id || null,
         item_code: ci.code,
         item_name: ci.productName,
         shade_code: ci.shadeCode,
-        shade_hex: ci.shadeColorHex,
         pack_size: ci.packSize,
         unit: ci.unit,
         qty: ci.qty,
@@ -577,10 +627,17 @@ export default function PosBilling({
     };
 
     try {
-      const res = await fetch('/api/invoices', {
-        method: 'POST',
+      const isEditingExisting = Boolean(editingInvoice?.id);
+      const apiEndpoint = '/api/invoices';
+      const apiMethod = isEditingExisting ? 'PATCH' : 'POST';
+      const payloadToSend = isEditingExisting
+        ? { id: editingInvoice.id, ...invoicePayload }
+        : invoicePayload;
+
+      const res = await fetch(apiEndpoint, {
+        method: apiMethod,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(invoicePayload),
+        body: JSON.stringify(payloadToSend),
       });
 
       const data = await res.json();
@@ -606,9 +663,13 @@ export default function PosBilling({
         onCompleteSale(completedInvoice);
         if (openPrint) {
           setPrintReceiptData(completedInvoice);
-          showFeedback(`Invoice ${finalServerInvoiceNo} finalized & sent to thermal printer.`);
+          showFeedback(isEditingExisting ? `Invoice #${finalServerInvoiceNo} updated & receipt ready!` : `Invoice ${finalServerInvoiceNo} finalized & sent to thermal printer.`);
         } else {
-          showFeedback(`Invoice ${finalServerInvoiceNo} saved to database.`);
+          showFeedback(isEditingExisting ? `Invoice #${finalServerInvoiceNo} updated successfully.` : `Invoice ${finalServerInvoiceNo} saved to database.`);
+        }
+
+        if (isEditingExisting) {
+          onClearEditingInvoice?.();
         }
 
         // Reset state for next customer
@@ -758,6 +819,53 @@ export default function PosBilling({
 
         {/* Left Scrollable Work Area */}
         <div className="pos-workspace-body pos-workspace-scroll">
+          {/* Editing Invoice Banner */}
+          {editingInvoice && (
+            <div style={{
+              background: 'linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%)',
+              border: '1px solid #F59E0B',
+              borderRadius: '10px',
+              padding: '10px 14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+              boxShadow: '0 2px 4px rgba(245, 158, 11, 0.15)',
+              marginBottom: '10px',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '18px' }}>📝</span>
+                <div>
+                  <div style={{ fontSize: '12.5px', fontWeight: 800, color: '#92400E' }}>
+                    Editing Invoice #{editingInvoice.invoice_no} (Original Total: Rs. {Number(editingInvoice.net_total || 0).toLocaleString()})
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#B45309' }}>
+                    Naye items add karein ya quantities badlein. Checkout par yehi invoice update hogi.
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  onClearEditingInvoice?.();
+                  handleCancelInvoice();
+                }}
+                style={{
+                  padding: '5px 10px',
+                  background: '#FFFFFF',
+                  color: '#92400E',
+                  border: '1px solid #F59E0B',
+                  borderRadius: '6px',
+                  fontSize: '11.5px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                ✕ Cancel Edit &amp; New Sale
+              </button>
+            </div>
+          )}
           {/* Top Row: Segmented Toggle (Sales Invoice / Return) + Invoice # / Date / Hold Button */}
           <div className="pos-card-box pos-row-between">
             {/* Sales Invoice / Return Toggle */}

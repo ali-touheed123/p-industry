@@ -4,6 +4,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Branch, Invoice } from '@/types/ceo';
 import { formatCurrency } from '@/data/ceoMockData';
 import { TrendingUp, BarChart3, Calendar, FileText } from 'lucide-react';
+import { DatePeriodFilter } from './DatePeriodFilter';
 
 interface OverviewViewProps {
   branch: Branch;
@@ -312,26 +313,35 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
             </p>
           </div>
 
-          {/* Quick Date Filters */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-            {(['Today (1D)', 'Yesterday', 'Last 3 Days', 'Last 7 Days', 'This Month', 'All Time'] as QuickFilter[]).map((filter) => (
-              <button
-                key={filter}
-                onClick={() => handleQuickFilter(filter)}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: '6px',
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  border: quickFilter === filter ? '1px solid rgba(198, 161, 91, 0.6)' : '1px solid #2A2F38',
-                  backgroundColor: quickFilter === filter ? '#12151B' : '#1C2128',
-                  color: quickFilter === filter ? '#C6A15B' : '#8B93A1',
-                }}
-              >
-                {filter}
-              </button>
-            ))}
+          {/* Date Period Picker + Quick Date Filters */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <DatePeriodFilter
+              startDate={fromDate}
+              endDate={toDate}
+              onChangeStartDate={(d) => setFromDate(d)}
+              onChangeEndDate={(d) => setToDate(d)}
+            />
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+              {(['Today (1D)', 'Yesterday', 'Last 3 Days', 'Last 7 Days', 'This Month', 'All Time'] as QuickFilter[]).map((filter) => (
+                <button
+                  key={filter}
+                  onClick={() => handleQuickFilter(filter)}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    border: quickFilter === filter ? '1px solid rgba(198, 161, 91, 0.6)' : '1px solid #2A2F38',
+                    backgroundColor: quickFilter === filter ? '#12151B' : '#1C2128',
+                    color: quickFilter === filter ? '#C6A15B' : '#8B93A1',
+                  }}
+                >
+                  {filter}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>

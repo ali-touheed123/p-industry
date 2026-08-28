@@ -25,14 +25,19 @@ export async function POST(req: NextRequest) {
     }
 
     const cleanUsername = username.trim().toLowerCase();
+    const altUsername1 = cleanUsername.replace(/-/g, '_');
+    const altUsername2 = cleanUsername.replace(/_/g, '-');
+    const lookupUsernames = Array.from(new Set([cleanUsername, altUsername1, altUsername2]));
 
     // 2. Query user
-    const { data: user, error: userErr } = await supabaseAdmin
+    const { data: userList, error: userErr } = await supabaseAdmin
       .from('app_users')
       .select('*, tenants(*)')
-      .eq('username', cleanUsername)
+      .in('username', lookupUsernames)
       .eq('is_active', true)
-      .single();
+      .limit(1);
+
+    const user = userList && userList.length > 0 ? userList[0] : null;
 
     if (userErr || !user) {
       return NextResponse.json({ success: false, error: 'Invalid username or inactive account' }, { status: 401 });

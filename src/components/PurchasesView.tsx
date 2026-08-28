@@ -78,60 +78,7 @@ const SHADE_COLOR_MAP: Record<string, string> = {
   'Standard Off-White': '#F8FAFC',
 };
 
-const DEFAULT_SUPPLIERS: any[] = [
-  {
-    id: 'sup-01',
-    name: 'IMRAN BHAI / SHAH ZAIN PAINT',
-    contact_person: 'Imran Shah',
-    phone: '+92 300 5518290',
-    city: 'Peshawar Road Industrial Depot',
-    credit_limit: 2500000,
-    current_balance: 145200,
-    days_outstanding: 15,
-    last_payment_amount: 85000,
-    last_payment_date: '18 Aug 2026',
-    category: 'Paint Manufacturer & Raw Supply',
-  },
-  {
-    id: 'sup-02',
-    name: 'National Resin & Monomer Polymer Corp',
-    contact_person: 'Sarmad Bhatti',
-    phone: '+92 42 35789011',
-    city: 'Sundar Industrial Zone',
-    credit_limit: 3000000,
-    current_balance: 1420000,
-    days_outstanding: 35,
-    last_payment_amount: 250000,
-    last_payment_date: '10 Aug 2026',
-    category: 'Raw Chemical Supplier',
-  },
-  {
-    id: 'sup-03',
-    name: 'Berger Paints Pakistan Ltd - Central Supply',
-    contact_person: 'Tariq Mehmood',
-    phone: '+92 42 111 237 437',
-    city: 'Multan Road Factory Outlet',
-    credit_limit: 5000000,
-    current_balance: 840000,
-    days_outstanding: 28,
-    last_payment_amount: 500000,
-    last_payment_date: '14 Aug 2026',
-    category: 'Finished Paints OEM',
-  },
-  {
-    id: 'sup-04',
-    name: 'Master Paints Industries (Pvt) Ltd',
-    contact_person: 'Mian Usman',
-    phone: '+92 42 37210982',
-    city: 'Badami Bagh Wholesale Center',
-    credit_limit: 4000000,
-    current_balance: 520000,
-    days_outstanding: 18,
-    last_payment_amount: 120000,
-    last_payment_date: '02 Aug 2026',
-    category: 'Decorative Coatings',
-  },
-];
+
 
 export default function PurchasesView({
   tenantId,
@@ -205,17 +152,14 @@ export default function PurchasesView({
         const res = await fetch(`/api/suppliers?tenant_id=${tenantId}`);
         const data = await res.json();
         if (data.success && data.suppliers?.length > 0) {
-          const merged = data.suppliers.map((s: any) => ({
-            ...s,
-            currentBalance: s.current_balance || s.currentBalance || 0,
-            daysOutstanding: s.days_outstanding || 15,
-            lastPaymentAmount: s.last_payment_amount || 75000,
-            lastPaymentDate: s.last_payment_date || '18 Aug',
-            category: s.category || 'Paint Manufacturer & Raw Supply',
-          }));
-          setSuppliers(merged);
-          setSelectedSupplier(merged[0]);
-          setSupplierQuery(merged[0].name);
+          setSuppliers(data.suppliers);
+          // Do not pre-select supplier by default
+          setSelectedSupplier(null);
+          setSupplierQuery('');
+        } else {
+          setSuppliers([]);
+          setSelectedSupplier(null);
+          setSupplierQuery('');
         }
       } catch (err) {
         console.error('Failed to load suppliers', err);
@@ -229,14 +173,14 @@ export default function PurchasesView({
 
   const totalStdDiscount = items.reduce((sum, item) => {
     const gross = item.rate * item.qty;
-    return sum + (gross * item.stdDiscPercent) / 100;
+    return sum + (gross * (item.stdDiscPercent || 0)) / 100;
   }, 0);
 
   const taxableValue = Math.max(0, grossSubtotal - totalStdDiscount);
 
   const computedItemTaxes = items.reduce((sum, item) => {
     const gross = item.rate * item.qty;
-    const discounted = gross - (gross * item.stdDiscPercent) / 100;
+    const discounted = gross - (gross * (item.stdDiscPercent || 0)) / 100;
     return sum + (discounted * item.taxPercent) / 100;
   }, 0);
 
@@ -247,9 +191,9 @@ export default function PurchasesView({
     taxableValue + effectiveSalesTax - additionalDiscount + cartageFreight
   );
 
-  const currentSupplierBalance = selectedSupplier ? (selectedSupplier.currentBalance ?? selectedSupplier.current_balance ?? 0) : 0;
-  const lastPayment = selectedSupplier ? (selectedSupplier.lastPaymentAmount ?? selectedSupplier.last_payment_amount ?? 0) : 0;
-  const lastPaymentDateStr = selectedSupplier ? (selectedSupplier.lastPaymentDate || selectedSupplier.last_payment_date || '—') : '—';
+  const currentSupplierBalance = selectedSupplier ? Number(selectedSupplier.current_balance || selectedSupplier.currentBalance || 0) : 0;
+  const lastPayment = selectedSupplier?.last_payment_amount ? Number(selectedSupplier.last_payment_amount) : 0;
+  const lastPaymentDateStr = selectedSupplier?.last_payment_date || '—';
 
   const projectedBalance =
     purchaseType === 'purchase'
@@ -260,7 +204,7 @@ export default function PurchasesView({
   const handleAddItem = () => {
     const prod = selectedProduct || liveCatalogItems[0];
     const shade = prod?.shade_code || 'Off-White 101';
-    const shadeHex = prod?.shade_hex || SHADE_COLOR_MAP[shade] || '#FAF9F6';
+    const shadeHex = SHADE_COLOR_MAP[shade] || '#FAF9F6';
 
     const newItem: PurchaseLineItem = {
       id: `pli-${Date.now()}`,
@@ -272,8 +216,8 @@ export default function PurchasesView({
       packSize: prod?.pack_size || prod?.unit || '4L Gallon',
       qty: Math.max(1, inputQty),
       unit: inputUnit || prod?.unit || 'Gallon',
-      rate: inputRate > 0 ? inputRate : (prod?.trade_price || prod?.cost_price || 2950),
-      stdDiscPercent: inputStdDisc,
+      rate: inputRate > 0 ? inputRate : (prod?.cost_price || 2950),
+      stdDiscPercent: Math.max(0, Math.min(100, inputStdDisc || 0)),
       taxPercent: inputTax,
     };
 
@@ -297,6 +241,11 @@ export default function PurchasesView({
       return;
     }
     setItems(items.map((i) => (i.id === id ? { ...i, qty: newQty } : i)));
+  };
+
+  const handleUpdateDisc = (id: string, newDisc: number) => {
+    const clampedDisc = Math.max(0, Math.min(100, newDisc));
+    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, stdDiscPercent: clampedDisc } : i)));
   };
 
   const handleNewPurchase = () => {
@@ -538,7 +487,7 @@ export default function PurchasesView({
           </div>
         </div>
 
-        {/* Section 1 & 2: Supplier Account and Ledger & Credit Terms (With LAST PAYMENT Added) */}
+        {/* Section 1 & 2: Supplier Account and Ledger & Credit Terms */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '0.875rem' }}>
           {/* 1. Supplier Account Search */}
           <div style={{ background: '#FFFFFF', padding: '0.875rem', borderRadius: '12px', border: '1px solid #E2E8F0', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', position: 'relative' }}>
@@ -547,9 +496,11 @@ export default function PurchasesView({
                 <Building2 style={{ width: 14, height: 14, color: '#F97316' }} />
                 Supplier Account
               </label>
-              <span style={{ fontSize: '9.5px', fontFamily: 'JetBrains Mono, monospace', color: '#166534', background: '#DCFCE7', padding: '2px 6px', borderRadius: '4px', border: '1px solid #BBF7D0', fontWeight: 600 }}>
-                NTN Verified
-              </span>
+              {selectedSupplier?.code && (
+                <span style={{ fontSize: '9.5px', fontFamily: 'JetBrains Mono, monospace', color: '#0369A1', background: '#E0F2FE', padding: '2px 6px', borderRadius: '4px', border: '1px solid #BAE6FD', fontWeight: 600 }}>
+                  {selectedSupplier.code}
+                </span>
+              )}
             </div>
             <div style={{ position: 'relative' }}>
               <input
@@ -577,13 +528,13 @@ export default function PurchasesView({
                     >
                       <div>
                         <div style={{ fontSize: '12px', fontWeight: 700, color: '#0F172A' }}>{sup.name}</div>
-                        <div style={{ fontSize: '10.5px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>{sup.city} · {sup.phone}</div>
+                        <div style={{ fontSize: '10.5px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>{sup.city || sup.address || '—'} · {sup.phone || 'No phone'}</div>
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         <div style={{ fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A' }}>
-                          Rs. {Number(sup.currentBalance || sup.current_balance || 0).toLocaleString()}
+                          Rs. {Number(sup.current_balance || sup.currentBalance || 0).toLocaleString()}
                         </div>
-                        <div style={{ fontSize: '9px', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>Balance</div>
+                        <div style={{ fontSize: '9px', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>Payable Balance</div>
                       </div>
                     </button>
                   ))}
@@ -592,52 +543,54 @@ export default function PurchasesView({
             </div>
           </div>
 
-          {/* 2. Supplier Ledger & Terms (WITH LAST PAYMENT INTEGRATED) */}
+          {/* 2. Supplier Ledger & Terms */}
           <div style={{ background: '#FFFFFF', padding: '0.875rem', borderRadius: '12px', border: '1px solid #E2E8F0', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
               <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', color: '#64748B', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <User style={{ width: 14, height: 14, color: '#F97316' }} />
-                Ledger &amp; Credit Terms
+                Ledger &amp; Contact Info
               </span>
               <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B', background: '#F1F5F9', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
-                {selectedSupplier?.category || 'Paint Manufacturer'}
+                {selectedSupplier?.name ? 'Registered Supplier' : 'No Supplier Selected'}
               </span>
             </div>
             
-            {/* 4-Column Balanced Grid: Cur. Balance, Last Payment, Credit Terms, City / Hub */}
+            {/* 4-Column Balanced Grid: Cur. Balance, Last Payment, Phone Contact, City / Location */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', paddingTop: '8px', borderTop: '1px solid #F1F5F9' }}>
               {/* Cur. Balance */}
               <div>
-                <div style={{ fontSize: '9.5px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>Cur. Balance</div>
-                <div style={{ fontWeight: 800, color: '#0F172A', fontSize: '13px', fontFamily: 'JetBrains Mono, monospace', marginTop: '2px' }}>
+                <div style={{ fontSize: '9.5px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>Payable Balance</div>
+                <div style={{ fontWeight: 800, color: currentSupplierBalance > 0 ? '#DC2626' : '#0F172A', fontSize: '13px', fontFamily: 'JetBrains Mono, monospace', marginTop: '2px' }}>
                   Rs. {Number(currentSupplierBalance).toLocaleString()}
                 </div>
               </div>
 
-              {/* Last Payment (NEWLY ADDED) */}
+              {/* Last Payment */}
               <div>
                 <div style={{ fontSize: '9.5px', color: '#16A34A', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700 }}>Last Payment</div>
-                <div style={{ fontWeight: 800, color: '#16A34A', fontSize: '13px', fontFamily: 'JetBrains Mono, monospace', marginTop: '2px' }}>
-                  Rs. {Number(lastPayment).toLocaleString()}
+                <div style={{ fontWeight: 800, color: lastPayment > 0 ? '#16A34A' : '#64748B', fontSize: '13px', fontFamily: 'JetBrains Mono, monospace', marginTop: '2px' }}>
+                  {lastPayment > 0 ? `Rs. ${Number(lastPayment).toLocaleString()}` : '—'}
                 </div>
-                <div style={{ fontSize: '9px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
-                  {lastPaymentDateStr}
+                {lastPaymentDateStr !== '—' && (
+                  <div style={{ fontSize: '9px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
+                    {lastPaymentDateStr}
+                  </div>
+                )}
+              </div>
+
+              {/* Phone Contact */}
+              <div>
+                <div style={{ fontSize: '9.5px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>Phone Contact</div>
+                <div style={{ fontWeight: 600, color: '#334155', fontSize: '12px', marginTop: '2px', fontFamily: 'JetBrains Mono, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {selectedSupplier?.phone || '—'}
                 </div>
               </div>
 
-              {/* Credit Terms */}
+              {/* City / Address */}
               <div>
-                <div style={{ fontSize: '9.5px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>Credit Terms</div>
-                <div style={{ fontWeight: 600, color: '#334155', fontSize: '12px', marginTop: '2px' }}>
-                  {selectedSupplier?.daysOutstanding || selectedSupplier?.days_outstanding || 15} Days Net
-                </div>
-              </div>
-
-              {/* City / Hub */}
-              <div>
-                <div style={{ fontSize: '9.5px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>City / Hub</div>
+                <div style={{ fontSize: '9.5px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>City / Address</div>
                 <div style={{ fontWeight: 600, color: '#334155', fontSize: '12px', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {selectedSupplier?.city || 'Industrial Hub'}
+                  {selectedSupplier?.city || selectedSupplier?.address || '—'}
                 </div>
               </div>
             </div>
@@ -675,7 +628,7 @@ export default function PurchasesView({
                     onClick={() => {
                       setSelectedProduct(p);
                       setProductQuery(p.name);
-                      setInputRate(p.trade_price || p.cost_price || p.retail_price * 0.85);
+                      setInputRate(p.cost_price || p.retail_price * 0.85);
                       setInputUnit(p.unit);
                       setShowProductDropdown(false);
                     }}
@@ -689,7 +642,7 @@ export default function PurchasesView({
                     </div>
                     <div style={{ textAlign: 'right' }}>
                       <div style={{ fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A' }}>
-                        Rs. {(p.trade_price || p.cost_price || p.retail_price * 0.85).toLocaleString()}
+                        Rs. {(p.cost_price || p.retail_price * 0.85).toLocaleString()}
                       </div>
                       <div style={{ fontSize: '9px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
                         Stock: {p.stock_qty || 0} {p.unit}
@@ -711,6 +664,23 @@ export default function PurchasesView({
               min={1}
               value={inputQty}
               onChange={(e) => setInputQty(Math.max(1, parseInt(e.target.value, 10) || 1))}
+              style={{ width: '100%', fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A', background: 'transparent', textAlign: 'center', border: 'none', outline: 'none' }}
+            />
+          </div>
+
+          {/* Disc % Field */}
+          <div style={{ width: '90px', flexShrink: 0, display: 'flex', alignItems: 'center', background: '#F8FAFC', border: '1px solid #CBD5E1', borderRadius: '8px', padding: '4px 8px' }}>
+            <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B', textTransform: 'uppercase', fontWeight: 700, marginRight: '4px' }}>
+              DISC %:
+            </span>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={0.5}
+              value={inputStdDisc || ''}
+              placeholder="0"
+              onChange={(e) => setInputStdDisc(Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)))}
               style={{ width: '100%', fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A', background: 'transparent', textAlign: 'center', border: 'none', outline: 'none' }}
             />
           </div>
@@ -740,9 +710,9 @@ export default function PurchasesView({
                   <th style={{ padding: '10px 8px', fontWeight: 700, textAlign: 'center', whiteSpace: 'nowrap' }}>Qty</th>
                   <th style={{ padding: '10px 8px', fontWeight: 700, whiteSpace: 'nowrap' }}>Unit</th>
                   <th style={{ padding: '10px 8px', fontWeight: 700, textAlign: 'right', whiteSpace: 'nowrap' }}>Rate</th>
-                  <th style={{ padding: '10px 8px', fontWeight: 700, textAlign: 'right', whiteSpace: 'nowrap' }}>Disc %</th>
+                  <th style={{ padding: '10px 8px', fontWeight: 700, textAlign: 'right', whiteSpace: 'nowrap', width: '85px' }}>Disc %</th>
                   <th style={{ padding: '10px 8px', fontWeight: 700, textAlign: 'right', whiteSpace: 'nowrap' }}>Amount</th>
-                  <th style={{ padding: '10px 8px', fontWeight: 700, textAlign: 'center', whiteSpace: 'nowrap', width: '70px' }}>Action</th>
+                  <th style={{ padding: '10px 8px', fontWeight: 700, textAlign: 'center', whiteSpace: 'nowrap', width: '50px' }}>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -755,7 +725,7 @@ export default function PurchasesView({
                 ) : (
                   items.map((item, index) => {
                     const lineGross = item.rate * item.qty;
-                    const lineDisc = (lineGross * item.stdDiscPercent) / 100;
+                    const lineDisc = (lineGross * (item.stdDiscPercent || 0)) / 100;
                     const lineNet = lineGross - lineDisc;
 
                     return (
@@ -807,31 +777,32 @@ export default function PurchasesView({
                         <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600, color: '#334155', whiteSpace: 'nowrap' }}>
                           {item.rate.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                         </td>
-                        <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', color: '#64748B', whiteSpace: 'nowrap' }}>
-                          {item.stdDiscPercent.toFixed(2)}
+                        <td style={{ padding: '6px 8px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', background: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '6px', padding: '2px 6px', width: '70px' }}>
+                            <input
+                              type="number"
+                              min={0}
+                              max={100}
+                              step={0.5}
+                              value={item.stdDiscPercent !== undefined ? item.stdDiscPercent : 0}
+                              onChange={(e) => handleUpdateDisc(item.id, parseFloat(e.target.value) || 0)}
+                              style={{ width: '100%', fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A', background: 'transparent', textAlign: 'right', border: 'none', outline: 'none' }}
+                            />
+                            <span style={{ fontSize: '10px', color: '#64748B', marginLeft: '2px', fontFamily: 'JetBrains Mono, monospace' }}>%</span>
+                          </div>
                         </td>
                         <td style={{ padding: '10px 8px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A', whiteSpace: 'nowrap' }}>
                           {lineNet.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                         </td>
                         <td style={{ padding: '10px 8px', textAlign: 'center', whiteSpace: 'nowrap' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                            <button
-                              type="button"
-                              onClick={() => setEditingItem(item)}
-                              style={{ padding: '4px', color: '#64748B', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px' }}
-                              title="Edit Line Item"
-                            >
-                              <Edit2 style={{ width: 14, height: 14 }} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveItem(item.id)}
-                              style={{ padding: '4px', color: '#DC2626', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px' }}
-                              title="Delete Line Item"
-                            >
-                              <Trash2 style={{ width: 14, height: 14 }} />
-                            </button>
-                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveItem(item.id)}
+                            style={{ padding: '4px', color: '#DC2626', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px' }}
+                            title="Delete Line Item"
+                          >
+                            <Trash2 style={{ width: 14, height: 14 }} />
+                          </button>
                         </td>
                       </tr>
                     );
@@ -1040,12 +1011,7 @@ export default function PurchasesView({
                   </span>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#475569' }}>
-                  <span>(-) Std. Discount</span>
-                  <span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#64748B' }}>
-                    Rs. {totalStdDiscount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                </div>
+
 
                 <div
                   style={{

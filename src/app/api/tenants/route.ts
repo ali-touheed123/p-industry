@@ -298,7 +298,6 @@ export async function DELETE(req: NextRequest) {
     }
 
     // 4. Clean up other child tables
-    await supabaseAdmin.from('ceo_tenants').delete().eq('tenant_id', id);
     await supabaseAdmin.from('app_users').delete().eq('tenant_id', id);
     await supabaseAdmin.from('held_invoices').delete().eq('tenant_id', id);
     await supabaseAdmin.from('items').delete().eq('tenant_id', id);
@@ -309,9 +308,6 @@ export async function DELETE(req: NextRequest) {
     await supabaseAdmin.from('suppliers').delete().eq('tenant_id', id);
     await supabaseAdmin.from('audit_logs').delete().eq('tenant_id', id);
     await supabaseAdmin.from('vouchers').delete().eq('tenant_id', id);
-    try {
-      await supabaseAdmin.from('stock_transfers').delete().or(`from_tenant_id.eq.${id},to_tenant_id.eq.${id}`);
-    } catch {}
 
     // 5. Finally delete the tenant
     const { error } = await supabaseAdmin.from('tenants').delete().eq('id', id);

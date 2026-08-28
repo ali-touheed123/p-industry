@@ -14,6 +14,8 @@ export interface Branch {
   healthStatus: 'Optimal' | 'Attention' | 'Normal';
   inventoryValue: number;
   slug?: string;
+  userId?: string;
+  counterUsername?: string;
 }
 
 export interface InvoiceItem {
@@ -110,6 +112,13 @@ export interface DayCloseRecord {
     department: string;
     amount: number;
   }[];
+  handover?: {
+    previousClosingCash: number;
+    openingCountedCash: number;
+    handoverVariance: number;
+    handoverStatus: 'MATCHED' | 'SHORT' | 'EXCESS';
+    handoverNotes?: string;
+  };
 }
 
 export interface CustomerTransaction {

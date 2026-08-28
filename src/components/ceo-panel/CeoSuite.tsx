@@ -12,6 +12,8 @@ import { ReturnsView } from './ReturnsView';
 import { DayCloseView } from './DayCloseView';
 import { CustomersView } from './CustomersView';
 import { PurchaseView } from './PurchaseView';
+import { BranchOrdersView } from './BranchOrdersView';
+import { AuditLogsView } from './AuditLogsView';
 import { SettingsView } from './SettingsView';
 import './ceo-panel.css';
 
@@ -49,7 +51,7 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
           region: `${city} • Reg ${idx + 1}`,
           code: `PK-${(idx + 1).toString().padStart(2, '0')}`,
           address: tenant.address || 'Commercial Area',
-          manager: counter.full_name || ownerName,
+          manager: counter.full_name || counter.username || ownerName,
           activeRegisters: 1,
           todaySales: 0,
           monthlySales: 0,
@@ -57,6 +59,8 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
           healthStatus: 'Optimal',
           inventoryValue: 0,
           slug: tenant.slug,
+          userId: counter.id,
+          counterUsername: counter.username,
         };
       });
       setBranches(multiBranches);
@@ -188,13 +192,15 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
             boxSizing: 'border-box',
           }}
         >
-          {currentSection === 'overview'  && <OverviewView key={selectedBranch.id} branch={selectedBranch} />}
-          {currentSection === 'sales'     && <SalesView key={selectedBranch.id} branch={selectedBranch} />}
-          {currentSection === 'returns'   && <ReturnsView key={selectedBranch.id} branch={selectedBranch} />}
-          {currentSection === 'day-close' && <DayCloseView key={selectedBranch.id} branch={selectedBranch} />}
-          {currentSection === 'customers' && <CustomersView key={selectedBranch.id} branch={selectedBranch} />}
-          {currentSection === 'purchase'  && <PurchaseView key={selectedBranch.id} branch={selectedBranch} />}
-          {currentSection === 'settings'  && <SettingsView tenant={tenant} />}
+          {currentSection === 'overview'      && <OverviewView key={selectedBranch.id} branch={selectedBranch} />}
+          {currentSection === 'sales'         && <SalesView key={selectedBranch.id} branch={selectedBranch} />}
+          {currentSection === 'returns'       && <ReturnsView key={selectedBranch.id} branch={selectedBranch} />}
+          {currentSection === 'day-close'     && <DayCloseView key={selectedBranch.id} branch={selectedBranch} />}
+          {currentSection === 'customers'     && <CustomersView key={selectedBranch.id} branch={selectedBranch} />}
+          {currentSection === 'purchase'      && <PurchaseView key={selectedBranch.id} branch={selectedBranch} />}
+          {currentSection === 'branch-orders' && <BranchOrdersView key={selectedBranch.id} branch={selectedBranch} />}
+          {currentSection === 'audit-logs'    && <AuditLogsView key={selectedBranch.id} branch={selectedBranch} />}
+          {currentSection === 'settings'      && <SettingsView tenant={tenant} />}
         </main>
       </div>
     </div>

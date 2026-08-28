@@ -5,12 +5,18 @@ import { Branch, PurchaseRecord } from '@/types/ceo';
 import { formatCurrency } from '@/data/ceoMockData';
 import { Search, ChevronRight, ShoppingBag } from 'lucide-react';
 import { PurchaseDetailModal } from './PurchaseDetailModal';
+import { DatePeriodFilter } from './DatePeriodFilter';
 
 interface PurchaseViewProps {
   branch: Branch;
 }
 
 export const PurchaseView: React.FC<PurchaseViewProps> = ({ branch }) => {
+  const todayIso = new Date().toISOString().split('T')[0];
+  const firstOfMonthIso = todayIso.substring(0, 8) + '01';
+
+  const [startDate, setStartDate] = useState<string>(firstOfMonthIso);
+  const [endDate, setEndDate] = useState<string>(todayIso);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('All Statuses');
   const [selectedPurchase, setSelectedPurchase] = useState<PurchaseRecord | null>(null);
@@ -99,6 +105,8 @@ export const PurchaseView: React.FC<PurchaseViewProps> = ({ branch }) => {
 
   const filteredPurchases = useMemo(() => {
     return purchases.filter((p) => {
+      if (startDate && p.date && p.date < startDate) return false;
+      if (endDate && p.date && p.date > endDate) return false;
       if (statusFilter !== 'All Statuses' && p.paymentStatus !== statusFilter) {
         return false;
       }
@@ -111,7 +119,7 @@ export const PurchaseView: React.FC<PurchaseViewProps> = ({ branch }) => {
       }
       return true;
     });
-  }, [purchases, statusFilter, searchQuery]);
+  }, [purchases, statusFilter, searchQuery, startDate, endDate]);
 
   const stats = useMemo(() => {
     const totalCost = filteredPurchases.reduce((acc, p) => acc + p.totalCost, 0);
@@ -192,29 +200,47 @@ export const PurchaseView: React.FC<PurchaseViewProps> = ({ branch }) => {
 
       {/* Filter toolbar */}
       <div style={{ padding: '12px 16px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#12151B', border: '1px solid #2A2F38', borderRadius: '6px', padding: '6px 12px', minWidth: '280px' }}>
-          <Search style={{ width: '14px', height: '14px', color: '#8B93A1' }} />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search PO #, supplier name, bill ref..."
-            style={{ background: 'none', border: 'none', color: '#E5E7EB', fontSize: '12px', outline: 'none', width: '100%' }}
-          />
-        </div>
+        {/* Date Period Filter */}
+        <DatePeriodFilter
+          startDate={startDate}
+          endDate={endDate}
+          onChangeStartDate={setStartDate}
+          onChangeEndDate={setEndDate}
+        />
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '11px', color: '#8B93A1' }}>Status:</span>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            style={{ backgroundColor: '#12151B', border: '1px solid #2A2F38', color: '#E5E7EB', fontSize: '12px', borderRadius: '6px', padding: '6px 10px', outline: 'none', cursor: 'pointer' }}
-          >
-            <option value="All Statuses">All Statuses</option>
-            <option value="Paid">Paid in Full</option>
-            <option value="Partial">Partial Settlement</option>
-            <option value="Due">Payment Due</option>
-          </select>
+        {/* Right Controls: Search + Status Filter */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#12151B', border: '1px solid #2A2F38', borderRadius: '6px', padding: '6px 12px', minWidth: '240px' }}>
+            <Search style={{ width: '14px', height: '14px', color: '#8B93A1' }} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search PO #, supplier, consignment..."
+              style={{ background: 'none', border: 'none', color: '#E5E7EB', fontSize: '12px', outline: 'none', width: '100%' }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {['All Statuses', 'Paid', 'Partial', 'Due'].map((st) => (
+              <button
+                key={st}
+                onClick={() => setStatusFilter(st)}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  border: statusFilter === st ? '1px solid rgba(198, 161, 91, 0.6)' : '1px solid #2A2F38',
+                  backgroundColor: statusFilter === st ? '#12151B' : '#1C2128',
+                  color: statusFilter === st ? '#C6A15B' : '#8B93A1',
+                }}
+              >
+                {st}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

@@ -369,6 +369,108 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ branch }) => {
         customer={selectedCustomer}
         onClose={() => setSelectedCustomer(null)}
         branchName={branch.name}
+        tenantId={branch?.id ? (/-b\d+$/.test(branch.id) ? branch.id.replace(/-b\d+$/, '') : branch.id) : (branch?.slug || '')}
+        onPaymentRecorded={() => {
+          setSelectedCustomer(null);
+          // Re-fetch all customers & transactions
+          const tid = branch?.id ? (/-b\d+$/.test(branch.id) ? branch.id.replace(/-b\d+$/, '') : branch.id) : (branch?.slug || '');
+          if (tid) {
+            setLoading(true);
+            Promise.all([
+              fetch(`/api/clients?tenant_id=${tid}`),
+              fetch(`/api/invoices?tenant_id=${tid}&limit=5000`),
+              fetch(`/api/vouchers?tenant_id=${tid}&party_type=client`),
+            ]).then(async ([cRes, iRes, vRes]) => {
+              const [cData, iData, vData] = await Promise.all([cRes.json(), iRes.json(), vRes.json()]);
+              if (cData.success && cData.clients) {
+                const allInvoices = iData.success ? (iData.invoices || []) : [];
+                const allVouchers = vData.success ? (vData.vouchers || []) : [];
+                const daysSince = (dateStr: string) => {
+                  const d = new Date(dateStr);
+                  return isNaN(d.getTime()) ? 9999 : Math.floor((Date.now() - d.getTime()) / 86400000);
+                };
+                const mapped = cData.clients.map((c: any) => {
+                  const debt = Number(c.current_balance || c.balance || 0);
+                  const clientInvoices = allInvoices.filter((inv: any) => inv.client_id === c.id && inv.invoice_type === 'sales');
+                  const lifetimePurchases = clientInvoices.reduce((sum: number, inv: any) => sum + Number(inv.net_total || 0), 0);
+                  const clientVouchers = allVouchers.filter((v: any) => v.party_id === c.id && v.voucher_type === 'receipt');
+                  const amountPaidToDate = clientVouchers.reduce((sum: number, v: any) => sum + Number(v.amount || 0), 0);
+                  let agingCurrent = 0;
+                  let aging30to60 = 0;
+                  let aging60plus = 0;
+                  clientInvoices.forEach((inv: any) => {
+                    const unpaid = Number(inv.due_amount || 0);
+                    if (unpaid <= 0) return;
+                    const age = daysSince(inv.date || inv.created_at || '');
+                    if (age <= 30) agingCurrent += unpaid;
+                    else if (age <= 60) aging30to60 += unpaid;
+                    else aging60plus += unpaid;
+                  });
+                  if (agingCurrent === 0 && aging30to60 === 0 && aging60plus === 0 && debt > 0) agingCurrent = debt;
+                  const transactions: any[] = [];
+                  let runningBalance = 0;
+                  const allEntries = [
+                    ...clientInvoices.map((inv: any) => ({
+                      id: inv.id,
+                      date: inv.date || inv.created_at?.split('T')[0] || '',
+                      time: inv.created_at?.split('T')[1]?.slice(0, 5) || '',
+                      type: 'Invoice' as const,
+                      referenceNo: inv.invoice_no,
+                      description: `Sales Invoice — ${inv.invoice_no}`,
+                      debit: Number(inv.net_total || 0),
+                      credit: 0,
+                      sortTs: new Date(inv.created_at || inv.date || 0).getTime(),
+                    })),
+                    ...clientVouchers.map((v: any) => ({
+                      id: v.id,
+                      date: v.date || v.created_at?.split('T')[0] || '',
+                      time: v.created_at?.split('T')[1]?.slice(0, 5) || '',
+                      type: 'Payment' as const,
+                      referenceNo: v.voucher_no,
+                      description: `Receipt — ${v.remarks || v.voucher_no}`,
+                      debit: 0,
+                      credit: Number(v.amount || 0),
+                      sortTs: new Date(v.created_at || v.date || 0).getTime(),
+                    })),
+                  ].sort((a, b) => a.sortTs - b.sortTs);
+                  allEntries.forEach((entry) => {
+                    runningBalance = runningBalance + entry.debit - entry.credit;
+                    transactions.push({
+                      id: entry.id,
+                      date: entry.date,
+                      time: entry.time,
+                      type: entry.type,
+                      referenceNo: entry.referenceNo,
+                      description: entry.description,
+                      debit: entry.debit,
+                      credit: entry.credit,
+                      balanceAfter: Math.max(0, runningBalance),
+                    });
+                  });
+                  transactions.reverse();
+                  return {
+                    id: c.id,
+                    name: c.name,
+                    phone: c.phone || '—',
+                    category: (c.category || 'Contractor') as any,
+                    city: c.city || c.address || '—',
+                    address: c.address || '—',
+                    totalDebt: debt,
+                    amountPaidToDate,
+                    lifetimePurchases,
+                    creditLimit: Number(c.credit_limit || 50000),
+                    lastTransactionDate: transactions[0]?.date || '—',
+                    riskLevel: debt > 100000 ? 'High' : debt > 30000 ? 'Moderate' : 'Low',
+                    aging: { current: agingCurrent, days30to60: aging30to60, days60plus: aging60plus },
+                    transactions,
+                  };
+                });
+                setCustomers(mapped);
+              }
+              setLoading(false);
+            }).catch(() => setLoading(false));
+          }
+        }}
       />
     </div>
   );
