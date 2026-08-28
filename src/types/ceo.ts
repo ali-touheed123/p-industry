@@ -78,6 +78,8 @@ export interface ReturnRecord {
 export interface DayCloseRecord {
   id: string;
   date: string;
+  status?: 'open' | 'closed';
+  isOpen?: boolean;
   shiftTitle: string;
   shiftTime: string;
   cashierName: string;
@@ -118,6 +120,11 @@ export interface DayCloseRecord {
     handoverVariance: number;
     handoverStatus: 'MATCHED' | 'SHORT' | 'EXCESS';
     handoverNotes?: string;
+  };
+  sameDayDelta?: {
+    amount: number;
+    direction: 'more' | 'less' | 'same';
+    previousShiftNetSales: number;
   };
 }
 

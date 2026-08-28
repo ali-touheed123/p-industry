@@ -1,16 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 
+async function resolveTenantId(idOrSlug: string): Promise<string | null> {
+  if (!idOrSlug) return null;
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrSlug);
+  if (isUuid) return idOrSlug;
+
+  const { data: tenant } = await supabaseAdmin
+    .from('tenants')
+    .select('id')
+    .eq('slug', idOrSlug.trim().toLowerCase())
+    .maybeSingle();
+
+  return tenant?.id || idOrSlug;
+}
+
 // GET: Fetch current active shift or shift history for a tenant
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const tenantId = searchParams.get('tenant_id');
+    const tenantIdParam = searchParams.get('tenant_id');
     const status = searchParams.get('status');
-    const lastClosed = searchParams.get('last_closed'); // NEW: get last closed shift
+    const lastClosed = searchParams.get('last_closed'); // get last closed shift
+    const sameDayPrevious = searchParams.get('same_day_previous');
+    const currentShiftId = searchParams.get('current_shift_id');
 
-    if (!tenantId) {
+    if (!tenantIdParam) {
       return NextResponse.json({ success: false, error: 'Tenant ID required' }, { status: 400 });
+    }
+
+    const tenantId = await resolveTenantId(tenantIdParam);
+    if (!tenantId) {
+      return NextResponse.json({ success: false, error: 'Tenant not found' }, { status: 404 });
     }
 
     // Special: return only last closed shift (for handover pre-fill)
@@ -20,12 +41,45 @@ export async function GET(req: NextRequest) {
         .select('*')
         .eq('tenant_id', tenantId)
         .eq('status', 'closed')
-        .order('end_time', { ascending: false })
+        .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
       if (error) throw error;
       return NextResponse.json({ success: true, lastClosedShift: lastShift || null });
+    }
+
+    // Special: return previous closed shift on the same calendar day
+    if (sameDayPrevious === '1' && currentShiftId) {
+      // First get the current shift to know its date
+      const { data: currentShift } = await supabaseAdmin
+        .from('shifts')
+        .select('start_time, created_at')
+        .eq('id', currentShiftId)
+        .maybeSingle();
+
+      if (currentShift) {
+        const shiftDate = (currentShift.start_time || currentShift.created_at || '').split('T')[0];
+        if (shiftDate) {
+          const { data: prevShifts, error } = await supabaseAdmin
+            .from('shifts')
+            .select('*')
+            .eq('tenant_id', tenantId)
+            .eq('status', 'closed')
+            .neq('id', currentShiftId)
+            .gte('start_time', `${shiftDate}T00:00:00`)
+            .lte('start_time', `${shiftDate}T23:59:59`)
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+          if (error) throw error;
+          return NextResponse.json({
+            success: true,
+            previousSameDayShift: prevShifts && prevShifts.length > 0 ? prevShifts[0] : null,
+          });
+        }
+      }
+      return NextResponse.json({ success: true, previousSameDayShift: null });
     }
 
     let query = supabaseAdmin
@@ -56,7 +110,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
-      tenant_id,
+      tenant_id: rawTenantId,
       opened_by,
       opening_cash = 0,
       previous_closing_cash = 0,
@@ -65,8 +119,13 @@ export async function POST(req: NextRequest) {
       notes,
     } = body;
 
-    if (!tenant_id) {
+    if (!rawTenantId) {
       return NextResponse.json({ success: false, error: 'Tenant ID required' }, { status: 400 });
+    }
+
+    const tenant_id = await resolveTenantId(rawTenantId);
+    if (!tenant_id) {
+      return NextResponse.json({ success: false, error: 'Tenant not found' }, { status: 404 });
     }
 
     const { data: shift, error } = await supabaseAdmin

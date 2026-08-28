@@ -125,10 +125,11 @@ export default function TenantAppPage({ params }: PageProps) {
       } else {
         setCurrentUser(data.user);
         if (data.user.role !== 'ceo' && data.user.role !== 'developer') {
+          const targetTenantId = tenant?.id || data.user.tenant?.id || data.user.tenant_id || slug;
           if (!activeShift) {
             // Fetch last closed shift for handover display
             try {
-              const tenantRes = await fetch(`/api/shifts?tenant_id=${data.user.tenant_id || slug}&last_closed=1`);
+              const tenantRes = await fetch(`/api/shifts?tenant_id=${targetTenantId}&last_closed=1`);
               const tenantData = await tenantRes.json();
               if (tenantData.success && tenantData.lastClosedShift) {
                 setLastClosedShift(tenantData.lastClosedShift);
@@ -154,10 +155,23 @@ export default function TenantAppPage({ params }: PageProps) {
 
   const handleOpenShift = async () => {
     if (!tenant) return;
+
+    // Defensively ensure lastClosedShift is available if previous shifts exist
+    let currentLastClosed = lastClosedShift;
+    if (!currentLastClosed && tenant.id) {
+      try {
+        const lastRes = await fetch(`/api/shifts?tenant_id=${tenant.id}&last_closed=1`);
+        const lastData = await lastRes.json();
+        if (lastData.success && lastData.lastClosedShift) {
+          currentLastClosed = lastData.lastClosedShift;
+        }
+      } catch {}
+    }
+
     const openingAmt = parseFloat(openingCashInput) || 0;
-    const prevClosing = lastClosedShift ? Number(lastClosedShift.actual_cash || 0) : 0;
+    const prevClosing = currentLastClosed ? Number(currentLastClosed.actual_cash || 0) : 0;
     const handoverVariance = openingAmt - prevClosing;
-    const handoverNotes = lastClosedShift
+    const handoverNotes = currentLastClosed
       ? `Handover: Prev shift closed Rs.${prevClosing.toLocaleString()}, Counted Rs.${openingAmt.toLocaleString()}, Variance ${handoverVariance >= 0 ? '+' : ''}Rs.${handoverVariance.toLocaleString()}`
       : 'First shift of the day';
 
@@ -178,6 +192,7 @@ export default function TenantAppPage({ params }: PageProps) {
       const data = await res.json();
       if (data.success && data.shift) {
         setActiveShift(data.shift);
+        setLastClosedShift(null);
       } else {
         setActiveShift({
           id: Date.now().toString(),
@@ -704,7 +719,12 @@ export default function TenantAppPage({ params }: PageProps) {
               onAddExpense={exp => setExpenses(p => [exp, ...p])}
               onShiftClosed={closedShift => {
                 setActiveShift(null);
-                alert('Shift closed and reconciled successfully!');
+              }}
+              onLogout={() => {
+                setCurrentUser(null);
+                setActiveShift(null);
+                setInvoices([]);
+                setExpenses([]);
               }}
             />
           )}

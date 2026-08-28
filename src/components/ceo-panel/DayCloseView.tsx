@@ -11,11 +11,15 @@ interface DayCloseViewProps {
 }
 
 export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
-  const todayIso = new Date().toISOString().split('T')[0];
-  const firstOfMonthIso = todayIso.substring(0, 8) + '01';
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const todayLocal = `${year}-${month}-${day}`;
+  const firstOfMonthLocal = `${year}-${month}-01`;
 
-  const [startDate, setStartDate] = useState<string>(firstOfMonthIso);
-  const [endDate, setEndDate] = useState<string>(todayIso);
+  const [startDate, setStartDate] = useState<string>(firstOfMonthLocal);
+  const [endDate, setEndDate] = useState<string>(todayLocal);
   const [shifts, setShifts] = useState<DayCloseRecord[]>([]);
   const [selectedRecordId, setSelectedRecordId] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
@@ -82,7 +86,9 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
           });
 
           const mapped: DayCloseRecord[] = branchShifts.map((s: any) => {
-            const shiftDate = s.created_at ? s.created_at.split('T')[0] : 'Recent';
+            const rawDate = s.start_time || s.created_at;
+            const shiftDate = rawDate ? new Date(rawDate).toLocaleDateString('en-CA') : todayLocal;
+            const isOpen = s.status === 'open';
             
             // Match expenses for this shift or date
             const shiftExpenses = allExpenses.filter((e: any) =>
@@ -118,9 +124,11 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
             const totalExpensesAmt = shiftExpenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0);
 
             const openAmt = Number(s.opening_cash || 0);
-            const closeAmt = Number(s.actual_cash !== undefined ? s.actual_cash : (s.closing_cash || openAmt));
-            const expCash = Number(s.expected_cash !== undefined ? s.expected_cash : (openAmt + cashSales - totalExpensesAmt));
-            const variance = closeAmt - expCash;
+            const closeAmt = isOpen ? 0 : Number(s.actual_cash !== undefined && s.actual_cash !== null ? s.actual_cash : openAmt);
+            const expCash = Number(s.expected_cash !== undefined && s.expected_cash !== null && !isOpen ? s.expected_cash : (openAmt + cashSales - totalExpensesAmt));
+            const variance = isOpen ? 0 : (closeAmt - expCash);
+            const varianceStatus: 'MATCHED' | 'SHORT' | 'EXCESS' =
+              isOpen ? 'MATCHED' : (variance === 0 ? 'MATCHED' : (variance < 0 ? 'SHORT' : 'EXCESS'));
 
             // Commission distribution
             const commissionPool = commEnabled ? Math.round(netShiftSales * (commRate / 100)) : 0;
@@ -163,12 +171,20 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
             const handoverStatus: 'MATCHED' | 'SHORT' | 'EXCESS' =
               handoverVarianceAmt === 0 ? 'MATCHED' : (handoverVarianceAmt < 0 ? 'SHORT' : 'EXCESS');
 
+            const shiftTime = s.end_time
+              ? new Date(s.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : (s.start_time
+                ? `${new Date(s.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} (Live)`
+                : 'Open / Live');
+
             return {
               id: s.id,
+              status: s.status || (isOpen ? 'open' : 'closed'),
+              isOpen,
               shiftTitle: `Register Shift #${s.id.substring(0, 4)}`,
               date: shiftDate,
-              shiftTime: s.closed_at ? new Date(s.closed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (s.opened_at ? new Date(s.opened_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Day Shift'),
-              cashierName: s.closed_by || s.opened_by || s.notes || 'Counter Staff',
+              shiftTime,
+              cashierName: s.closed_by || (s.notes?.startsWith('Opened by ') ? s.notes.replace('Opened by ', '') : s.opened_by) || 'Counter Staff',
               registerNo: '01',
               financialSummary: {
                 openingBalance: openAmt,
@@ -179,7 +195,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
                 expectedCash: expCash,
                 actualCashCounted: closeAmt,
                 varianceAmount: variance,
-                varianceStatus: variance === 0 ? 'MATCHED' : (variance < 0 ? 'SHORT' : 'EXCESS'),
+                varianceStatus,
               },
               commissionBreakdown: {
                 totalSales: netShiftSales,
@@ -198,6 +214,29 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
                 },
               } : {}),
             };
+          });
+
+          // Feature #3: Compute same-day shift-to-shift delta
+          const dateGroups = new Map<string, DayCloseRecord[]>();
+          mapped.forEach(rec => {
+            const existing = dateGroups.get(rec.date) || [];
+            existing.push(rec);
+            dateGroups.set(rec.date, existing);
+          });
+          dateGroups.forEach(group => {
+            if (group.length < 2) return;
+            // Sort by shift time (ascending) within the day
+            group.sort((a, b) => (a.shiftTime || '').localeCompare(b.shiftTime || ''));
+            for (let i = 1; i < group.length; i++) {
+              const prevNet = group[i - 1].commissionBreakdown.totalSales;
+              const currNet = group[i].commissionBreakdown.totalSales;
+              const deltaAmt = currNet - prevNet;
+              group[i].sameDayDelta = {
+                amount: Math.abs(deltaAmt),
+                direction: deltaAmt > 0 ? 'more' : deltaAmt < 0 ? 'less' : 'same',
+                previousShiftNetSales: prevNet,
+              };
+            }
           });
 
           setShifts(mapped);
@@ -296,7 +335,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
               >
                 {filteredShifts.map((r) => (
                   <option key={r.id} value={r.id} style={{ backgroundColor: '#1C2128', color: '#E5E7EB' }}>
-                    {r.date} — {r.shiftTime} ({r.financialSummary.varianceStatus})
+                    {r.date} — {r.shiftTime} {r.status === 'open' ? '🟢 (Open / Live)' : `(${r.financialSummary.varianceStatus})`}
                   </option>
                 ))}
               </select>
@@ -393,6 +432,19 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
                   {formatCurrency(financialSummary.expectedCash)}
                 </span>
               </div>
+
+              {/* Feature #3: Same-day shift-to-shift delta */}
+              {activeRecord.sameDayDelta && (
+                <div style={{ marginTop: '10px', padding: '8px 10px', borderRadius: '6px', background: activeRecord.sameDayDelta.direction === 'less' ? 'rgba(248,113,113,0.1)' : 'rgba(52,211,153,0.1)', border: `1px solid ${activeRecord.sameDayDelta.direction === 'less' ? '#7F1D1D' : '#064E3B'}` }}>
+                  <div style={{ fontSize: '11px', color: '#8B93A1', marginBottom: '2px' }}>vs Previous Shift Today</div>
+                  <div className="ceo-font-mono" style={{ fontSize: '13px', fontWeight: 700, color: activeRecord.sameDayDelta.direction === 'less' ? '#F87171' : '#34D399' }}>
+                    {formatCurrency(activeRecord.sameDayDelta.amount)} {activeRecord.sameDayDelta.direction === 'same' ? '— same as' : activeRecord.sameDayDelta.direction} than previous shift
+                  </div>
+                  <div style={{ fontSize: '10px', color: '#8B93A1', marginTop: '2px' }}>
+                    Previous shift net sales: {formatCurrency(activeRecord.sameDayDelta.previousShiftNetSales)}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -407,27 +459,31 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
                 padding: '2px 8px',
                 borderRadius: '4px',
                 fontWeight: 700,
-                backgroundColor: financialSummary.varianceStatus === 'MATCHED' ? 'rgba(52, 211, 153, 0.15)' : 'rgba(248, 113, 113, 0.15)',
-                color: financialSummary.varianceStatus === 'MATCHED' ? '#34D399' : '#F87171',
+                backgroundColor: activeRecord.status === 'open' ? 'rgba(59, 130, 246, 0.15)' : (financialSummary.varianceStatus === 'MATCHED' ? 'rgba(52, 211, 153, 0.15)' : 'rgba(248, 113, 113, 0.15)'),
+                color: activeRecord.status === 'open' ? '#60A5FA' : (financialSummary.varianceStatus === 'MATCHED' ? '#34D399' : '#F87171'),
               }}>
-                {financialSummary.varianceStatus}
+                {activeRecord.status === 'open' ? 'OPEN / LIVE' : financialSummary.varianceStatus}
               </span>
             </div>
             <p style={{ fontSize: '11px', color: '#8B93A1', margin: '4px 0 0' }}>
-              Physical counted drawer vs Expected system register balance
+              {activeRecord.status === 'open' ? 'Shift currently active. Reconciliation will be verified at shift close.' : 'Physical counted drawer vs Expected system register balance'}
             </p>
 
             <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid #2A2F38', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div style={{ fontSize: '10px', color: '#8B93A1', textTransform: 'uppercase' }}>ACTUAL COUNTED CASH</div>
+                <div style={{ fontSize: '10px', color: '#8B93A1', textTransform: 'uppercase' }}>
+                  {activeRecord.status === 'open' ? 'EXPECTED DRAWER' : 'ACTUAL COUNTED CASH'}
+                </div>
                 <div className="ceo-font-mono" style={{ fontSize: '18px', fontWeight: 700, color: '#34D399', marginTop: '2px' }}>
-                  {formatCurrency(financialSummary.actualCashCounted)}
+                  {activeRecord.status === 'open' ? formatCurrency(financialSummary.expectedCash) : formatCurrency(financialSummary.actualCashCounted)}
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '10px', color: '#8B93A1', textTransform: 'uppercase' }}>DRAWER VARIANCE</div>
-                <div className="ceo-font-mono" style={{ fontSize: '18px', fontWeight: 700, color: financialSummary.varianceAmount < 0 ? '#F87171' : '#34D399', marginTop: '2px' }}>
-                  {formatCurrency(financialSummary.varianceAmount)}
+                <div style={{ fontSize: '10px', color: '#8B93A1', textTransform: 'uppercase' }}>
+                  {activeRecord.status === 'open' ? 'AUDIT STATUS' : 'DRAWER VARIANCE'}
+                </div>
+                <div className="ceo-font-mono" style={{ fontSize: '18px', fontWeight: 700, color: activeRecord.status === 'open' ? '#60A5FA' : (financialSummary.varianceAmount < 0 ? '#F87171' : '#34D399'), marginTop: '2px' }}>
+                  {activeRecord.status === 'open' ? 'In Progress' : formatCurrency(financialSummary.varianceAmount)}
                 </div>
               </div>
             </div>

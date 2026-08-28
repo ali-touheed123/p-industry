@@ -7,6 +7,8 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const tenantId = searchParams.get('tenant_id');
     const type = searchParams.get('type');
+    const shiftId = searchParams.get('shift_id');
+    const startDate = searchParams.get('start_date');
     const limit = parseInt(searchParams.get('limit') || '200', 10);
 
     if (!tenantId) {
@@ -19,6 +21,26 @@ export async function GET(req: NextRequest) {
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
       .limit(limit);
+
+    // Scope purchases to a specific shift's time window
+    if (shiftId) {
+      const { data: shift } = await supabaseAdmin
+        .from('shifts')
+        .select('start_time, end_time, status')
+        .eq('id', shiftId)
+        .single();
+
+      if (shift?.start_time) {
+        query = query.gte('created_at', shift.start_time);
+        if (shift.end_time && shift.status === 'closed') {
+          query = query.lte('created_at', shift.end_time);
+        }
+      }
+    } else if (startDate) {
+      // Fallback: scope to a specific date
+      query = query.gte('created_at', `${startDate}T00:00:00`)
+                    .lte('created_at', `${startDate}T23:59:59`);
+    }
 
     if (type && type !== 'all') {
       query = query.eq('purchase_type', type);

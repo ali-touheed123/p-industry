@@ -15,6 +15,7 @@ interface Props {
   totalSales: number;
   onAddExpense: (expense: PettyExpense) => void;
   onShiftClosed?: (closedShift: Shift) => void;
+  onLogout?: () => void;
 }
 
 export default function ShiftDrawer({
@@ -29,22 +30,31 @@ export default function ShiftDrawer({
   totalSales,
   onAddExpense,
   onShiftClosed,
+  onLogout,
 }: Props) {
   const [expenseTitle, setExpenseTitle] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expenseCategory, setExpenseCategory] = useState('Staff');
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [submittingExpense, setSubmittingExpense] = useState(false);
+  const [expenseError, setExpenseError] = useState('');
 
   // Closing Shift State
   const [actualCashInput, setActualCashInput] = useState('');
   const [isClosing, setIsClosing] = useState(false);
   const [showPrintSummary, setShowPrintSummary] = useState(false);
   const [closedShiftData, setClosedShiftData] = useState<any | null>(null);
+  const [showCloseConfirmModal, setShowCloseConfirmModal] = useState(false);
 
   const [purchases, setPurchases] = useState<any[]>([]);
   const [dbInvoices, setDbInvoices] = useState<any[]>([]);
   const [dbExpenses, setDbExpenses] = useState<PettyExpense[]>([]);
+
+  // Previous same-day shift (for reference & delta)
+  const [previousSameDayShift, setPreviousSameDayShift] = useState<any | null>(null);
+
+  // Detect if shift is already closed
+  const isShiftClosed = shift?.status === 'closed';
 
   // Fetch today's purchases, invoices and expenses for current shift/tenant
   React.useEffect(() => {
@@ -53,7 +63,7 @@ export default function ShiftDrawer({
       try {
         const todayIso = new Date().toISOString().split('T')[0];
         const [purchasesRes, invoicesRes, expensesRes] = await Promise.all([
-          fetch(`/api/purchases?tenant_id=${tenantId}`),
+          fetch(`/api/purchases?tenant_id=${tenantId}${shift?.id ? `&shift_id=${shift.id}` : `&start_date=${todayIso}`}`),
           fetch(`/api/invoices?tenant_id=${tenantId}${shift?.id ? `&shift_id=${shift.id}` : `&start_date=${todayIso}`}`),
           fetch(`/api/expenses?tenant_id=${tenantId}${shift?.id ? `&shift_id=${shift.id}` : ''}`),
         ]);
@@ -78,6 +88,25 @@ export default function ShiftDrawer({
       }
     };
     fetchShiftData();
+  }, [tenantId, shift?.id]);
+
+  // Fetch previous same-day shift for reference & delta
+  React.useEffect(() => {
+    if (!tenantId || !shift?.id) return;
+    const fetchPrevShift = async () => {
+      try {
+        const res = await fetch(`/api/shifts?tenant_id=${tenantId}&same_day_previous=1&current_shift_id=${shift.id}`);
+        const data = await res.json();
+        if (data.success && data.previousSameDayShift) {
+          setPreviousSameDayShift(data.previousSameDayShift);
+        } else {
+          setPreviousSameDayShift(null);
+        }
+      } catch {
+        setPreviousSameDayShift(null);
+      }
+    };
+    fetchPrevShift();
   }, [tenantId, shift?.id]);
 
   // Combine passed props with DB records (deduplicating by id)
@@ -141,86 +170,90 @@ export default function ShiftDrawer({
   // Expected Cash = Opening Cash + Cash Inflow (Sales) - Cash Outflow (Sales Returns + Supplier Cash + Expenses)
   const expectedCash = Math.max(0, openingCash + cashSales - cashReturns - supplierCashPaid - totalExpenses);
 
-  // Actual Physical Cash & Variance
-  const actualPhysicalCash = actualCashInput !== '' ? (parseFloat(actualCashInput) || 0) : expectedCash;
-  const variance = actualPhysicalCash - expectedCash;
-  const isShort = variance < 0;
-  const isBalanced = variance === 0;
+  // BUG FIX #6: Actual Physical Cash does NOT default to expectedCash — requires explicit input
+  const hasCashInput = actualCashInput !== '';
+  const actualPhysicalCash = hasCashInput ? (parseFloat(actualCashInput) || 0) : 0;
+  const variance = hasCashInput ? actualPhysicalCash - expectedCash : 0;
+  const isShort = hasCashInput && variance < 0;
+  const isBalanced = hasCashInput && variance === 0;
 
   // Commission Settings (Configured by CEO / Tenant)
   const isCommissionEnabled = Boolean(tenant?.commission_enabled);
   const commissionRate = Number(tenant?.commission_rate || 2.0);
-  const splitLead = Number(tenant?.commission_split_lead || 35.0);
-  const splitStaff = Number(tenant?.commission_split_staff || 35.0);
+  const rawSplitLead = Number(tenant?.commission_split_lead || 35.0);
+  const rawSplitStaff = Number(tenant?.commission_split_staff || 35.0);
+
+  // BUG FIX #5: Validate commission splits sum to 100% — normalize if not
+  const rawSplitTotal = rawSplitLead + rawSplitStaff;
+  const commissionSplitWarning = isCommissionEnabled && rawSplitTotal !== 100
+    ? `⚠️ Commission splits total ${rawSplitTotal}% (expected 100%). Values normalized.`
+    : '';
+  const splitLead = rawSplitTotal > 0 && rawSplitTotal !== 100
+    ? (rawSplitLead / rawSplitTotal) * 100
+    : rawSplitLead;
+  const splitStaff = rawSplitTotal > 0 && rawSplitTotal !== 100
+    ? (rawSplitStaff / rawSplitTotal) * 100
+    : rawSplitStaff;
 
   // Commission Breakdown (Only calculated if enabled)
   const commissionPool = isCommissionEnabled ? Math.round(netSales * (commissionRate / 100)) : 0;
   const staffAShare = isCommissionEnabled ? Math.round(commissionPool * (splitLead / 100)) : 0;
   const staffBShare = isCommissionEnabled ? Math.round(commissionPool * (splitStaff / 100)) : 0;
 
-  // Add Petty Expense to DB
+  // Shift-to-shift delta (Feature #3)
+  const previousNetSales = previousSameDayShift
+    ? Number(previousSameDayShift.expected_cash || 0) - Number(previousSameDayShift.opening_cash || 0)
+    : null;
+  const sameDayDelta = previousNetSales !== null ? netSales - previousNetSales : null;
+
+  // Add Petty Expense to DB — BUG FIX #4: No fake fallback on failure
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!expenseTitle || !expenseAmount) return;
     setSubmittingExpense(true);
+    setExpenseError('');
 
     try {
-      if (tenantId) {
-        const res = await fetch('/api/expenses', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            tenant_id: tenantId,
-            shift_id: shift?.id || null,
-            category: expenseCategory,
-            title: expenseTitle,
-            amount: parseFloat(expenseAmount) || 0,
-            paid_by: staffName,
-          }),
-        });
-        const data = await res.json();
-        if (data.success && data.expense) {
-          onAddExpense(data.expense);
-          setDbExpenses(prev => [data.expense, ...prev]);
-        } else {
-          // Fallback local
-          const fallbackExp = {
-            id: Date.now().toString(),
-            tenant_id: tenantId,
-            shift_id: shift?.id || 'shift-1',
-            category: expenseCategory,
-            title: expenseTitle,
-            amount: parseFloat(expenseAmount) || 0,
-            created_at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          };
-          onAddExpense(fallbackExp);
-          setDbExpenses(prev => [fallbackExp, ...prev]);
-        }
-      } else {
-        onAddExpense({
-          id: Date.now().toString(),
-          tenant_id: '',
-          shift_id: 'shift-1',
+      if (!tenantId) {
+        setExpenseError('Cannot save expense: No tenant configured. Please contact support.');
+        setSubmittingExpense(false);
+        return;
+      }
+
+      const res = await fetch('/api/expenses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          shift_id: shift?.id || null,
           category: expenseCategory,
           title: expenseTitle,
           amount: parseFloat(expenseAmount) || 0,
-          created_at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        });
+          paid_by: staffName,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.expense) {
+        onAddExpense(data.expense);
+        setDbExpenses(prev => [data.expense, ...prev]);
+        setExpenseTitle('');
+        setExpenseAmount('');
+        setShowExpenseModal(false);
+      } else {
+        // BUG FIX #4: Show error instead of creating fake local record
+        setExpenseError(data.error || 'Failed to save expense. Please try again.');
       }
-
-      setExpenseTitle('');
-      setExpenseAmount('');
-      setShowExpenseModal(false);
     } catch (err) {
       console.error(err);
+      setExpenseError('Network error: Could not save expense. Check your connection and try again.');
     } finally {
       setSubmittingExpense(false);
     }
   };
 
-  // Close & Reconcile Shift
+  // Close & Reconcile Shift — BUG FIX #7: No more native confirm()
   const handleCloseShift = async () => {
-    if (!confirm('Are you sure you want to close today\'s register shift?')) return;
+    setShowCloseConfirmModal(false);
     setIsClosing(true);
 
     const shiftDataToSave = {
@@ -282,8 +315,66 @@ export default function ShiftDrawer({
     window.open(url, '_blank');
   };
 
+  // Whether close button should be enabled
+  const canClose = !isClosing && !isShiftClosed && hasCashInput;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', height: '100%', paddingBottom: '1rem' }}>
+
+      {/* BUG FIX #3: Closed shift banner */}
+      {isShiftClosed && (
+        <div style={{
+          background: '#FEF2F2',
+          border: '1px solid #FECACA',
+          borderRadius: '8px',
+          padding: '10px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          fontSize: '13px',
+          fontWeight: 700,
+          color: '#991B1B',
+        }}>
+          <span style={{ fontSize: '16px' }}>🔒</span>
+          This shift has been closed and reconciled. No further changes can be made. Open a new shift to continue.
+        </div>
+      )}
+
+      {/* ── Previous Same-Day Shift Reference (Feature #2) ── */}
+      {previousSameDayShift && (
+        <div style={{
+          background: '#EFF6FF',
+          border: '1px solid #BFDBFE',
+          borderRadius: '8px',
+          padding: '10px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontSize: '12px',
+          color: '#1E40AF',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '14px' }}>📋</span>
+            <span style={{ fontWeight: 600 }}>Previous shift (same day)</span>
+            <span style={{ color: '#64748B' }}>closed with</span>
+            <span style={{ fontWeight: 700, fontFamily: 'JetBrains Mono, monospace' }}>
+              Rs. {Number(previousSameDayShift.actual_cash || 0).toLocaleString()}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {previousSameDayShift.difference !== undefined && previousSameDayShift.difference !== 0 && (
+              <span style={{
+                fontFamily: 'JetBrains Mono, monospace',
+                fontWeight: 700,
+                color: Number(previousSameDayShift.difference) < 0 ? '#DC2626' : '#16A34A',
+              }}>
+                Variance: {Number(previousSameDayShift.difference) >= 0 ? '+' : ''}Rs. {Number(previousSameDayShift.difference).toLocaleString()}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── Page Header ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
         <div>
@@ -295,7 +386,7 @@ export default function ShiftDrawer({
               📅 {new Date().toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' })}
             </span>
             <span>•</span>
-            <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>⏰ Active Register</span>
+            <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>⏰ {isShiftClosed ? 'Shift Closed' : 'Active Register'}</span>
             <span>•</span>
             <span style={{ fontWeight: 600, color: '#0F172A' }}>👤 {staffName}</span>
           </div>
@@ -312,19 +403,44 @@ export default function ShiftDrawer({
             <span style={{ fontSize: '14px' }}>💬</span>
             WhatsApp
           </button>
+          {/* BUG FIX #6: Disabled until cash is explicitly counted. BUG FIX #3: Disabled if shift closed */}
           <button
             type="button"
-            onClick={handleCloseShift}
-            disabled={isClosing}
+            onClick={() => setShowCloseConfirmModal(true)}
+            disabled={!canClose}
             className="btn btn-primary"
-            style={{ fontSize: '12px', padding: '6px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}
-            title="Reconcile & Close Register"
+            style={{
+              fontSize: '12px',
+              padding: '6px 16px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              opacity: canClose ? 1 : 0.5,
+              cursor: canClose ? 'pointer' : 'not-allowed',
+            }}
+            title={isShiftClosed ? 'Shift already closed' : !hasCashInput ? 'Enter counted cash first' : 'Reconcile & Close Register'}
           >
             <span>🔒</span>
-            {isClosing ? 'Closing Shift...' : 'Close & Reconcile'}
+            {isClosing ? 'Closing Shift...' : isShiftClosed ? 'Shift Closed' : 'Close & Reconcile'}
           </button>
         </div>
       </div>
+
+      {/* ── Commission Split Warning (Bug Fix #5) ── */}
+      {commissionSplitWarning && (
+        <div style={{
+          background: '#FFFBEB',
+          border: '1px solid #FDE68A',
+          borderRadius: '8px',
+          padding: '8px 14px',
+          fontSize: '11px',
+          color: '#92400E',
+          fontWeight: 600,
+        }}>
+          {commissionSplitWarning}
+        </div>
+      )}
 
       {/* ── Top 4 KPI Summary Cards (Horizontal Balanced Bar) ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.875rem' }}>
@@ -340,19 +456,21 @@ export default function ShiftDrawer({
                 fontWeight: 800,
                 padding: '1px 6px',
                 borderRadius: '4px',
-                background: isBalanced ? '#DCFCE7' : isShort ? '#FEE2E2' : '#FFEDD5',
-                color: isBalanced ? '#166534' : isShort ? '#991B1B' : '#9A3412',
+                background: !hasCashInput ? '#F1F5F9' : isBalanced ? '#DCFCE7' : isShort ? '#FEE2E2' : '#FFEDD5',
+                color: !hasCashInput ? '#64748B' : isBalanced ? '#166534' : isShort ? '#991B1B' : '#9A3412',
                 fontFamily: 'JetBrains Mono, monospace',
               }}
             >
-              {isBalanced ? 'BALANCED' : isShort ? 'SHORT' : 'OVER'}
+              {!hasCashInput ? 'PENDING' : isBalanced ? 'BALANCED' : isShort ? 'SHORT' : 'OVER'}
             </span>
           </div>
           <div style={{ fontSize: '18px', fontWeight: 800, color: '#0F172A', fontFamily: 'JetBrains Mono, monospace' }}>
             Rs. {expectedCash.toLocaleString()}
           </div>
           <div style={{ fontSize: '10.5px', color: '#64748B' }}>
-            Counted: <strong style={{ color: '#0F172A', fontFamily: 'JetBrains Mono, monospace' }}>Rs. {actualPhysicalCash.toLocaleString()}</strong>
+            Counted: <strong style={{ color: hasCashInput ? '#0F172A' : '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>
+              {hasCashInput ? `Rs. ${actualPhysicalCash.toLocaleString()}` : '— enter below'}
+            </strong>
           </div>
         </div>
 
@@ -373,6 +491,18 @@ export default function ShiftDrawer({
             Gross: <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {grossSales.toLocaleString()}</span>
             {totalSalesReturns > 0 && <span style={{ color: '#DC2626', marginLeft: '4px' }}>(-{totalSalesReturns.toLocaleString()})</span>}
           </div>
+          {/* Feature #3: Shift-to-shift delta */}
+          {sameDayDelta !== null && (
+            <div style={{
+              fontSize: '10px',
+              fontWeight: 700,
+              color: sameDayDelta >= 0 ? '#16A34A' : '#DC2626',
+              fontFamily: 'JetBrains Mono, monospace',
+              marginTop: '2px',
+            }}>
+              Rs. {Math.abs(sameDayDelta).toLocaleString()} {sameDayDelta >= 0 ? 'more' : 'less'} than prev shift today
+            </div>
+          )}
         </div>
 
         {/* KPI 3: Purchases Today */}
@@ -459,26 +589,26 @@ export default function ShiftDrawer({
             </div>
           </div>
 
-          {/* Physical Cash Input Box */}
-          <div style={{ marginTop: '0.75rem', background: '#F8FAFC', padding: '8px 10px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+          {/* Physical Cash Input Box — BUG FIX #6: Required field, no auto-fill */}
+          <div style={{ marginTop: '0.75rem', background: '#F8FAFC', padding: '8px 10px', borderRadius: '8px', border: `1px solid ${!hasCashInput ? '#F59E0B' : '#E2E8F0'}` }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-              <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>
-                Counted Physical Cash
+              <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: !hasCashInput ? '#92400E' : '#64748B', textTransform: 'uppercase' }}>
+                Counted Physical Cash {!hasCashInput && '(Required)'}
               </span>
-              <span style={{ fontSize: '11px', fontWeight: 800, color: isBalanced ? '#16A34A' : '#DC2626', fontFamily: 'JetBrains Mono, monospace' }}>
-                {variance === 0 ? 'Exact Match' : variance < 0 ? `Short: Rs. ${Math.abs(variance).toLocaleString()}` : `Over: +Rs. ${variance.toLocaleString()}`}
+              <span style={{ fontSize: '11px', fontWeight: 800, color: !hasCashInput ? '#92400E' : isBalanced ? '#16A34A' : '#DC2626', fontFamily: 'JetBrains Mono, monospace' }}>
+                {!hasCashInput ? 'Enter count ↓' : variance === 0 ? 'Exact Match' : variance < 0 ? `Short: Rs. ${Math.abs(variance).toLocaleString()}` : `Over: +Rs. ${variance.toLocaleString()}`}
               </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ fontSize: '12px', fontWeight: 700, color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>Rs.</span>
               <input
                 type="number"
-                value={actualCashInput !== '' ? actualCashInput : expectedCash}
+                value={actualCashInput}
                 onChange={e => setActualCashInput(e.target.value)}
                 style={{
                   width: '100%',
                   background: '#FFFFFF',
-                  border: '1px solid #CBD5E1',
+                  border: `1px solid ${!hasCashInput ? '#F59E0B' : '#CBD5E1'}`,
                   borderRadius: '6px',
                   padding: '4px 8px',
                   fontSize: '13px',
@@ -487,7 +617,8 @@ export default function ShiftDrawer({
                   color: '#0F172A',
                   outline: 'none',
                 }}
-                placeholder="Enter physical cash"
+                placeholder="Enter physical cash count"
+                disabled={isShiftClosed}
               />
             </div>
           </div>
@@ -533,8 +664,8 @@ export default function ShiftDrawer({
                 </span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#64748B' }}>
-                <span>{staffName} ({splitLead}%): <strong style={{ color: '#0F172A', fontFamily: 'JetBrains Mono, monospace' }}>Rs. {staffAShare.toLocaleString()}</strong></span>
-                <span>Floor Staff ({splitStaff}%): <strong style={{ color: '#0F172A', fontFamily: 'JetBrains Mono, monospace' }}>Rs. {staffBShare.toLocaleString()}</strong></span>
+                <span>{staffName} ({splitLead.toFixed(0)}%): <strong style={{ color: '#0F172A', fontFamily: 'JetBrains Mono, monospace' }}>Rs. {staffAShare.toLocaleString()}</strong></span>
+                <span>Floor Staff ({splitStaff.toFixed(0)}%): <strong style={{ color: '#0F172A', fontFamily: 'JetBrains Mono, monospace' }}>Rs. {staffBShare.toLocaleString()}</strong></span>
               </div>
             </div>
           )}
@@ -547,21 +678,24 @@ export default function ShiftDrawer({
               <span style={{ fontSize: '12px', fontWeight: 800, color: '#0F172A', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                 💸 Petty Cash Log
               </span>
+              {/* BUG FIX #3: Disable Add Expense on closed shift */}
               <button
                 type="button"
-                onClick={() => setShowExpenseModal(true)}
+                onClick={() => { setExpenseError(''); setShowExpenseModal(true); }}
+                disabled={isShiftClosed}
                 style={{
-                  background: '#F97316',
+                  background: isShiftClosed ? '#94A3B8' : '#F97316',
                   color: '#FFFFFF',
                   border: 'none',
                   borderRadius: '6px',
                   padding: '2px 8px',
                   fontSize: '11px',
                   fontWeight: 700,
-                  cursor: 'pointer',
+                  cursor: isShiftClosed ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '4px',
+                  opacity: isShiftClosed ? 0.5 : 1,
                 }}
               >
                 + Add Expense
@@ -620,6 +754,21 @@ export default function ShiftDrawer({
                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
+            {/* BUG FIX #4: Show error message */}
+            {expenseError && (
+              <div style={{
+                background: '#FEF2F2',
+                border: '1px solid #FECACA',
+                borderRadius: '8px',
+                padding: '8px 12px',
+                marginBottom: '0.875rem',
+                fontSize: '12px',
+                color: '#991B1B',
+                fontWeight: 600,
+              }}>
+                ❌ {expenseError}
+              </div>
+            )}
             <form onSubmit={handleAddExpense} style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
               <div>
                 <label className="form-label">Expense Title</label>
@@ -671,6 +820,84 @@ export default function ShiftDrawer({
         </div>
       )}
 
+      {/* ── BUG FIX #7: In-App Close Confirmation Modal (replaces native confirm) ── */}
+      {showCloseConfirmModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem', zIndex: 2500 }}>
+          <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '1.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h3 className="headline-sm">Confirm Shift Close</h3>
+              <button onClick={() => setShowCloseConfirmModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--on-surface-variant)' }}>
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <div style={{ fontSize: '13px', color: '#64748B', marginBottom: '1rem' }}>
+              You are about to close and reconcile this register shift. Please review the summary below:
+            </div>
+
+            {/* Summary */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px', marginBottom: '1rem', padding: '12px', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748B' }}>Expected Cash</span>
+                <span style={{ fontWeight: 700, fontFamily: 'JetBrains Mono, monospace' }}>Rs. {expectedCash.toLocaleString()}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748B' }}>Counted Cash</span>
+                <span style={{ fontWeight: 700, fontFamily: 'JetBrains Mono, monospace' }}>Rs. {actualPhysicalCash.toLocaleString()}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #E2E8F0', paddingTop: '6px' }}>
+                <span style={{ fontWeight: 700 }}>Variance</span>
+                <span style={{
+                  fontWeight: 800,
+                  fontFamily: 'JetBrains Mono, monospace',
+                  color: isBalanced ? '#16A34A' : '#DC2626',
+                }}>
+                  {variance === 0 ? 'Rs. 0 (BALANCED)' : variance < 0 ? `- Rs. ${Math.abs(variance).toLocaleString()} (SHORT)` : `+ Rs. ${variance.toLocaleString()} (OVER)`}
+                </span>
+              </div>
+            </div>
+
+            {/* BUG FIX #2: Extra warning when variance is non-zero */}
+            {variance !== 0 && (
+              <div style={{
+                background: isShort ? '#FEF2F2' : '#FFFBEB',
+                border: `1px solid ${isShort ? '#FECACA' : '#FDE68A'}`,
+                borderRadius: '8px',
+                padding: '10px 14px',
+                marginBottom: '1rem',
+                fontSize: '12px',
+                color: isShort ? '#991B1B' : '#92400E',
+                fontWeight: 600,
+              }}>
+                ⚠️ Cash variance of Rs. {Math.abs(variance).toLocaleString()} ({isShort ? 'SHORT' : 'OVER'}) detected. 
+                This will be recorded in the shift closing report and visible to the CEO.
+                Are you sure you want to close with this mismatch?
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => setShowCloseConfirmModal(false)}
+                className="btn btn-secondary-outline btn-full"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCloseShift}
+                className="btn btn-primary btn-full"
+                style={{
+                  background: variance !== 0 ? '#DC2626' : undefined,
+                }}
+              >
+                {variance !== 0 ? `Close with ${isShort ? 'Shortage' : 'Excess'}` : 'Confirm Close'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Shift Closed Print Summary Receipt ── */}
       {showPrintSummary && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem', zIndex: 3000 }}>
@@ -715,7 +942,13 @@ export default function ShiftDrawer({
               <button onClick={() => window.print()} style={{ flex: 1, padding: '9px', background: '#f97316', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: '700', cursor: 'pointer', fontSize: '13px' }}>
                 Print Receipt
               </button>
-              <button onClick={() => setShowPrintSummary(false)} style={{ flex: 1, padding: '9px', background: '#e2e8f0', color: '#000', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: '700', cursor: 'pointer', fontSize: '13px' }}>
+              {/* Feature #1: Redirect to login after dismissing print summary */}
+              <button onClick={() => {
+                setShowPrintSummary(false);
+                if (onLogout) {
+                  onLogout();
+                }
+              }} style={{ flex: 1, padding: '9px', background: '#e2e8f0', color: '#000', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: '700', cursor: 'pointer', fontSize: '13px' }}>
                 Close
               </button>
             </div>

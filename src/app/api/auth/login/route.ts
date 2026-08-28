@@ -116,6 +116,8 @@ export async function POST(req: NextRequest) {
       sanitizedUser.tenant = user.tenants;
     }
 
+    sanitizedUser.tenant_id = sessionTenantId;
+
     // 4. Issue encrypted JWT session token
     const token = await createSessionToken({
       userId: user.id,
