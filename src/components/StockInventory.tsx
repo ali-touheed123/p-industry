@@ -551,10 +551,10 @@ export default function StockInventory({
                   setShowReceiveModal(true);
                 }}
                 className="inv-btn-secondary"
-                title="Inward goods stock receiving"
+                title="Audit stock count correction or damage adjustment"
               >
                 <PackagePlus style={{ width: 14, height: 14, color: '#F97316' }} />
-                Receive Stock
+                Stock Adjustment
               </button>
 
               <button
@@ -947,17 +947,17 @@ export default function StockInventory({
         </div>
       )}
 
-      {/* ── MODAL 2: INWARD GOODS RECEIPT (GRN) ── */}
+      {/* ── MODAL 2: STOCK ADJUSTMENT (+ / -) ── */}
       {showReceiveModal && (
         <div className="pos-modal-overlay">
           <div className="pos-modal-card" style={{ maxWidth: '480px' }}>
             <div style={{ padding: '1rem', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#F8FAFC' }}>
               <div>
                 <h3 style={{ fontWeight: 700, fontSize: '13px', textTransform: 'uppercase', color: '#0F172A' }}>
-                  Inward Goods Receipt (GRN)
+                  Stock Adjustment (+ / -)
                 </h3>
                 <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B' }}>
-                  GRN Reference (Auto-Sequenced on Save)
+                  Physical Count / Damage / Audit Correction (Logged to Audit Trail)
                 </span>
               </div>
               <button
@@ -969,7 +969,11 @@ export default function StockInventory({
               </button>
             </div>
 
-            <div style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '12px' }}>
+            <div style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '12px' }}>
+              <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', padding: '8px 12px', borderRadius: '6px', fontSize: '11px', color: '#1E40AF', lineHeight: 1.4 }}>
+                ℹ️ <strong>Note:</strong> Standard vendor stock must be entered via <strong>Purchases</strong>, and branch transfers via <strong>Branch Orders</strong>. Use this tool only for audit variances or damaged stock.
+              </div>
+
               <div>
                 <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
                   Select SKU / Product:
@@ -982,7 +986,7 @@ export default function StockInventory({
                 >
                   {items.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.code} — {p.name} ({p.pack_size || p.unit})
+                      {p.code} — {p.name} ({p.pack_size || p.unit}) • Current Stock: {p.stock_qty}
                     </option>
                   ))}
                 </select>
@@ -991,7 +995,7 @@ export default function StockInventory({
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                 <div>
                   <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
-                    Quantity Received:
+                    Adjustment Qty (+):
                   </label>
                   <input
                     type="number"
@@ -1004,26 +1008,30 @@ export default function StockInventory({
                 </div>
                 <div>
                   <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
-                    Manufacturer Batch #:
+                    Adjustment Reason:
                   </label>
-                  <input
-                    type="text"
-                    value={receiveBatchNo}
-                    onChange={(e) => setReceiveBatchNo(e.target.value)}
+                  <select
+                    value={supplierBillRef}
+                    onChange={(e) => setSupplierBillRef(e.target.value)}
                     className="pos-text-input"
-                    style={{ textTransform: 'uppercase', fontFamily: 'JetBrains Mono, monospace' }}
-                  />
+                  >
+                    <option value="Physical Audit Discrepancy">Physical Audit Discrepancy</option>
+                    <option value="Damaged / Leaked Cans">Damaged / Leaked Cans</option>
+                    <option value="Opening Stock Correction">Opening Stock Correction</option>
+                    <option value="Sample / Tester Consumption">Sample / Tester Consumption</option>
+                  </select>
                 </div>
               </div>
 
               <div>
                 <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
-                  Supplier Invoice / Bilty Reference:
+                  Audit Batch Ref / Notes:
                 </label>
                 <input
                   type="text"
-                  value={supplierBillRef}
-                  onChange={(e) => setSupplierBillRef(e.target.value)}
+                  value={receiveBatchNo}
+                  onChange={(e) => setReceiveBatchNo(e.target.value)}
+                  placeholder="e.g. Audit Notes / Shelf 4 verification"
                   className="pos-text-input"
                 />
               </div>
@@ -1043,7 +1051,7 @@ export default function StockInventory({
                 onClick={handleConfirmReceive}
                 style={{ flex: 1, padding: '10px', background: '#F97316', color: '#ffffff', fontWeight: 700, fontSize: '12px', borderRadius: '8px', border: 'none', cursor: 'pointer', textTransform: 'uppercase' }}
               >
-                {submitting ? 'Receiving...' : 'Confirm Inward Batch'}
+                {submitting ? 'Saving Adjustment...' : 'Apply Stock Adjustment'}
               </button>
             </div>
           </div>

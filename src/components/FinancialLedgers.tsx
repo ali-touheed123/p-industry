@@ -5,8 +5,10 @@ import { Client, Supplier } from '@/types';
 
 interface Props {
   tenantId?: string;
+  tenantSlug?: string;
   tenantName?: string;
   staffName?: string;
+  staffUsername?: string;
 }
 
 interface LedgerTransaction {
@@ -22,12 +24,15 @@ interface LedgerTransaction {
 
 export default function FinancialLedgers({
   tenantId,
+  tenantSlug,
   tenantName = 'Paint House',
   staffName = 'Counter Staff',
+  staffUsername,
 }: Props) {
-  const [activeTab, setActiveTab] = useState<'clients' | 'suppliers'>('clients');
+  const [activeTab, setActiveTab] = useState<'clients' | 'suppliers' | 'branches'>('clients');
   const [clients, setClients] = useState<Client[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [branches, setBranches] = useState<any[]>([]);
   const [selectedParty, setSelectedParty] = useState<any | null>(null);
   const [statement, setStatement] = useState<LedgerTransaction[]>([]);
   const [loadingLedger, setLoadingLedger] = useState(false);
@@ -72,7 +77,7 @@ export default function FinancialLedgers({
             });
           }
         }
-      } else {
+      } else if (activeTab === 'suppliers') {
         const res = await fetch(`/api/suppliers?tenant_id=${tenantId}`);
         const data = await res.json();
         if (data.success) {
@@ -84,6 +89,71 @@ export default function FinancialLedgers({
               return updated || data.suppliers[0];
             });
           }
+        }
+      } else {
+        // Fetch Sister Branches (Both other shops AND sister counter registers in same shop)
+        const combinedBranches: any[] = [];
+
+        // 1. Fetch other shops/branches
+        try {
+          const res = await fetch('/api/tenants');
+          const data = await res.json();
+          if (data.success && data.tenants) {
+            (data.tenants || []).forEach((t: any) => {
+              if (t.id !== tenantId) {
+                combinedBranches.push({
+                  id: t.id,
+                  code: t.slug?.toUpperCase() || 'BR',
+                  name: t.name || 'Sister Branch',
+                  city: t.city || 'Pakistan',
+                  phone: t.phone || t.owner_phone || '—',
+                  address: t.address || t.city || 'Commercial Market',
+                  type: 'branch',
+                  current_balance: 0,
+                });
+              }
+            });
+          }
+        } catch (e) {
+          console.error(e);
+        }
+
+        // 2. Fetch sister counters in current shop
+        if (tenantSlug) {
+          try {
+            const currentTenantRes = await fetch(`/api/tenants?slug=${tenantSlug}`);
+            const currentTenantData = await currentTenantRes.json();
+            if (currentTenantData.success && currentTenantData.tenant) {
+              const users = currentTenantData.tenant.users || [];
+              const counters = users.filter((u: any) => u.role === 'staff' || u.role === 'godown_staff');
+
+              counters.forEach((c: any) => {
+                if (c.username !== staffUsername) {
+                  combinedBranches.push({
+                    id: `counter_${c.username}`,
+                    code: c.username.toUpperCase(),
+                    name: `${c.full_name || c.username} (${c.username.toUpperCase()})`,
+                    city: tenantName,
+                    phone: 'Internal Counter',
+                    address: `Branch Counter • ${tenantName}`,
+                    type: 'counter',
+                    current_balance: 0,
+                  });
+                }
+              });
+            }
+          } catch (e) {
+            console.error(e);
+          }
+        }
+
+        setBranches(combinedBranches);
+        if (combinedBranches.length > 0) {
+          setSelectedParty((prev: any) => {
+            if (!prev) return combinedBranches[0];
+            const updated = combinedBranches.find((b: any) => b.id === prev.id);
+            return updated || combinedBranches[0];
+          });
         }
       }
     } catch (err) {
@@ -100,8 +170,9 @@ export default function FinancialLedgers({
     if (!tenantId || !partyId) return;
     setLoadingLedger(true);
     try {
+      const partyTypeParam = activeTab === 'clients' ? 'client' : activeTab === 'suppliers' ? 'supplier' : 'branch';
       const res = await fetch(
-        `/api/ledgers?tenant_id=${tenantId}&party_id=${partyId}&party_type=${activeTab === 'clients' ? 'client' : 'supplier'}`
+        `/api/ledgers?tenant_id=${tenantId}&party_id=${partyId}&party_type=${partyTypeParam}`
       );
       const data = await res.json();
       if (data.success) {
@@ -132,13 +203,15 @@ export default function FinancialLedgers({
     setReceiptError('');
 
     try {
+      const partyTypeParam = activeTab === 'clients' ? 'client' : activeTab === 'suppliers' ? 'supplier' : 'branch';
+      const voucherTypeParam = activeTab === 'clients' ? 'receipt' : activeTab === 'suppliers' ? 'payment' : 'payment';
       const res = await fetch('/api/vouchers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tenant_id: tenantId,
-          voucher_type: activeTab === 'clients' ? 'receipt' : 'payment',
-          party_type: activeTab === 'clients' ? 'client' : 'supplier',
+          voucher_type: voucherTypeParam,
+          party_type: partyTypeParam,
           party_id: selectedParty.id,
           party_name: selectedParty.name,
           amount: parseFloat(receiptAmount) || 0,
@@ -276,7 +349,7 @@ export default function FinancialLedgers({
     window.open(url, '_blank');
   };
 
-  const partiesList = activeTab === 'clients' ? clients : suppliers;
+  const partiesList = activeTab === 'clients' ? clients : activeTab === 'suppliers' ? suppliers : branches;
   const filteredParties = partiesList.filter(p =>
     p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     p.code?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -320,7 +393,26 @@ export default function FinancialLedgers({
   const exceedsThreshold = hasCreditLimit && currentPartyBalance >= creditLimit * OVERDUE_THRESHOLD;
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr 320px', gap: '1.25rem', height: 'calc(100vh - var(--topbar-height) - 2 * var(--gutter))', overflow: 'hidden' }}>
+    <div className="financial-ledgers-container" style={{ display: 'grid', gridTemplateColumns: '300px 1fr 280px', gap: '1.25rem', height: '100%', overflow: 'hidden' }}>
+      <style>{`
+        .role-tab {
+          flex: 1;
+          padding: 6px 12px;
+          border: none;
+          background: transparent;
+          color: var(--on-surface-variant);
+          font-weight: 600;
+          font-size: 12px;
+          border-radius: var(--radius-sm);
+          cursor: pointer;
+          transition: all 0.15s;
+        }
+        .role-tab.active {
+          background: var(--surface);
+          color: var(--on-surface);
+          box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+      `}</style>
       
       {/* Print Styles for Isolated Ledger Statement */}
       <style>{`
@@ -355,27 +447,38 @@ export default function FinancialLedgers({
         <div style={{ padding: '1rem', borderBottom: '1px solid var(--outline-variant)', background: 'var(--surface)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
             <h3 className="headline-sm">Directory</h3>
-            <button
-              onClick={() => setShowAddPartyModal(true)}
-              style={{ width: 28, height: 28, borderRadius: 'var(--radius-full)', background: 'var(--secondary)', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-              title={`Add New ${activeTab === 'clients' ? 'Client' : 'Supplier'}`}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span>
-            </button>
+            {activeTab !== 'branches' && (
+              <button
+                onClick={() => setShowAddPartyModal(true)}
+                style={{ width: 28, height: 28, borderRadius: 'var(--radius-full)', background: 'var(--secondary)', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                title={`Add New ${activeTab === 'clients' ? 'Client' : 'Supplier'}`}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span>
+              </button>
+            )}
           </div>
 
-          <div style={{ display: 'flex', background: 'var(--surface-container)', borderRadius: 'var(--radius-sm)', padding: '3px', marginBottom: '0.75rem' }}>
+          <div style={{ display: 'flex', background: 'var(--surface-container)', borderRadius: 'var(--radius-sm)', padding: '3px', marginBottom: '0.75rem', gap: '2px' }}>
             <button
               onClick={() => { setActiveTab('clients'); setSelectedParty(null); }}
               className={`role-tab ${activeTab === 'clients' ? 'active' : ''}`}
+              style={{ fontSize: '11px', padding: '6px 8px' }}
             >
               Clients ({clients.length})
             </button>
             <button
               onClick={() => { setActiveTab('suppliers'); setSelectedParty(null); }}
               className={`role-tab ${activeTab === 'suppliers' ? 'active' : ''}`}
+              style={{ fontSize: '11px', padding: '6px 8px' }}
             >
               Suppliers ({suppliers.length})
+            </button>
+            <button
+              onClick={() => { setActiveTab('branches'); setSelectedParty(null); }}
+              className={`role-tab ${activeTab === 'branches' ? 'active' : ''}`}
+              style={{ fontSize: '11px', padding: '6px 8px' }}
+            >
+              Branches ({branches.length})
             </button>
           </div>
 
@@ -424,11 +527,11 @@ export default function FinancialLedgers({
                       fontSize: '10px',
                     }}
                   >
-                    {isOverdue ? 'OVERDUE' : bal === 0 ? 'SETTLED' : 'ACTIVE'}
+                    {activeTab === 'branches' ? 'BRANCH' : isOverdue ? 'OVERDUE' : bal === 0 ? 'SETTLED' : 'ACTIVE'}
                   </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--on-surface-variant)' }}>
-                  <span>ID: {party.code || '—'}</span>
+                  <span>ID: {party.code || party.city || '—'}</span>
                   <span className="font-mono font-bold" style={{ color: isOverdue ? 'var(--error)' : 'inherit', fontSize: '12px' }}>
                     Rs. {bal.toLocaleString()}
                   </span>
@@ -438,7 +541,7 @@ export default function FinancialLedgers({
           })}
           {filteredParties.length === 0 && (
             <div style={{ textAlign: 'center', padding: '2.5rem 1rem', color: 'var(--on-surface-variant)', fontSize: '13px' }}>
-              No {activeTab} found. Click + to add.
+              No {activeTab} found.
             </div>
           )}
         </div>
@@ -448,64 +551,60 @@ export default function FinancialLedgers({
       <div className="card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {selectedParty ? (
           <div id="printable-ledger-statement" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-            {/* Party Details Header */}
-            <div style={{ padding: '1.25rem', borderBottom: '1px solid var(--outline-variant)', background: 'var(--surface-container-lowest)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
-                <div>
-                  <h2 className="headline-md" style={{ marginBottom: '4px' }}>{selectedParty.name}</h2>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '12px', color: 'var(--on-surface-variant)', flexWrap: 'wrap' }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>location_on</span>
-                      {selectedParty.address || selectedParty.city || '—'}
-                    </span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>call</span>
-                      {selectedParty.phone || '—'}
-                    </span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>fingerprint</span>
-                      Code: {selectedParty.code || '—'}
-                    </span>
-                  </div>
+            {/* Header */}
+            <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--outline-variant)', background: 'var(--surface)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <h3 className="headline-sm">{selectedParty.name}</h3>
+                  <span className="badge badge-secondary" style={{ fontSize: '10px' }}>
+                    {activeTab === 'clients' ? 'Client' : activeTab === 'suppliers' ? 'Supplier' : 'Sister Branch'}
+                  </span>
                 </div>
-                <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <span className="badge badge-premium">{activeTab === 'clients' ? 'CLIENT ACCOUNT' : 'SUPPLIER'}</span>
-                  <button onClick={() => window.print()} className="btn btn-secondary-outline btn-icon" title="Print Ledger Statement">
-                    <span className="material-symbols-outlined" style={{ fontSize: 18 }}>picture_as_pdf</span>
-                  </button>
-                  <button onClick={handleSendWhatsAppLedger} className="btn btn-secondary-outline btn-icon" title="Send WhatsApp Payment Reminder">
-                    <span className="material-symbols-outlined" style={{ fontSize: 18, color: '#16a34a' }}>chat</span>
-                  </button>
-                </div>
+                <p className="text-muted text-xs font-mono" style={{ marginTop: '2px' }}>
+                  ID: {selectedParty.code || '—'} • Tel: {selectedParty.phone || 'No phone'}
+                </p>
               </div>
 
-              {/* Statement Bar */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '0.75rem', borderTop: '1px solid var(--outline-variant)' }}>
-                <span style={{ fontWeight: 600, fontSize: '13px' }}>Statement of Account</span>
+              <div className="no-print" style={{ display: 'flex', gap: '8px' }}>
                 <select
-                  className="form-select no-print"
                   value={dateFilter}
                   onChange={e => setDateFilter(e.target.value)}
-                  style={{ height: '32px', fontSize: '12px', width: '150px' }}
+                  className="form-input"
+                  style={{ height: '34px', fontSize: '12px', paddingRight: '2rem' }}
                 >
-                  <option value="All Transactions">All Transactions</option>
-                  <option value="Last 30 Days">Last 30 Days</option>
-                  <option value="This Quarter">This Quarter</option>
+                  <option>All Transactions</option>
+                  <option>Last 30 Days</option>
+                  <option>This Quarter</option>
                 </select>
+                <button
+                  onClick={handleSendWhatsAppLedger}
+                  className="btn btn-secondary"
+                  style={{ height: '34px', padding: '0 10px' }}
+                  title="Share Statement via WhatsApp"
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 16 }}>share</span>
+                </button>
+                <button
+                  onClick={() => window.print()}
+                  className="btn btn-secondary"
+                  style={{ height: '34px', padding: '0 10px' }}
+                  title="Print Ledger Statement"
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 16 }}>print</span>
+                </button>
               </div>
             </div>
 
-            {/* Statement Rows */}
+            {/* Table Area */}
             <div style={{ flex: 1, overflowY: 'auto' }}>
               {loadingLedger ? (
-                <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--on-surface-variant)' }}>
-                  <div className="spinner" style={{ margin: '0 auto 0.5rem' }} />
-                  Loading transactions...
+                <div style={{ padding: '3rem', textAlign: 'center' }}>
+                  <div className="spinner" style={{ margin: '0 auto 1rem', borderColor: '#f97316', borderTopColor: 'transparent' }} />
+                  <p className="text-muted text-sm font-mono">Loading statement of account...</p>
                 </div>
               ) : filteredStatement.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--on-surface-variant)', fontSize: '13px' }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: 36, marginBottom: '0.5rem', display: 'block', color: 'var(--outline-variant)' }}>receipt_long</span>
-                  No transaction history recorded for this selection.
+                <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--on-surface-variant)' }}>
+                  No transactions found for this party.
                 </div>
               ) : (
                 <table className="data-table">
@@ -540,7 +639,7 @@ export default function FinancialLedgers({
                 </table>
               )}
             </div>
-
+            
             {/* Footer Totals */}
             <div style={{ padding: '0.75rem 1.25rem', background: 'var(--surface-container-high)', borderTop: '1px solid var(--outline-variant)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
               <div>
@@ -555,7 +654,7 @@ export default function FinancialLedgers({
           </div>
         ) : (
           <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--on-surface-variant)' }}>
-            Select a client or supplier from the directory.
+            Select an account from the directory.
           </div>
         )}
       </div>
@@ -563,16 +662,16 @@ export default function FinancialLedgers({
       {/* ── Right Col: Financial Summary & Actions ── */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
         
-        {/* Record Receipt Action Button */}
+        {/* Record Receipt / Payment / Settlement Button */}
         <div className="card" style={{ padding: '1.25rem', textAlign: 'center' }}>
           <div style={{ width: 44, height: 44, borderRadius: 'var(--radius-md)', background: 'var(--secondary-fixed)', color: 'var(--secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.75rem' }}>
             <span className="material-symbols-outlined filled" style={{ fontSize: 24 }}>payments</span>
           </div>
           <h4 style={{ fontWeight: 700, fontSize: '15px', marginBottom: '4px' }}>
-            {activeTab === 'clients' ? 'Receive Payment' : 'Pay Supplier'}
+            {activeTab === 'clients' ? 'Receive Payment' : activeTab === 'suppliers' ? 'Pay Supplier' : 'Branch Settlement'}
           </h4>
           <p className="text-muted text-sm" style={{ marginBottom: '1rem' }}>
-            {activeTab === 'clients' ? 'Post cash, online or cheque payment to client ledger' : 'Record payment disbursed to vendor'}
+            {activeTab === 'clients' ? 'Post cash, online or cheque payment to client ledger' : activeTab === 'suppliers' ? 'Record payment disbursed to vendor' : 'Settle inter-branch transfer balance'}
           </p>
           <button
             onClick={() => setShowReceiptModal(true)}
@@ -581,7 +680,7 @@ export default function FinancialLedgers({
             style={{ opacity: !selectedParty ? 0.5 : 1 }}
           >
             <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add_circle</span>
-            {activeTab === 'clients' ? 'Record Receipt' : 'Record Payment'}
+            {activeTab === 'clients' ? 'Record Receipt' : activeTab === 'suppliers' ? 'Record Payment' : 'Record Settlement'}
           </button>
         </div>
 
@@ -708,7 +807,7 @@ export default function FinancialLedgers({
           <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '1.5rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <h3 className="headline-sm">
-                {activeTab === 'clients' ? 'Record Payment Receipt' : 'Record Supplier Payment'}
+                {activeTab === 'clients' ? 'Record Payment Receipt' : activeTab === 'suppliers' ? 'Record Supplier Payment' : 'Record Inter-Branch Settlement'}
               </h3>
               <button onClick={() => setShowReceiptModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--on-surface-variant)' }}>
                 <span className="material-symbols-outlined">close</span>
@@ -730,7 +829,7 @@ export default function FinancialLedgers({
 
             <form onSubmit={handleRecordReceipt} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
-                <label className="form-label">Payment Amount (Rs.) *</label>
+                <label className="form-label">{activeTab === 'branches' ? 'Settlement Amount (Rs.) *' : 'Payment Amount (Rs.) *'}</label>
                 <input
                   type="number"
                   min="1"
@@ -786,7 +885,7 @@ export default function FinancialLedgers({
                   disabled={submittingReceipt}
                   className="btn btn-primary"
                 >
-                  {submittingReceipt ? 'Posting to Ledger...' : 'Post Payment'}
+                  {submittingReceipt ? 'Posting to Ledger...' : activeTab === 'branches' ? 'Post Settlement' : 'Post Payment'}
                 </button>
               </div>
             </form>

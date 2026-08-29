@@ -694,8 +694,10 @@ export default function TenantAppPage({ params }: PageProps) {
           {(activeTab === 'customers' || activeTab === 'ledgers') && (
             <FinancialLedgers
               tenantId={tenant.id}
+              tenantSlug={slug}
               tenantName={tenant.name}
               staffName={currentUser?.full_name || currentUser?.username || 'Staff'}
+              staffUsername={currentUser?.username}
             />
           )}
           {(activeTab === 'credit_recovery' || activeTab === 'credit') && (

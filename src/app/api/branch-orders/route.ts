@@ -168,6 +168,24 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
+    // Helper: calculate total transfer value from supplying branch's real cost prices
+    const calcTransferValue = async (toTenantId: string, itemsList: any[]): Promise<number> => {
+      let total = 0;
+      for (const it of itemsList) {
+        const { data: srcItem } = await supabaseAdmin
+          .from('items')
+          .select('cost_price, retail_price')
+          .eq('tenant_id', toTenantId)
+          .eq('code', it.item_code)
+          .maybeSingle();
+        if (srcItem) {
+          const unitCost = Number(srcItem.cost_price) || Number(srcItem.retail_price) * 0.85 || 0;
+          total += unitCost * Number(it.qty || 1);
+        }
+      }
+      return total;
+    };
+
     // Fetch the current order to validate transition
     const { data: currentOrder, error: fetchErr } = await supabaseAdmin
       .from('branch_orders')
@@ -194,6 +212,176 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
+    // 1. Fetch order items and tenant info
+    const { data: orderItems } = await supabaseAdmin
+      .from('branch_order_items')
+      .select('*')
+      .eq('order_id', id);
+
+    const itemsList = orderItems || [];
+
+    // 2. Fetch tenant names
+    const { data: fromTenant } = await supabaseAdmin
+      .from('tenants')
+      .select('id, name')
+      .eq('id', currentOrder.from_tenant_id)
+      .maybeSingle();
+
+    const { data: toTenant } = await supabaseAdmin
+      .from('tenants')
+      .select('id, name')
+      .eq('id', currentOrder.to_tenant_id)
+      .maybeSingle();
+
+    const fromName = fromTenant?.name || 'Requesting Branch';
+    const toName = toTenant?.name || 'Supplying Branch';
+
+    // 3. Handle Status Specific Actions (Stock & Financial Posting)
+    if (status === 'dispatched') {
+      // ─── STEP A: Deduct stock from Supplying Branch (to_tenant_id) ───
+      // Calculate real transfer value from supplying branch cost prices
+      const realTransferValue = await calcTransferValue(currentOrder.to_tenant_id, itemsList);
+
+      for (const it of itemsList) {
+        const { data: sourceItem } = await supabaseAdmin
+          .from('items')
+          .select('id, stock_qty')
+          .eq('tenant_id', currentOrder.to_tenant_id)
+          .eq('code', it.item_code)
+          .maybeSingle();
+
+        if (sourceItem) {
+          const curQty = Number(sourceItem.stock_qty || 0);
+          await supabaseAdmin
+            .from('items')
+            .update({ stock_qty: Math.max(0, curQty - Number(it.qty || 1)) })
+            .eq('id', sourceItem.id);
+        }
+      }
+
+      // Persist the real transfer value onto the order row so 'received' can reuse it
+      await supabaseAdmin
+        .from('branch_orders')
+        .update({ transfer_value: realTransferValue > 0 ? realTransferValue : null })
+        .eq('id', id);
+
+      // Log dispatch audit
+      try {
+        await supabaseAdmin.from('audit_logs').insert({
+          tenant_id: currentOrder.to_tenant_id,
+          user_name: toName,
+          action: `Branch Order ${currentOrder.order_no} Dispatched to ${fromName}`,
+          action_type: 'branch_dispatch',
+          entity_type: 'branch_order',
+          entity_id: id,
+          details: {
+            order_no: currentOrder.order_no,
+            to: fromName,
+            items_count: itemsList.length,
+            transfer_value: realTransferValue,
+          },
+        });
+      } catch {}
+
+    } else if (status === 'received') {
+      // ─── STEP B: Add stock to Requesting Branch (from_tenant_id) ───
+
+      // Read transfer value that was calculated & stored at dispatch time
+      // (Falls back to recalculating from supplying branch cost prices)
+      const dispatchValue = Number((currentOrder as any).transfer_value || 0);
+      const transferAmount = dispatchValue > 0
+        ? dispatchValue
+        : await calcTransferValue(currentOrder.to_tenant_id, itemsList);
+
+      for (const it of itemsList) {
+        const { data: destItem } = await supabaseAdmin
+          .from('items')
+          .select('id, stock_qty')
+          .eq('tenant_id', currentOrder.from_tenant_id)
+          .eq('code', it.item_code)
+          .maybeSingle();
+
+        if (destItem) {
+          const curQty = Number(destItem.stock_qty || 0);
+          await supabaseAdmin
+            .from('items')
+            .update({ stock_qty: curQty + Number(it.qty || 1) })
+            .eq('id', destItem.id);
+        } else {
+          // Item doesn't exist in receiving branch yet → copy master record from supplying branch
+          const { data: origItem } = await supabaseAdmin
+            .from('items')
+            .select('*')
+            .eq('tenant_id', currentOrder.to_tenant_id)
+            .eq('code', it.item_code)
+            .maybeSingle();
+
+          if (origItem) {
+            const { id: _ignore, ...itemWithoutId } = origItem;
+            await supabaseAdmin.from('items').insert({
+              ...itemWithoutId,
+              tenant_id: currentOrder.from_tenant_id,
+              stock_qty: Number(it.qty || 1),
+            });
+          }
+        }
+      }
+
+      // ─── STEP C: Post Inter-Branch Ledger Vouchers (real amount only) ───
+      // Voucher for Receiving Branch — they OWE the supplying branch (Payable / Debit)
+      try {
+        await supabaseAdmin.from('vouchers').insert({
+          tenant_id: currentOrder.from_tenant_id,
+          voucher_no: `IBT-${currentOrder.order_no.slice(-6)}`,
+          voucher_type: 'branch_transfer_in',
+          party_type: 'branch',
+          party_id: currentOrder.to_tenant_id,
+          party_name: toName,
+          amount: transferAmount,
+          payment_mode: 'Transfer on Account',
+          reference_no: currentOrder.order_no,
+          remarks: `Stock Received from ${toName} | ${itemsList.length} item(s) | ${currentOrder.order_no}`,
+          date: new Date().toISOString().split('T')[0],
+        });
+      } catch {}
+
+      // Voucher for Supplying Branch — they are OWED by the receiving branch (Receivable / Credit)
+      try {
+        await supabaseAdmin.from('vouchers').insert({
+          tenant_id: currentOrder.to_tenant_id,
+          voucher_no: `IBT-${currentOrder.order_no.slice(-6)}`,
+          voucher_type: 'branch_transfer_out',
+          party_type: 'branch',
+          party_id: currentOrder.from_tenant_id,
+          party_name: fromName,
+          amount: transferAmount,
+          payment_mode: 'Transfer on Account',
+          reference_no: currentOrder.order_no,
+          remarks: `Stock Dispatched to ${fromName} | ${itemsList.length} item(s) | ${currentOrder.order_no}`,
+          date: new Date().toISOString().split('T')[0],
+        });
+      } catch {}
+
+      // Log receive audit
+      try {
+        await supabaseAdmin.from('audit_logs').insert({
+          tenant_id: currentOrder.from_tenant_id,
+          user_name: fromName,
+          action: `Branch Order ${currentOrder.order_no} Received & Restocked from ${toName}`,
+          action_type: 'branch_receive',
+          entity_type: 'branch_order',
+          entity_id: id,
+          details: {
+            order_no: currentOrder.order_no,
+            from: toName,
+            amount: transferAmount,
+            items_count: itemsList.length,
+          },
+        });
+      } catch {}
+    }
+
+    // 4. Update the order status in DB
     const { data: updatedOrder, error: updateErr } = await supabaseAdmin
       .from('branch_orders')
       .update({ status })

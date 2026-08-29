@@ -13,9 +13,70 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Tenant ID and Party ID are required' }, { status: 400 });
     }
 
-    // 1. Fetch Invoices or Purchases depending on partyType
+    // 1. Fetch Invoices, Purchases, or Branch Transfers depending on partyType
     let records: any[] = [];
-    if (partyType === 'supplier') {
+    if (partyType === 'branch') {
+      let branchOrders: any[] = [];
+      if (partyId.startsWith('counter_')) {
+        const counterUsername = partyId.replace('counter_', '');
+        const { data: boData, error: boErr } = await supabaseAdmin
+          .from('branch_orders')
+          .select('*, branch_order_items(*)')
+          .eq('from_tenant_id', tenantId)
+          .eq('to_tenant_id', tenantId)
+          .or(`from_counter.eq.${counterUsername},target_counter.eq.${counterUsername}`)
+          .in('status', ['dispatched', 'received'])
+          .order('created_at', { ascending: true });
+        if (boErr) throw boErr;
+        branchOrders = boData || [];
+      } else {
+        // Fetch branch orders between this tenant and target sister branch
+        const { data: boData, error: boErr } = await supabaseAdmin
+          .from('branch_orders')
+          .select('*, branch_order_items(*)')
+          .or(`and(from_tenant_id.eq.${tenantId},to_tenant_id.eq.${partyId}),and(from_tenant_id.eq.${partyId},to_tenant_id.eq.${tenantId})`)
+          .in('status', ['dispatched', 'received'])
+          .order('created_at', { ascending: true });
+
+        if (boErr) throw boErr;
+        branchOrders = boData || [];
+      }
+
+      records = (branchOrders || []).map(bo => {
+        const isReceivedByUs = bo.from_tenant_id === tenantId;
+        const items = bo.branch_order_items || [];
+        const itemsCount = items.length || 1;
+        // Build a readable items summary
+        const itemsSummary = items.slice(0, 3).map((i: any) => `${i.item_name || i.item_code} ×${i.qty}`).join(', ');
+        const moreItems = itemsCount > 3 ? ` +${itemsCount - 3} more` : '';
+
+        if (isReceivedByUs) {
+          // We received stock from them → We OWE them (Payable / Debit)
+          return {
+            id: bo.id,
+            date: new Date(bo.created_at).toISOString().split('T')[0],
+            timestamp: new Date(bo.created_at).getTime(),
+            type: 'RCV',
+            typeClass: 'badge-target',
+            desc: `${bo.order_no} — STOCK IN: ${itemsSummary}${moreItems}`,
+            debit: 0,    // real amount will come from the IBT voucher fetched below
+            credit: 0,
+          };
+        } else {
+          // We dispatched stock to them → They OWE us (Receivable / Credit)
+          return {
+            id: bo.id,
+            date: new Date(bo.created_at).toISOString().split('T')[0],
+            timestamp: new Date(bo.created_at).getTime(),
+            type: 'DSP',
+            typeClass: 'badge-credit',
+            desc: `${bo.order_no} — STOCK OUT: ${itemsSummary}${moreItems}`,
+            debit: 0,    // real amount will come from the IBT voucher fetched below
+            credit: 0,
+          };
+        }
+      });
+    } else if (partyType === 'supplier') {
       const { data: purchases, error: purErr } = await supabaseAdmin
         .from('purchases')
         .select('*')
@@ -109,16 +170,50 @@ export async function GET(req: NextRequest) {
     const transactions: any[] = [...records];
 
     (vouchers || []).forEach(v => {
-      transactions.push({
-        id: v.id,
-        date: v.date || new Date(v.created_at).toISOString().split('T')[0],
-        timestamp: new Date(v.created_at).getTime(),
-        type: v.voucher_type === 'receipt' ? 'PAY' : 'PMT',
-        typeClass: v.voucher_type === 'receipt' ? 'badge-paid' : 'badge-credit',
-        desc: `${v.voucher_no} (${v.payment_mode ? `${v.payment_mode}${v.remarks ? ` — ${v.remarks}` : ''}` : (v.remarks || (v.voucher_type === 'receipt' ? 'Payment Received' : 'Supplier Payment'))})`,
-        debit: 0,
-        credit: Number(v.amount || 0),
-      });
+      const vType = v.voucher_type || '';
+      const amt = Number(v.amount || 0);
+
+      // ── Branch Transfer Vouchers ──────────────────────────────────────
+      if (vType === 'branch_transfer_in') {
+        // We received stock → Debit (we OWE them)
+        transactions.push({
+          id: v.id,
+          date: v.date || new Date(v.created_at).toISOString().split('T')[0],
+          timestamp: new Date(v.created_at).getTime(),
+          type: 'IBT-IN',
+          typeClass: 'badge-target',
+          desc: `${v.voucher_no} — ${v.remarks || 'Stock Received (Payable)'}`,
+          debit: amt,
+          credit: 0,
+        });
+      } else if (vType === 'branch_transfer_out') {
+        // We dispatched stock → Credit (they OWE us)
+        transactions.push({
+          id: v.id,
+          date: v.date || new Date(v.created_at).toISOString().split('T')[0],
+          timestamp: new Date(v.created_at).getTime(),
+          type: 'IBT-OUT',
+          typeClass: 'badge-credit',
+          desc: `${v.voucher_no} — ${v.remarks || 'Stock Dispatched (Receivable)'}`,
+          debit: 0,
+          credit: amt,
+        });
+      } else {
+        // ── Standard Receipts / Payments / Settlements ──────────────────
+        const isReceipt = vType === 'receipt';
+        transactions.push({
+          id: v.id,
+          date: v.date || new Date(v.created_at).toISOString().split('T')[0],
+          timestamp: new Date(v.created_at).getTime(),
+          type: isReceipt ? 'PAY' : 'PMT',
+          typeClass: isReceipt ? 'badge-paid' : 'badge-credit',
+          desc: `${v.voucher_no} (${v.payment_mode
+            ? `${v.payment_mode}${v.remarks ? ` — ${v.remarks}` : ''}`
+            : (v.remarks || (isReceipt ? 'Payment Received' : 'Supplier Payment'))})`,
+          debit: 0,
+          credit: amt,
+        });
+      }
     });
 
     // Sort by timestamp
