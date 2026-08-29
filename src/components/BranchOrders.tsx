@@ -52,7 +52,7 @@ export default function BranchOrders({
       try {
         const destList: OrderDestination[] = [];
 
-        // 1. Fetch other branches & godowns
+        // Fetch other branches & godowns
         const tenantsRes = await fetch('/api/tenants');
         const tenantsData = await tenantsRes.json();
         if (tenantsData.success) {
@@ -69,29 +69,6 @@ export default function BranchOrders({
           });
         }
 
-        // 2. Fetch sister counters / staff within current shop
-        if (tenantSlug) {
-          const currentTenantRes = await fetch(`/api/tenants?slug=${tenantSlug}`);
-          const currentTenantData = await currentTenantRes.json();
-          if (currentTenantData.success && currentTenantData.tenant) {
-            const users = currentTenantData.tenant.users || [];
-            const counters = users.filter((u: any) => u.role === 'staff' || u.role === 'godown_staff');
-
-            counters.forEach((c: any) => {
-              if (c.username !== staffUsername) {
-                destList.push({
-                  id: `counter_${c.username}`,
-                  tenantId: tenantId || '',
-                  counterUsername: c.username,
-                  name: `${c.full_name || c.username} (${c.username.toUpperCase()})`,
-                  type: 'counter',
-                  subtitle: `Counter Register • ${tenantName}`,
-                });
-              }
-            });
-          }
-        }
-
         setDestinations(destList);
         if (destList.length > 0) {
           setSelectedDestId(destList[0].id);
@@ -102,7 +79,7 @@ export default function BranchOrders({
     };
 
     fetchDestinations();
-  }, [tenantId, tenantSlug, staffUsername, tenantName]);
+  }, [tenantId]);
 
   // Set initial selected item
   useEffect(() => {

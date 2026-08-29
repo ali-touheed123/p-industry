@@ -16,66 +16,8 @@ export async function GET(req: NextRequest) {
     // 1. Fetch Invoices, Purchases, or Branch Transfers depending on partyType
     let records: any[] = [];
     if (partyType === 'branch') {
-      let branchOrders: any[] = [];
-      if (partyId.startsWith('counter_')) {
-        const counterUsername = partyId.replace('counter_', '');
-        const { data: boData, error: boErr } = await supabaseAdmin
-          .from('branch_orders')
-          .select('*, branch_order_items(*)')
-          .eq('from_tenant_id', tenantId)
-          .eq('to_tenant_id', tenantId)
-          .or(`from_counter.eq.${counterUsername},target_counter.eq.${counterUsername}`)
-          .in('status', ['dispatched', 'received'])
-          .order('created_at', { ascending: true });
-        if (boErr) throw boErr;
-        branchOrders = boData || [];
-      } else {
-        // Fetch branch orders between this tenant and target sister branch
-        const { data: boData, error: boErr } = await supabaseAdmin
-          .from('branch_orders')
-          .select('*, branch_order_items(*)')
-          .or(`and(from_tenant_id.eq.${tenantId},to_tenant_id.eq.${partyId}),and(from_tenant_id.eq.${partyId},to_tenant_id.eq.${tenantId})`)
-          .in('status', ['dispatched', 'received'])
-          .order('created_at', { ascending: true });
-
-        if (boErr) throw boErr;
-        branchOrders = boData || [];
-      }
-
-      records = (branchOrders || []).map(bo => {
-        const isReceivedByUs = bo.from_tenant_id === tenantId;
-        const items = bo.branch_order_items || [];
-        const itemsCount = items.length || 1;
-        // Build a readable items summary
-        const itemsSummary = items.slice(0, 3).map((i: any) => `${i.item_name || i.item_code} ×${i.qty}`).join(', ');
-        const moreItems = itemsCount > 3 ? ` +${itemsCount - 3} more` : '';
-
-        if (isReceivedByUs) {
-          // We received stock from them → We OWE them (Payable / Debit)
-          return {
-            id: bo.id,
-            date: new Date(bo.created_at).toISOString().split('T')[0],
-            timestamp: new Date(bo.created_at).getTime(),
-            type: 'RCV',
-            typeClass: 'badge-target',
-            desc: `${bo.order_no} — STOCK IN: ${itemsSummary}${moreItems}`,
-            debit: 0,    // real amount will come from the IBT voucher fetched below
-            credit: 0,
-          };
-        } else {
-          // We dispatched stock to them → They OWE us (Receivable / Credit)
-          return {
-            id: bo.id,
-            date: new Date(bo.created_at).toISOString().split('T')[0],
-            timestamp: new Date(bo.created_at).getTime(),
-            type: 'DSP',
-            typeClass: 'badge-credit',
-            desc: `${bo.order_no} — STOCK OUT: ${itemsSummary}${moreItems}`,
-            debit: 0,    // real amount will come from the IBT voucher fetched below
-            credit: 0,
-          };
-        }
-      });
+      // Branch accounting transactions are recorded as IBT vouchers in the vouchers table (Step 2)
+      records = [];
     } else if (partyType === 'supplier') {
       const { data: purchases, error: purErr } = await supabaseAdmin
         .from('purchases')
@@ -157,12 +99,21 @@ export async function GET(req: NextRequest) {
     }
 
     // 2. Fetch Vouchers (Receipts/Payments) for this party
-    const { data: vouchers, error: vouchErr } = await supabaseAdmin
+    // For counter parties (partyId starts with "counter_"), match on party_code TEXT column.
+    // For all other parties (clients, suppliers, branches by UUID), match on party_id UUID column.
+    let vouchersQuery = supabaseAdmin
       .from('vouchers')
       .select('*')
       .eq('tenant_id', tenantId)
-      .eq('party_id', partyId)
       .order('created_at', { ascending: true });
+
+    if (partyId.startsWith('counter_')) {
+      vouchersQuery = vouchersQuery.eq('party_code', partyId);
+    } else {
+      vouchersQuery = vouchersQuery.eq('party_id', partyId);
+    }
+
+    const { data: vouchers, error: vouchErr } = await vouchersQuery;
 
     if (vouchErr) throw vouchErr;
 

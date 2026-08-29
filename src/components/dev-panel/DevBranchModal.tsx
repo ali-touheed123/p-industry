@@ -33,7 +33,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
   const [ceoUsername, setCeoUsername] = useState('');
   const [ceoPassword, setCeoPassword] = useState('');
   const [counters, setCounters] = useState<Array<{ username: string; password: string; name: string }>>([
-    { username: 'counter1', password: '123', name: 'Branch 01 Counter' }
+    { username: 'counter1', password: '123', name: 'Counter 01 (Main POS)' }
   ]);
 
   const [loading, setLoading] = useState(false);
@@ -52,7 +52,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
       setOwnerName(editingBranch.owner_name || '');
       setCeoUsername('');
       setCeoPassword('');
-      setCounters([{ username: 'counter1', password: '123', name: 'Branch 01 Counter' }]);
+      setCounters([{ username: 'counter1', password: '123', name: 'Counter 01 (Main POS)' }]);
     } else {
       setName('');
       setType('shop');
@@ -65,7 +65,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
       setCeoUsername('');
       setCeoPassword('');
       setCounters([
-        { username: 'counter1', password: '123', name: 'Branch 01 (Main Counter)' }
+        { username: 'counter1', password: '123', name: 'Counter 01 (Main POS)' }
       ]);
     }
     setFormError('');
@@ -89,7 +89,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
     const nextIdx = counters.length + 1;
     setCounters([
       ...counters,
-      { username: `counter${nextIdx}`, password: '123', name: `Branch 0${nextIdx} Counter` }
+      { username: `counter${nextIdx}`, password: '123', name: `Counter 0${nextIdx} (POS Register)` }
     ]);
   };
 
@@ -323,11 +323,11 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
                 </div>
               </div>
 
-              {/* Branch Counters Setup */}
+              {/* POS Cash Registers Setup */}
               <div style={{ paddingTop: '12px', borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
                   <div style={{ fontSize: '12px', fontWeight: 700, color: '#60a5fa' }}>
-                    Branch Counters ({counters.length} Active Branches)
+                    POS Cash Registers ({counters.length} Active Cashiers)
                   </div>
                   <button
                     type="button"
@@ -336,7 +336,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
                     style={{ padding: '4px 10px', fontSize: '11px', gap: '4px' }}
                   >
                     <Plus style={{ width: '12px', height: '12px' }} />
-                    <span>+ Add Another Branch</span>
+                    <span>+ Add Counter Register</span>
                   </button>
                 </div>
 
@@ -344,12 +344,12 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
                   {counters.map((c, idx) => (
                     <div key={idx} style={{ padding: '10px 12px', borderRadius: '12px', backgroundColor: 'rgba(0, 0, 0, 0.4)', border: '1px solid rgba(255, 255, 255, 0.06)', display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr auto', gap: '10px', alignItems: 'center' }}>
                       <div>
-                        <span style={{ fontSize: '9px', textTransform: 'uppercase', color: '#9ca3af', display: 'block', marginBottom: '2px' }}>Branch / Counter Name</span>
+                        <span style={{ fontSize: '9px', textTransform: 'uppercase', color: '#9ca3af', display: 'block', marginBottom: '2px' }}>Counter / Register Name</span>
                         <input
                           type="text"
                           value={c.name}
                           onChange={(e) => updateCounter(idx, 'name', e.target.value)}
-                          placeholder={`Branch 0${idx + 1}`}
+                          placeholder={`Counter 0${idx + 1} (POS)`}
                           className="aura-form-input"
                           style={{ padding: '6px 10px', fontSize: '11px' }}
                         />
@@ -381,7 +381,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
                           type="button"
                           onClick={() => removeCounter(idx)}
                           style={{ padding: '6px', borderRadius: '6px', color: '#f87171', background: 'none', border: 'none', cursor: 'pointer', marginTop: '14px' }}
-                          title="Remove branch counter"
+                          title="Remove counter register"
                         >
                           <Trash2 style={{ width: '14px', height: '14px' }} />
                         </button>

@@ -99,7 +99,7 @@ export const DevBranchesView: React.FC<DevBranchesViewProps> = ({
           className="aura-btn-gold"
         >
           <Plus style={{ width: '16px', height: '16px', strokeWidth: 3 }} />
-          <span>+ Add New Branch</span>
+          <span>+ Provision Shop / Godown</span>
         </button>
       </div>
 

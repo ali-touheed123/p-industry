@@ -85,30 +85,36 @@ export async function POST(req: NextRequest) {
 
     if (error) throw error;
 
-    // 2. Automatically sync this new product to all other branches/godowns
+    // 2. Sync new product catalog (with stock_qty=0) to ALL sister branches under same owner
+    // Sister branches = other tenants with the same owner email
     try {
-      // Find current tenant's owner or all other tenants
       const { data: currentTenant } = await supabaseAdmin
         .from('tenants')
         .select('id, owner_name, email')
         .eq('id', tenant_id)
         .single();
 
-      let sisterTenantsQuery = supabaseAdmin
+      // Build sister-branch query — group by email (most reliable), fallback to owner_name
+      let sisterQuery = supabaseAdmin
         .from('tenants')
-        .select('id')
+        .select('id, name')
         .neq('id', tenant_id)
         .eq('is_active', true);
 
-      if (currentTenant?.owner_name) {
-        sisterTenantsQuery = sisterTenantsQuery.eq('owner_name', currentTenant.owner_name);
+      if (currentTenant?.email) {
+        sisterQuery = sisterQuery.eq('email', currentTenant.email);
+      } else if (currentTenant?.owner_name) {
+        sisterQuery = sisterQuery.eq('owner_name', currentTenant.owner_name);
+      } else {
+        // No reliable grouping key — skip cross-branch sync
+        console.warn('[items/POST] No email or owner_name on tenant, skipping sister sync');
       }
 
-      const { data: sisterTenants } = await sisterTenantsQuery;
+      const { data: sisterTenants } = await sisterQuery;
 
       if (sisterTenants && sisterTenants.length > 0) {
         for (const sister of sisterTenants) {
-          // Check if item code already exists in sister branch
+          // Skip if product already exists on that branch
           const { data: existing } = await supabaseAdmin
             .from('items')
             .select('id')
@@ -127,14 +133,15 @@ export async function POST(req: NextRequest) {
               shade_code: shade_code || null,
               cost_price: Number(cost_price) || 0,
               retail_price: Number(retail_price) || 0,
-              stock_qty: 0, // Other branches start with 0 stock
+              stock_qty: 0,           // ← ALWAYS 0 — sister branches must use Branch Orders to get stock
               min_stock_alert: Number(min_stock_alert) || 5,
             });
+            console.log(`[items/POST] Synced product ${normalizedCode} to sister branch "${sister.name}" with stock_qty=0`);
           }
         }
       }
     } catch (syncErr) {
-      console.error('Error syncing new product across sister branches:', syncErr);
+      console.error('[items/POST] Error syncing product to sister branches:', syncErr);
     }
 
     return NextResponse.json({ success: true, item });

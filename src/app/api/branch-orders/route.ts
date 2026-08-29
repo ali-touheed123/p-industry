@@ -172,11 +172,12 @@ export async function PATCH(req: NextRequest) {
     const calcTransferValue = async (toTenantId: string, itemsList: any[]): Promise<number> => {
       let total = 0;
       for (const it of itemsList) {
+        const cleanCode = (it.item_code || '').trim().toUpperCase();
         const { data: srcItem } = await supabaseAdmin
           .from('items')
           .select('cost_price, retail_price')
           .eq('tenant_id', toTenantId)
-          .eq('code', it.item_code)
+          .ilike('code', cleanCode)
           .maybeSingle();
         if (srcItem) {
           const unitCost = Number(srcItem.cost_price) || Number(srcItem.retail_price) * 0.85 || 0;
@@ -243,11 +244,12 @@ export async function PATCH(req: NextRequest) {
       const realTransferValue = await calcTransferValue(currentOrder.to_tenant_id, itemsList);
 
       for (const it of itemsList) {
+        const cleanCode = (it.item_code || '').trim().toUpperCase();
         const { data: sourceItem } = await supabaseAdmin
           .from('items')
           .select('id, stock_qty')
           .eq('tenant_id', currentOrder.to_tenant_id)
-          .eq('code', it.item_code)
+          .ilike('code', cleanCode)
           .maybeSingle();
 
         if (sourceItem) {
@@ -287,18 +289,18 @@ export async function PATCH(req: NextRequest) {
       // ─── STEP B: Add stock to Requesting Branch (from_tenant_id) ───
 
       // Read transfer value that was calculated & stored at dispatch time
-      // (Falls back to recalculating from supplying branch cost prices)
       const dispatchValue = Number((currentOrder as any).transfer_value || 0);
       const transferAmount = dispatchValue > 0
         ? dispatchValue
         : await calcTransferValue(currentOrder.to_tenant_id, itemsList);
 
       for (const it of itemsList) {
+        const cleanCode = (it.item_code || '').trim().toUpperCase();
         const { data: destItem } = await supabaseAdmin
           .from('items')
           .select('id, stock_qty')
           .eq('tenant_id', currentOrder.from_tenant_id)
-          .eq('code', it.item_code)
+          .ilike('code', cleanCode)
           .maybeSingle();
 
         if (destItem) {
@@ -313,7 +315,7 @@ export async function PATCH(req: NextRequest) {
             .from('items')
             .select('*')
             .eq('tenant_id', currentOrder.to_tenant_id)
-            .eq('code', it.item_code)
+            .ilike('code', cleanCode)
             .maybeSingle();
 
           if (origItem) {
@@ -328,14 +330,28 @@ export async function PATCH(req: NextRequest) {
       }
 
       // ─── STEP C: Post Inter-Branch Ledger Vouchers (real amount only) ───
-      // Voucher for Receiving Branch — they OWE the supplying branch (Payable / Debit)
+
+      // Determine if this is a same-tenant counter order or a true inter-branch order
+      const isCounterOrder = currentOrder.from_tenant_id === currentOrder.to_tenant_id;
+
+      // For counter orders, party_id must be "counter_<username>" to match ledger queries.
+      // For branch orders, party_id is the tenant UUID.
+      const receivingPartyId = isCounterOrder
+        ? `counter_${currentOrder.target_counter}`   // the counter that supplied (supplier side)
+        : currentOrder.to_tenant_id;
+      const supplyingPartyId = isCounterOrder
+        ? `counter_${currentOrder.from_counter}`     // the counter that requested (debtor side)
+        : currentOrder.from_tenant_id;
+
+      // Voucher for Receiving Counter/Branch — they OWE the supplying side (Debit / Payable)
       try {
         await supabaseAdmin.from('vouchers').insert({
           tenant_id: currentOrder.from_tenant_id,
           voucher_no: `IBT-${currentOrder.order_no.slice(-6)}`,
           voucher_type: 'branch_transfer_in',
           party_type: 'branch',
-          party_id: currentOrder.to_tenant_id,
+          party_id: currentOrder.to_tenant_id,          // always the tenant UUID
+          party_code: isCounterOrder ? receivingPartyId : null, // counter_<username> for counter orders
           party_name: toName,
           amount: transferAmount,
           payment_mode: 'Transfer on Account',
@@ -345,14 +361,15 @@ export async function PATCH(req: NextRequest) {
         });
       } catch {}
 
-      // Voucher for Supplying Branch — they are OWED by the receiving branch (Receivable / Credit)
+      // Voucher for Supplying Counter/Branch — they are OWED by the receiving side (Credit / Receivable)
       try {
         await supabaseAdmin.from('vouchers').insert({
           tenant_id: currentOrder.to_tenant_id,
           voucher_no: `IBT-${currentOrder.order_no.slice(-6)}`,
           voucher_type: 'branch_transfer_out',
           party_type: 'branch',
-          party_id: currentOrder.from_tenant_id,
+          party_id: currentOrder.from_tenant_id,        // always the tenant UUID
+          party_code: isCounterOrder ? supplyingPartyId : null, // counter_<username> for counter orders
           party_name: fromName,
           amount: transferAmount,
           payment_mode: 'Transfer on Account',

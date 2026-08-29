@@ -125,7 +125,7 @@ export const DevOverviewView: React.FC<DevOverviewViewProps> = ({
             className="aura-btn-gold"
           >
             <Plus style={{ width: '16px', height: '16px', strokeWidth: 3 }} />
-            <span>Add Branch</span>
+            <span>+ Provision Shop / Godown</span>
           </button>
         </div>
       </div>

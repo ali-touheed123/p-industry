@@ -91,10 +91,9 @@ export default function FinancialLedgers({
           }
         }
       } else {
-        // Fetch Sister Branches (Both other shops AND sister counter registers in same shop)
+        // Fetch Sister Branches (Other shops/godowns)
         const combinedBranches: any[] = [];
 
-        // 1. Fetch other shops/branches
         try {
           const res = await fetch('/api/tenants');
           const data = await res.json();
@@ -116,35 +115,6 @@ export default function FinancialLedgers({
           }
         } catch (e) {
           console.error(e);
-        }
-
-        // 2. Fetch sister counters in current shop
-        if (tenantSlug) {
-          try {
-            const currentTenantRes = await fetch(`/api/tenants?slug=${tenantSlug}`);
-            const currentTenantData = await currentTenantRes.json();
-            if (currentTenantData.success && currentTenantData.tenant) {
-              const users = currentTenantData.tenant.users || [];
-              const counters = users.filter((u: any) => u.role === 'staff' || u.role === 'godown_staff');
-
-              counters.forEach((c: any) => {
-                if (c.username !== staffUsername) {
-                  combinedBranches.push({
-                    id: `counter_${c.username}`,
-                    code: c.username.toUpperCase(),
-                    name: `${c.full_name || c.username} (${c.username.toUpperCase()})`,
-                    city: tenantName,
-                    phone: 'Internal Counter',
-                    address: `Branch Counter • ${tenantName}`,
-                    type: 'counter',
-                    current_balance: 0,
-                  });
-                }
-              });
-            }
-          } catch (e) {
-            console.error(e);
-          }
         }
 
         setBranches(combinedBranches);
