@@ -222,15 +222,17 @@ export default function TenantAppPage({ params }: PageProps) {
 
   const fetchPendingOrdersCount = async () => {
     if (!tenant?.id) return;
+    if (typeof window !== 'undefined' && !navigator.onLine) return;
     try {
       const counterParam = currentUser?.username ? `&counter=${encodeURIComponent(currentUser.username)}` : '';
       const res = await fetch(`/api/branch-orders?tenant_id=${tenant.id}${counterParam}&count_only=incoming`);
+      if (!res.ok) return;
       const data = await res.json();
-      if (data.success) {
+      if (data && data.success) {
         setPendingOrdersCount(data.pendingCount || 0);
       }
-    } catch (err) {
-      console.error('Failed to fetch pending orders count', err);
+    } catch {
+      // Silently ignore transient background polling network hiccups
     }
   };
 
@@ -243,16 +245,17 @@ export default function TenantAppPage({ params }: PageProps) {
   }, [tenant?.id, currentUser?.username]);
 
   const refreshItems = async () => {
-    if (tenant?.id) {
-      try {
-        const itemsRes = await fetch(`/api/items?tenant_id=${tenant.id}`);
-        const itemsData = await itemsRes.json();
-        if (itemsData.success) {
-          setItems(itemsData.items || []);
-        }
-      } catch (err) {
-        console.error('Failed to reload items', err);
+    if (!tenant?.id) return;
+    if (typeof window !== 'undefined' && !navigator.onLine) return;
+    try {
+      const itemsRes = await fetch(`/api/items?tenant_id=${tenant.id}`);
+      if (!itemsRes.ok) return;
+      const itemsData = await itemsRes.json();
+      if (itemsData && itemsData.success) {
+        setItems(itemsData.items || []);
       }
+    } catch {
+      // Silently ignore transient offline fetch failures
     }
   };
 

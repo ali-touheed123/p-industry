@@ -388,7 +388,9 @@ export const DevBranchesView: React.FC<DevBranchesViewProps> = ({
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <button
                         onClick={() => {
-                          onDeleteBranch(branch.id);
+                          if (window.confirm(`⚠️ PERMANENT DELETE WARNING:\n\nAre you sure you want to completely delete "${branch.name}"?\n\nThis will remove all inventory, staff logins, sales history, and ledgers for this branch.`)) {
+                            onDeleteBranch(branch.id);
+                          }
                           setDeleteConfirmId(null);
                         }}
                         style={{ padding: '6px 12px', borderRadius: '8px', backgroundColor: '#dc2626', color: '#fff', fontSize: '11px', fontWeight: 700, border: 'none', cursor: 'pointer' }}
