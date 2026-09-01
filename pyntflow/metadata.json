@@ -1,6 +1,0 @@
-{
-  "name": "pyntflow",
-  "description": "Point of Sale & Inventory Software engineered specifically for Paint Retailers, Tinting Centers, and Wholesale Distributors.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
