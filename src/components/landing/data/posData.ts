@@ -99,9 +99,9 @@ export const POS_FEATURES: PosFeature[] = [
     iconName: 'Layers',
     badge: 'Paint-Optimized',
     details: [
-      'Gallon-to-drum conversion calculations',
+      'Pack size tracking (1L, 4L Gallons, 16L Drums, 20KG)',
       'Base A, B, C & Colorant stock monitoring',
-      'Batch numbering and expiration tracking',
+      'Batch numbering and shade code cataloging',
       'Automated low-stock reorder thresholds'
     ],
     gridSpan: 'col-span-1 md:col-span-1'
@@ -159,7 +159,7 @@ export const POS_FEATURES: PosFeature[] = [
       'Individual painter & contractor credit limits',
       'Running ledger balance statements',
       'Payment collection receipts',
-      'SMS / WhatsApp ledger sharing'
+      '1-Click WhatsApp ledger statements & receipts'
     ],
     gridSpan: 'col-span-1 md:col-span-1'
   },
@@ -198,7 +198,7 @@ export const PRICING_PLANS: PricingPlan[] = [
       'Supplier Purchase Returns & Distributor Debit Notes',
       'Day Close & Cash Drawer Register Balancing',
       'Thermal Receipt & Standard Invoice Printing',
-      '100% Offline Capability (Works without Internet)'
+      'Cloud Sync & Resilient Counter Operation'
     ],
     omittedFeatures: [
       'Branch Order & Central Stock Transfer',
@@ -228,7 +228,7 @@ export const PRICING_PLANS: PricingPlan[] = [
       'Debt Recovery Management & Aging Due Alerts',
       'Percentage Pool Commission System for Managers',
       'Full CEO Oversight, Remote Audits & Executive Dashboards',
-      'Per-Branch Add-on Option (~Rs. 2,999/branch/mo)',
+      'Per-Branch Add-on Option (Rs. 2,999/branch/mo)',
       'Priority Phone & WhatsApp Support with Free Onboarding'
     ]
   },
@@ -245,10 +245,10 @@ export const PRICING_PLANS: PricingPlan[] = [
     features: [
       'One-Off Custom Features & Unique Shop Workflows',
       'New Custom Report Types & Audit Statements',
-      'Direct Tinting Dispenser Machine & Hardware Bridges',
+      'Specialized Hardware & Barcode Scale Integrations',
       'Third-party ERP, Bank & Accounting Integrations',
       'Tailored Profit-Sharing & Manager Incentive Logic',
-      'Custom Automated SMS / WhatsApp Alerts & Triggers',
+      'Custom Accounting & Financial Formula Integrations',
       'Dedicated Developer Delivery & Architectural Support',
       'Lifetime Upgrade Compatibility & Warranty'
     ]
@@ -283,8 +283,8 @@ export const FAQ_ITEMS: FAQItem[] = [
   },
   {
     id: 'faq-6',
-    question: 'Does the software work offline?',
-    answer: 'Yes. The POS is built with robust offline-first architecture. You can continue billing customers, printing receipts, and managing inventory without any internet connection. If cloud sync is enabled, data automatically synchronizes when connection is restored.'
+    question: 'Does the software support real-time cloud sync?',
+    answer: 'Yes. Pyntflow is built on a high-speed cloud database architecture. Your multi-branch stock levels, counter sales, and customer ledgers sync in real-time, allowing the owner/CEO to view live reports remotely from anywhere.'
   },
   {
     id: 'faq-7',
@@ -294,7 +294,7 @@ export const FAQ_ITEMS: FAQItem[] = [
   {
     id: 'faq-8',
     question: 'How do multi-branch add-ons and custom features work?',
-    answer: 'With the Full (POS + CEO) plan, you can connect additional branches or store outlets for ~Rs. 2,999/month per branch with unified live inventory sync. If you require one-off bespoke development—such as specialized tinting machine drivers, custom bank reconciliations, unique accounting formulas, or bespoke report formats—we scope and quote them separately per feature.'
+    answer: 'With the Full (POS + CEO) plan, you can connect additional branches or store outlets for Rs. 2,999/month per branch with unified live inventory sync. If you require one-off bespoke development—such as specialized tinting integrations, custom bank reconciliations, unique accounting formulas, or bespoke report formats—we scope and quote them separately per feature.'
   },
   {
     id: 'faq-9',

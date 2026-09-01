@@ -3,7 +3,8 @@ import { motion } from 'motion/react';
 import { 
   ArrowRight, 
   Play, 
-  Check
+  Check,
+  ArrowLeftRight
 } from 'lucide-react';
 import { PosScreenshotView, PosTabId } from './PosScreenshotView';
 
@@ -100,7 +101,7 @@ export const Hero: React.FC<HeroProps> = ({ onOpenDemo, onExploreFeatures }) => 
           >
             <div className="flex items-center gap-1.5">
               <Check className="w-4 h-4 text-emerald-600 font-bold" />
-              <span className="font-medium text-slate-700">100% Offline Ready</span>
+              <span className="font-medium text-slate-700">Real-time Cloud Sync</span>
             </div>
             <div className="flex items-center gap-1.5">
               <Check className="w-4 h-4 text-emerald-600 font-bold" />
@@ -122,43 +123,50 @@ export const Hero: React.FC<HeroProps> = ({ onOpenDemo, onExploreFeatures }) => 
             className="relative rounded-2xl bg-slate-900 border border-slate-700/80 shadow-2xl overflow-hidden text-slate-100"
           >
             {/* App Window Titlebar */}
-            <div className="h-10 bg-slate-950 border-b border-slate-800 flex items-center justify-between px-4">
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5">
+            <div className="h-10 bg-slate-950 border-b border-slate-800 flex items-center justify-between px-3 sm:px-4">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="flex items-center gap-1.5 shrink-0">
                   <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block" />
                   <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" />
                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
                 </div>
-                <span className="text-xs text-slate-300 font-mono ml-2 font-medium">
+                <span className="text-[11px] sm:text-xs text-slate-300 font-mono ml-1 sm:ml-2 font-medium truncate">
                   {tabTitles[activeTab]}
                 </span>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-700/50 text-emerald-400 text-[11px] font-mono font-medium">
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-700/50 text-emerald-400 text-[10px] sm:text-[11px] font-mono font-medium">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  Live System Ready
+                  <span className="hidden sm:inline">Live System Ready</span>
+                  <span className="sm:hidden">Live</span>
                 </span>
               </div>
             </div>
 
+            {/* Mobile Swipe Guidance Bar */}
+            <div className="lg:hidden flex items-center justify-center gap-2 py-1.5 px-3 bg-slate-950/90 text-slate-300 text-[11px] border-b border-slate-800/80">
+              <ArrowLeftRight className="w-3.5 h-3.5 text-blue-400 animate-pulse" />
+              <span>Swipe horizontally to interact with full POS workspace</span>
+            </div>
+
             {/* POS Interface Container with Responsive Overflow Protection */}
-            <div className="relative bg-[#0A0F1D] overflow-x-auto">
+            <div className="relative bg-[#0A0F1D] overflow-x-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-900">
               <PosScreenshotView onTabChange={setActiveTab} />
             </div>
           </motion.div>
 
           {/* Bottom Trade Feature Highlights */}
-          <div className="flex flex-wrap items-center justify-between gap-3 mt-4 px-2 text-xs text-slate-500 font-medium">
+          <div className="flex flex-col sm:flex-row flex-wrap items-start sm:items-center justify-between gap-2 sm:gap-3 mt-4 px-2 text-[11px] sm:text-xs text-slate-500 font-medium">
             <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-blue-500" />
+              <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
               <span>Keyboard Hotkey Speed (F2 to F9 Navigation)</span>
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
               <span>Instant Walk-in & Painter Khata Ledger</span>
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-orange-500" />
+              <span className="w-2 h-2 rounded-full bg-orange-500 shrink-0" />
               <span>One-Click Thermal Save & Print (F5)</span>
             </span>
           </div>

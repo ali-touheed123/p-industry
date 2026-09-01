@@ -204,8 +204,8 @@ export const Pricing: React.FC<PricingProps> = ({ onSelectPlan }) => {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
+          <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-slate-200">
+            <table className="w-full min-w-[580px] text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-slate-200 text-slate-700 font-semibold bg-slate-50/60">
                   <th className="py-3 px-4">Feature / Capability</th>
