@@ -10,9 +10,17 @@ const DEV_ADMIN_COOKIE = 'aura_dev_token';
 export async function POST(req: NextRequest) {
   try {
     const { pin } = await req.json();
-    const configuredPin = process.env.DEV_ADMIN_PIN || '1234';
+    const envPin = process.env.DEV_ADMIN_PIN;
+    const cleanPin = String(pin || '').trim();
 
-    if (!pin || String(pin).trim() !== String(configuredPin).trim()) {
+    // Accepted PINs: explicitly configured env PIN, or defaults 'dev2026' and '1234'
+    const validPins = [
+      'dev2026',
+      '1234',
+      ...(envPin ? [String(envPin).trim()] : []),
+    ];
+
+    if (!cleanPin || !validPins.includes(cleanPin)) {
       return NextResponse.json(
         { success: false, error: 'Invalid Developer Master PIN' },
         { status: 401 }
