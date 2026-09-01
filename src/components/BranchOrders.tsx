@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Item, Tenant, BranchOrder } from '@/types';
+import { Search, Package, Plus, Trash2, X, Check, ShoppingBag, Layers, AlertCircle } from 'lucide-react';
 
 interface OrderDestination {
   id: string;
@@ -10,6 +11,11 @@ interface OrderDestination {
   name: string;
   type: 'branch' | 'counter';
   subtitle?: string;
+}
+
+interface OrderCartItem {
+  item: Item;
+  qty: number;
 }
 
 interface Props {
@@ -39,14 +45,71 @@ export default function BranchOrders({
 
   // Form state
   const [selectedDestId, setSelectedDestId] = useState('');
-  const [selectedItemId, setSelectedItemId] = useState('');
-  const [qty, setQty] = useState('1');
+  const [orderCart, setOrderCart] = useState<OrderCartItem[]>([]);
+  const [productSearch, setProductSearch] = useState('');
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
   const [formSuccess, setFormSuccess] = useState('');
 
-  // Fetch all potential order destinations (other branches + other counters)
+  // Close search dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setIsSearchOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Filter products by SKU, Name, Category, Shade
+  const filteredProducts = useMemo(() => {
+    const q = productSearch.trim().toLowerCase();
+    if (!q) return items.slice(0, 50); // Show first 50 items by default
+
+    return items.filter(it => {
+      const codeMatch = (it.code || '').toLowerCase().includes(q);
+      const nameMatch = (it.name || '').toLowerCase().includes(q);
+      const catMatch = (it.category || '').toLowerCase().includes(q);
+      const shadeMatch = (it.shade_code || '').toLowerCase().includes(q);
+      const packMatch = (it.pack_size || '').toLowerCase().includes(q);
+      return codeMatch || nameMatch || catMatch || shadeMatch || packMatch;
+    }).slice(0, 60);
+  }, [items, productSearch]);
+
+  // Add Item to Order Cart
+  const handleAddItemToCart = (item: Item) => {
+    setOrderCart(prev => {
+      const existingIdx = prev.findIndex(ci => ci.item.id === item.id);
+      if (existingIdx >= 0) {
+        const updated = [...prev];
+        updated[existingIdx].qty += 1;
+        return updated;
+      }
+      return [...prev, { item, qty: 1 }];
+    });
+    setProductSearch('');
+    setIsSearchOpen(false);
+  };
+
+  const handleUpdateCartQty = (idx: number, newQty: number) => {
+    if (newQty < 1) return;
+    setOrderCart(prev => {
+      const updated = [...prev];
+      updated[idx].qty = newQty;
+      return updated;
+    });
+  };
+
+  const handleRemoveCartItem = (idx: number) => {
+    setOrderCart(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  // Fetch all potential order destinations (other branches)
   useEffect(() => {
     const fetchDestinations = async () => {
       try {
@@ -80,13 +143,6 @@ export default function BranchOrders({
 
     fetchDestinations();
   }, [tenantId]);
-
-  // Set initial selected item
-  useEffect(() => {
-    if (items.length > 0 && !selectedItemId) {
-      setSelectedItemId(items[0].id);
-    }
-  }, [items, selectedItemId]);
 
   // Fetch orders
   const fetchOrders = async () => {
@@ -122,24 +178,24 @@ export default function BranchOrders({
 
     const selectedDest = destinations.find(d => d.id === selectedDestId);
     if (!selectedDest) {
-      setFormError('Please select a source branch or counter');
+      setFormError('Please select a source branch to order from');
       return;
     }
 
-    const itemObj = items.find(i => i.id === selectedItemId);
-    if (!itemObj) {
-      setFormError('Please select a valid product');
-      return;
-    }
-
-    const parsedQty = parseInt(qty) || 1;
-    if (parsedQty < 1) {
-      setFormError('Quantity must be at least 1');
+    if (orderCart.length === 0) {
+      setFormError('Please search and add at least 1 product to the order');
       return;
     }
 
     setSubmitting(true);
     try {
+      const payloadItems = orderCart.map(ci => ({
+        item_code: ci.item.code,
+        item_name: ci.item.name,
+        unit: ci.item.unit || ci.item.pack_size || 'Can',
+        qty: ci.qty,
+      }));
+
       const res = await fetch('/api/branch-orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -148,14 +204,7 @@ export default function BranchOrders({
           to_tenant_id: selectedDest.tenantId,
           from_counter: staffUsername || null,
           target_counter: selectedDest.counterUsername || null,
-          items: [
-            {
-              item_code: itemObj.code,
-              item_name: itemObj.name,
-              unit: itemObj.unit || 'Can',
-              qty: parsedQty,
-            },
-          ],
+          items: payloadItems,
           notes: notes || null,
           created_by: staffName,
         }),
@@ -163,17 +212,18 @@ export default function BranchOrders({
 
       const data = await res.json();
       if (data.success) {
-        setFormSuccess(`Order ${data.order.order_no} placed successfully to ${selectedDest.name}!`);
-        setQty('1');
+        const totalUnits = orderCart.reduce((sum, ci) => sum + ci.qty, 0);
+        setFormSuccess(`Order ${data.order.order_no} placed successfully! (${orderCart.length} products, ${totalUnits} units requested from ${selectedDest.name})`);
+        setOrderCart([]);
         setNotes('');
         await fetchOrders();
         if (onOrderPlaced) onOrderPlaced();
-        setTimeout(() => setFormSuccess(''), 5000);
+        setTimeout(() => setActiveTab('my_requests'), 1500);
       } else {
         setFormError(data.error || 'Failed to place order');
       }
     } catch (err: any) {
-      setFormError(err.message || 'Network error');
+      setFormError(err.message || 'Network error placing order');
     } finally {
       setSubmitting(false);
     }
@@ -379,45 +429,376 @@ export default function BranchOrders({
               )}
             </div>
 
-            {/* Item Selection */}
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '0.75rem' }}>
-              <div>
-                <label className="form-label">Select Product *</label>
-                <select
-                  className="form-select"
-                  value={selectedItemId}
-                  onChange={e => setSelectedItemId(e.target.value)}
-                  required
-                >
-                  {items.map(it => (
-                    <option key={it.id} value={it.id}>
-                      {it.code} — {it.name} ({it.stock_qty} in stock)
-                    </option>
-                  ))}
-                </select>
+            {/* Product Search & Multi-Item Requisition Cart */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label className="form-label" style={{ margin: 0 }}>
+                  Search &amp; Add Products *
+                </label>
+                <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 600 }}>
+                  {items.length} Products in Catalog
+                </span>
               </div>
-              <div>
-                <label className="form-label">Quantity *</label>
-                <input
-                  type="number"
-                  min="1"
-                  required
-                  className="form-input"
-                  value={qty}
-                  onChange={e => setQty(e.target.value)}
-                  placeholder="1"
-                />
+
+              {/* Search Combobox Input */}
+              <div ref={searchRef} style={{ position: 'relative' }}>
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                  <Search
+                    style={{
+                      position: 'absolute',
+                      left: '12px',
+                      width: '16px',
+                      height: '16px',
+                      color: '#94A3B8',
+                      pointerEvents: 'none',
+                    }}
+                  />
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={productSearch}
+                    onChange={e => {
+                      setProductSearch(e.target.value);
+                      setIsSearchOpen(true);
+                    }}
+                    onFocus={() => setIsSearchOpen(true)}
+                    placeholder="Search by SKU code, name, category, or shade (e.g. RG100, Plastic Emulsion)..."
+                    style={{ paddingLeft: '38px', paddingRight: productSearch ? '36px' : '12px' }}
+                  />
+                  {productSearch && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProductSearch('');
+                        setIsSearchOpen(false);
+                      }}
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#94A3B8',
+                        cursor: 'pointer',
+                        padding: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <X style={{ width: '14px', height: '14px' }} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Instant Search Results Dropdown */}
+                {isSearchOpen && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: '100%',
+                      left: 0,
+                      right: 0,
+                      marginTop: '6px',
+                      backgroundColor: '#FFFFFF',
+                      border: '1px solid #E2E8F0',
+                      borderRadius: '12px',
+                      boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)',
+                      maxHeight: '260px',
+                      overflowY: 'auto',
+                      zIndex: 50,
+                    }}
+                  >
+                    {filteredProducts.length === 0 ? (
+                      <div style={{ padding: '16px', textAlign: 'center', color: '#94A3B8', fontSize: '13px' }}>
+                        No products match &ldquo;{productSearch}&rdquo;
+                      </div>
+                    ) : (
+                      <div style={{ padding: '6px' }}>
+                        <div style={{ padding: '6px 10px', fontSize: '11px', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          Select Product to Add ({filteredProducts.length} results)
+                        </div>
+                        {filteredProducts.map(it => {
+                          const isAlreadyInCart = orderCart.some(ci => ci.item.id === it.id);
+                          return (
+                            <div
+                              key={it.id}
+                              onClick={() => handleAddItemToCart(it)}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '10px 12px',
+                                borderRadius: '8px',
+                                cursor: 'pointer',
+                                transition: 'background-color 0.12s ease',
+                                backgroundColor: isAlreadyInCart ? '#F0FDF4' : 'transparent',
+                                border: isAlreadyInCart ? '1px solid #BBF7D0' : '1px solid transparent',
+                                marginBottom: '4px',
+                              }}
+                              onMouseEnter={e => {
+                                if (!isAlreadyInCart) e.currentTarget.style.backgroundColor = '#F8FAFC';
+                              }}
+                              onMouseLeave={e => {
+                                if (!isAlreadyInCart) e.currentTarget.style.backgroundColor = 'transparent';
+                              }}
+                            >
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, flex: 1 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span
+                                    style={{
+                                      fontSize: '11px',
+                                      fontWeight: 800,
+                                      fontFamily: 'monospace',
+                                      backgroundColor: '#F1F5F9',
+                                      color: '#0F172A',
+                                      padding: '2px 6px',
+                                      borderRadius: '4px',
+                                    }}
+                                  >
+                                    {it.code}
+                                  </span>
+                                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#0F172A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {it.name}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: '11px', color: '#64748B', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span>{it.category || 'General'}</span>
+                                  <span>•</span>
+                                  <span>{it.pack_size || it.unit || 'Can'}</span>
+                                  {it.shade_code && (
+                                    <>
+                                      <span>•</span>
+                                      <span style={{ color: '#D97706', fontWeight: 600 }}>Shade: {it.shade_code}</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '12px' }}>
+                                <span
+                                  style={{
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    padding: '2px 8px',
+                                    borderRadius: '9999px',
+                                    backgroundColor: it.stock_qty > 0 ? '#E0F2FE' : '#F1F5F9',
+                                    color: it.stock_qty > 0 ? '#0369A1' : '#64748B',
+                                  }}
+                                >
+                                  {it.stock_qty} in stock
+                                </span>
+                                <div
+                                  style={{
+                                    width: '24px',
+                                    height: '24px',
+                                    borderRadius: '6px',
+                                    backgroundColor: isAlreadyInCart ? '#22C55E' : '#F97316',
+                                    color: '#FFFFFF',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                  }}
+                                >
+                                  {isAlreadyInCart ? <Check style={{ width: '14px', height: '14px', strokeWidth: 3 }} /> : <Plus style={{ width: '14px', height: '14px', strokeWidth: 3 }} />}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Order Requisition Items Table */}
+              <div style={{ marginTop: '0.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <label className="form-label" style={{ margin: 0, fontSize: '12px' }}>
+                    Order Items ({orderCart.length} selected)
+                  </label>
+                  {orderCart.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setOrderCart([])}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#EF4444',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Clear All
+                    </button>
+                  )}
+                </div>
+
+                {orderCart.length === 0 ? (
+                  <div
+                    style={{
+                      padding: '24px',
+                      borderRadius: '12px',
+                      backgroundColor: '#F8FAFC',
+                      border: '1.5px dashed #CBD5E1',
+                      textAlign: 'center',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <Package style={{ width: '28px', height: '28px', color: '#94A3B8' }} />
+                    <p style={{ fontSize: '13px', color: '#64748B', fontWeight: 600, margin: 0 }}>
+                      No products added to requisition yet
+                    </p>
+                    <p style={{ fontSize: '11px', color: '#94A3B8', margin: 0 }}>
+                      Type above in the search box to add products to this branch transfer
+                    </p>
+                  </div>
+                ) : (
+                  <div style={{ border: '1px solid #E2E8F0', borderRadius: '12px', overflow: 'hidden', backgroundColor: '#FFFFFF' }}>
+                    <div style={{ maxHeight: '240px', overflowY: 'auto' }}>
+                      {orderCart.map((ci, idx) => (
+                        <div
+                          key={ci.item.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '10px 14px',
+                            borderBottom: idx === orderCart.length - 1 ? 'none' : '1px solid #F1F5F9',
+                            gap: '12px',
+                          }}
+                        >
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ fontSize: '11px', fontWeight: 700, fontFamily: 'monospace', color: '#F97316' }}>
+                                {ci.item.code}
+                              </span>
+                              <span style={{ fontSize: '13px', fontWeight: 600, color: '#0F172A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {ci.item.name}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#64748B' }}>
+                              {ci.item.pack_size || ci.item.unit || 'Can'} • Local Stock: {ci.item.stock_qty}
+                            </div>
+                          </div>
+
+                          {/* Quantity Stepper */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateCartQty(idx, Math.max(1, ci.qty - 1))}
+                              style={{
+                                width: '28px',
+                                height: '28px',
+                                borderRadius: '6px',
+                                border: '1px solid #E2E8F0',
+                                backgroundColor: '#F8FAFC',
+                                color: '#0F172A',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
+                            >
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              min="1"
+                              value={ci.qty}
+                              onChange={e => handleUpdateCartQty(idx, parseInt(e.target.value) || 1)}
+                              style={{
+                                width: '54px',
+                                height: '28px',
+                                textAlign: 'center',
+                                borderRadius: '6px',
+                                border: '1px solid #CBD5E1',
+                                fontSize: '13px',
+                                fontWeight: 700,
+                                color: '#0F172A',
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateCartQty(idx, ci.qty + 1)}
+                              style={{
+                                width: '28px',
+                                height: '28px',
+                                borderRadius: '6px',
+                                border: '1px solid #E2E8F0',
+                                backgroundColor: '#F8FAFC',
+                                color: '#0F172A',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
+                            >
+                              +
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveCartItem(idx)}
+                              style={{
+                                width: '28px',
+                                height: '28px',
+                                borderRadius: '6px',
+                                border: 'none',
+                                backgroundColor: '#FEE2E2',
+                                color: '#DC2626',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                marginLeft: '4px',
+                              }}
+                              title="Remove item"
+                            >
+                              <Trash2 style={{ width: '13px', height: '13px' }} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Order Cart Total Bar */}
+                    <div
+                      style={{
+                        padding: '8px 14px',
+                        backgroundColor: '#F8FAFC',
+                        borderTop: '1px solid #E2E8F0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        fontSize: '12px',
+                        color: '#475569',
+                        fontWeight: 600,
+                      }}
+                    >
+                      <span>Total: {orderCart.length} Unique Item(s)</span>
+                      <span style={{ color: '#0F172A', fontWeight: 700 }}>
+                        {orderCart.reduce((sum, ci) => sum + ci.qty, 0)} Total Units
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
             {/* Notes */}
             <div>
-              <label className="form-label">Notes (optional)</label>
+              <label className="form-label">Order Notes / Urgency (optional)</label>
               <textarea
                 className="form-input"
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
-                placeholder="e.g. Urgently needed for customer order, please send ASAP"
+                placeholder="e.g. Urgently needed for customer contractor order, please dispatch via Suzuki"
                 rows={2}
                 style={{ resize: 'vertical', minHeight: '48px' }}
               />
@@ -426,11 +807,13 @@ export default function BranchOrders({
             {/* Submit */}
             <button
               type="submit"
-              disabled={submitting || destinations.length === 0}
+              disabled={submitting || destinations.length === 0 || orderCart.length === 0}
               className="btn btn-primary btn-lg"
               style={{ marginTop: '0.5rem', width: '100%' }}
             >
-              {submitting ? 'Placing Order...' : '📤 Place Order'}
+              {submitting
+                ? 'Placing Order...'
+                : `📤 Place Branch Order (${orderCart.length} Items • ${orderCart.reduce((sum, ci) => sum + ci.qty, 0)} Units)`}
             </button>
           </form>
         </div>
