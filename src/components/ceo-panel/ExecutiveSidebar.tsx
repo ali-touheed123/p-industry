@@ -58,8 +58,8 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        backgroundColor: '#10141B',
-        borderRight: '1px solid #2A2F38',
+        backgroundColor: '#FFFFFF',
+        borderRight: '1px solid #E2E8F0',
         overflow: 'hidden',
       }}
     >
@@ -69,7 +69,7 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
         <div
           style={{
             padding: '16px 20px',
-            borderBottom: '1px solid #2A2F38',
+            borderBottom: '1px solid #E2E8F0',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -98,7 +98,7 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
                     padding: '1px 6px',
                     borderRadius: '4px',
                     backgroundColor: 'rgba(198,161,91,0.12)',
-                    color: '#C6A15B',
+                    color: '#D97706',
                     border: '1px solid rgba(198,161,91,0.25)',
                     flexShrink: 0,
                   }}
@@ -108,7 +108,7 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
               </div>
               <div
                 className="ceo-font-mono"
-                style={{ fontSize: '10px', color: '#8B93A1', marginTop: '1px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                style={{ fontSize: '10px', color: '#64748B', marginTop: '1px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
               >
                 {branch.code || 'PK-01'} • {branch.city || 'Karachi'}
               </div>
@@ -122,7 +122,7 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
               style={{
                 padding: '4px',
                 borderRadius: '6px',
-                color: '#8B93A1',
+                color: '#64748B',
                 background: 'none',
                 border: 'none',
                 cursor: 'pointer',
@@ -139,8 +139,8 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
         <div
           style={{
             padding: '12px 20px',
-            borderBottom: '1px solid #2A2F38',
-            backgroundColor: '#12151B',
+            borderBottom: '1px solid #E2E8F0',
+            backgroundColor: '#F8FAFC',
           }}
         >
           <div
@@ -149,7 +149,7 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
               textTransform: 'uppercase',
               letterSpacing: '0.08em',
               fontWeight: 700,
-              color: '#8B93A1',
+              color: '#64748B',
               marginBottom: '4px',
             }}
           >
@@ -160,7 +160,7 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
             style={{
               fontSize: '13px',
               fontWeight: 700,
-              color: '#E5E7EB',
+              color: '#0F172A',
               lineHeight: 1.3,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -169,7 +169,7 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
           >
             {branch.name}
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {branch.city} • {branch.manager}
           </div>
         </div>
@@ -192,7 +192,7 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
             fontWeight: 800,
             textTransform: 'uppercase',
             letterSpacing: '0.1em',
-            color: '#8B93A1',
+            color: '#64748B',
             padding: '4px 8px 8px',
           }}
         >
@@ -218,9 +218,9 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
                 fontWeight: isActive ? 700 : 500,
                 cursor: 'pointer',
                 border: 'none',
-                borderLeft: isActive ? '3px solid #C6A15B' : '3px solid transparent',
-                backgroundColor: isActive ? '#1C2128' : 'transparent',
-                color: isActive ? '#C6A15B' : '#8B93A1',
+                borderLeft: isActive ? '3px solid #D97706' : '3px solid transparent',
+                backgroundColor: isActive ? '#FFFFFF' : 'transparent',
+                color: isActive ? '#D97706' : '#64748B',
                 textAlign: 'left',
                 transition: 'all 0.15s ease',
               }}
@@ -229,7 +229,7 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
                 style={{
                   width: '15px',
                   height: '15px',
-                  color: isActive ? '#C6A15B' : '#6B7280',
+                  color: isActive ? '#D97706' : '#6B7280',
                   flexShrink: 0,
                 }}
               />
@@ -240,7 +240,7 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
                     width: '6px',
                     height: '6px',
                     borderRadius: '50%',
-                    backgroundColor: '#C6A15B',
+                    backgroundColor: '#D97706',
                     flexShrink: 0,
                   }}
                 />
@@ -255,8 +255,8 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
         style={{
           flexShrink: 0,
           padding: '12px 16px',
-          borderTop: '1px solid #2A2F38',
-          backgroundColor: '#10141B',
+          borderTop: '1px solid #E2E8F0',
+          backgroundColor: '#FFFFFF',
         }}
       >
         <button

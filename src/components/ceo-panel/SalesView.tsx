@@ -148,17 +148,17 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
   return (
     <div id="executive-sales-view" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       {/* Title */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #2A2F38', paddingBottom: '16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '16px' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <h2 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 700, color: '#E5E7EB', margin: 0 }}>
+            <h2 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
               Sales Register &amp; Invoices
             </h2>
-            <span className="ceo-font-mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '9999px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', color: '#8B93A1' }}>
+            <span className="ceo-font-mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '9999px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', color: '#64748B' }}>
               {stats.completedCount} Sales{stats.returnsCount > 0 ? ` • ${stats.returnsCount} Returns` : ''}
             </span>
           </div>
-          <p style={{ fontSize: '12px', color: '#8B93A1', margin: '4px 0 0' }}>
+          <p style={{ fontSize: '12px', color: '#64748B', margin: '4px 0 0' }}>
             {branch.name} • Executive live sales register, invoice records &amp; itemized shade breakdowns
           </p>
         </div>
@@ -167,48 +167,48 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
       {/* 4 Stat Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Net Sales</div>
-          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#C6A15B', marginTop: '6px' }}>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Net Sales</div>
+          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#D97706', marginTop: '6px' }}>
             {formatCurrency(stats.netSales)}
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
             {stats.completedCount} sales{stats.returnsCount > 0 ? <span style={{ color: '#F87171' }}> • -{formatCurrency(stats.totalReturnsValue)} returns excluded</span> : ''}
           </div>
         </div>
 
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Cash Inflow</div>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Cash Inflow</div>
           <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#34D399', marginTop: '6px' }}>
             {formatCurrency(stats.cashInflow)}
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
             Direct register cash collected
           </div>
         </div>
 
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Credit (Udhaar)</div>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Credit (Udhaar)</div>
           <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#F87171', marginTop: '6px' }}>
             {formatCurrency(stats.creditUdhaar)}
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
             Client ledger balance additions
           </div>
         </div>
 
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Total Volume Sold</div>
-          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#E5E7EB', marginTop: '6px' }}>
-            {stats.totalUnits} <span style={{ fontSize: '12px', color: '#8B93A1', fontWeight: 400 }}>containers</span>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Total Volume Sold</div>
+          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#0F172A', marginTop: '6px' }}>
+            {stats.totalUnits} <span style={{ fontSize: '12px', color: '#64748B', fontWeight: 400 }}>containers</span>
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
             Units &amp; Containers
           </div>
         </div>
       </div>
 
       {/* Filter Toolbar */}
-      <div style={{ padding: '12px 16px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+      <div style={{ padding: '12px 16px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
         {/* Date Period Filter */}
         <DatePeriodFilter
           startDate={startDate}
@@ -220,14 +220,14 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
         {/* Right Controls: Search + Payment Filter */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           {/* Search */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#12151B', border: '1px solid #2A2F38', borderRadius: '6px', padding: '6px 12px', minWidth: '240px' }}>
-            <Search style={{ width: '14px', height: '14px', color: '#8B93A1' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '6px', padding: '6px 12px', minWidth: '240px' }}>
+            <Search style={{ width: '14px', height: '14px', color: '#64748B' }} />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search invoice #, customer, shade..."
-              style={{ background: 'none', border: 'none', color: '#E5E7EB', fontSize: '12px', outline: 'none', width: '100%' }}
+              style={{ background: 'none', border: 'none', color: '#0F172A', fontSize: '12px', outline: 'none', width: '100%' }}
             />
           </div>
 
@@ -243,9 +243,9 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
                   fontSize: '11px',
                   fontWeight: 600,
                   cursor: 'pointer',
-                  border: paymentFilter === mode ? '1px solid rgba(198, 161, 91, 0.6)' : '1px solid #2A2F38',
-                  backgroundColor: paymentFilter === mode ? '#12151B' : '#1C2128',
-                  color: paymentFilter === mode ? '#C6A15B' : '#8B93A1',
+                  border: paymentFilter === mode ? '1px solid rgba(198, 161, 91, 0.6)' : '1px solid #E2E8F0',
+                  backgroundColor: paymentFilter === mode ? '#F8FAFC' : '#FFFFFF',
+                  color: paymentFilter === mode ? '#D97706' : '#64748B',
                 }}
               >
                 {mode}
@@ -273,10 +273,10 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
           <tbody>
             {filteredInvoices.map((inv) => (
               <tr key={inv.id} onClick={() => setSelectedInvoice(inv)} style={{ cursor: 'pointer' }}>
-                <td className="ceo-font-mono" style={{ fontWeight: 700, color: '#C6A15B' }}>{inv.invoiceNumber}</td>
-                <td style={{ color: '#8B93A1' }} className="ceo-font-mono">{inv.date} {inv.time}</td>
-                <td style={{ fontWeight: 600, color: '#E5E7EB' }}>{inv.customerName}</td>
-                <td style={{ color: '#8B93A1' }}>{inv.customerCategory}</td>
+                <td className="ceo-font-mono" style={{ fontWeight: 700, color: '#D97706' }}>{inv.invoiceNumber}</td>
+                <td style={{ color: '#64748B' }} className="ceo-font-mono">{inv.date} {inv.time}</td>
+                <td style={{ fontWeight: 600, color: '#0F172A' }}>{inv.customerName}</td>
+                <td style={{ color: '#64748B' }}>{inv.customerCategory}</td>
                 <td>
                   <span style={{
                     fontSize: '10px',
@@ -289,10 +289,10 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
                     {inv.paymentMode}
                   </span>
                 </td>
-                <td style={{ textAlign: 'center', color: '#8B93A1' }} className="ceo-font-mono">{inv.items.length} items</td>
-                <td style={{ textAlign: 'right', fontWeight: 700, color: '#E5E7EB' }} className="ceo-font-mono">{formatCurrency(inv.netAmount)}</td>
+                <td style={{ textAlign: 'center', color: '#64748B' }} className="ceo-font-mono">{inv.items.length} items</td>
+                <td style={{ textAlign: 'right', fontWeight: 700, color: '#0F172A' }} className="ceo-font-mono">{formatCurrency(inv.netAmount)}</td>
                 <td style={{ textAlign: 'center' }}>
-                  <span style={{ fontSize: '11px', color: '#C6A15B', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                  <span style={{ fontSize: '11px', color: '#D97706', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
                     Inspect <ChevronRight style={{ width: '12px', height: '12px' }} />
                   </span>
                 </td>
@@ -300,7 +300,7 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
             ))}
             {filteredInvoices.length === 0 && (
               <tr>
-                <td colSpan={8} style={{ textAlign: 'center', padding: '32px', color: '#8B93A1' }}>
+                <td colSpan={8} style={{ textAlign: 'center', padding: '32px', color: '#64748B' }}>
                   {loading ? 'Loading sales invoices...' : 'No sales invoices recorded yet. New invoices generated at the counter will appear here.'}
                 </td>
               </tr>

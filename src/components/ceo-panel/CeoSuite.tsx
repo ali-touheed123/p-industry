@@ -193,7 +193,7 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
         minHeight: '100vh',
         width: '100%',
         overflow: 'hidden',
-        backgroundColor: '#12151B',
+        backgroundColor: '#F8FAFC',
       }}
     >
       {/* Mobile Sidebar Overlay */}
@@ -236,7 +236,7 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
           flexDirection: 'column',
           height: '100vh',
           overflowY: 'auto',
-          backgroundColor: '#12151B',
+          backgroundColor: '#F8FAFC',
         }}
       >
         {/* Sticky Executive Header */}

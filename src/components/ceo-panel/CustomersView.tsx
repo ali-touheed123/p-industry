@@ -214,17 +214,17 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ branch }) => {
   return (
     <div id="executive-customers-view" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #2A2F38', paddingBottom: '16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '16px' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <h2 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 700, color: '#E5E7EB', margin: 0 }}>
+            <h2 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
               Customer Accounts &amp; Udhaar Receivables
             </h2>
-            <span className="ceo-font-mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '9999px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', color: '#8B93A1' }}>
+            <span className="ceo-font-mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '9999px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', color: '#64748B' }}>
               {stats.totalCount} Accounts
             </span>
           </div>
-          <p style={{ fontSize: '12px', color: '#8B93A1', margin: '4px 0 0' }}>
+          <p style={{ fontSize: '12px', color: '#64748B', margin: '4px 0 0' }}>
             {branch.name} • Master credit ledger, outstanding receivables (Udhaar), aging analysis &amp; payment histories
           </p>
         </div>
@@ -233,65 +233,65 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ branch }) => {
       {/* 4 Stat Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Total Receivables (Udhaar)</div>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Total Receivables (Udhaar)</div>
           <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#F87171', marginTop: '6px' }}>
             {formatCurrency(stats.totalReceivables)}
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
             {stats.highDebtCount} accounts exceeding Rs. 200,000
           </div>
         </div>
 
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Paid to Date (Collections)</div>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Paid to Date (Collections)</div>
           <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#34D399', marginTop: '6px' }}>
             {formatCurrency(stats.totalCollections)}
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
             Settled via Cash, Cheques &amp; Bank
           </div>
         </div>
 
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Lifetime Billing Volume</div>
-          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#C6A15B', marginTop: '6px' }}>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Lifetime Billing Volume</div>
+          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#D97706', marginTop: '6px' }}>
             {formatCurrency(stats.lifetimeVolume)}
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
             Cumulative revenue generated
           </div>
         </div>
 
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Active Client Base</div>
-          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#E5E7EB', marginTop: '6px' }}>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Active Client Base</div>
+          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#0F172A', marginTop: '6px' }}>
             {stats.totalCount} Clients
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
             Contractors, Wholesalers &amp; Painters
           </div>
         </div>
       </div>
 
       {/* Filter toolbar */}
-      <div style={{ padding: '12px 16px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#12151B', border: '1px solid #2A2F38', borderRadius: '6px', padding: '6px 12px', minWidth: '280px' }}>
-          <Search style={{ width: '14px', height: '14px', color: '#8B93A1' }} />
+      <div style={{ padding: '12px 16px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '6px', padding: '6px 12px', minWidth: '280px' }}>
+          <Search style={{ width: '14px', height: '14px', color: '#64748B' }} />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search client name, phone, city..."
-            style={{ background: 'none', border: 'none', color: '#E5E7EB', fontSize: '12px', outline: 'none', width: '100%' }}
+            style={{ background: 'none', border: 'none', color: '#0F172A', fontSize: '12px', outline: 'none', width: '100%' }}
           />
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '11px', color: '#8B93A1' }}>Category:</span>
+          <span style={{ fontSize: '11px', color: '#64748B' }}>Category:</span>
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
-            style={{ backgroundColor: '#12151B', border: '1px solid #2A2F38', color: '#E5E7EB', fontSize: '12px', borderRadius: '6px', padding: '6px 10px', outline: 'none', cursor: 'pointer' }}
+            style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', color: '#0F172A', fontSize: '12px', borderRadius: '6px', padding: '6px 10px', outline: 'none', cursor: 'pointer' }}
           >
             <option value="All Categories">All Categories</option>
             <option value="Contractor">Contractors</option>
@@ -321,33 +321,33 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ branch }) => {
             {filteredCustomers.map((cust) => (
               <tr key={cust.id} onClick={() => setSelectedCustomer(cust)} style={{ cursor: 'pointer' }}>
                 <td>
-                  <div style={{ fontWeight: 600, color: '#E5E7EB' }}>{cust.name}</div>
-                  <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '1px' }}>{cust.city}</div>
+                  <div style={{ fontWeight: 600, color: '#0F172A' }}>{cust.name}</div>
+                  <div style={{ fontSize: '11px', color: '#64748B', marginTop: '1px' }}>{cust.city}</div>
                 </td>
                 <td>
-                  <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '4px', backgroundColor: '#12151B', border: '1px solid #2A2F38', color: '#8B93A1', fontWeight: 600 }}>
+                  <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '4px', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', color: '#64748B', fontWeight: 600 }}>
                     {cust.category}
                   </span>
                 </td>
-                <td className="ceo-font-mono" style={{ color: '#8B93A1' }}>{cust.phone}</td>
-                <td style={{ textAlign: 'right', color: '#8B93A1' }} className="ceo-font-mono">{formatCurrency(cust.creditLimit)}</td>
+                <td className="ceo-font-mono" style={{ color: '#64748B' }}>{cust.phone}</td>
+                <td style={{ textAlign: 'right', color: '#64748B' }} className="ceo-font-mono">{formatCurrency(cust.creditLimit)}</td>
                 <td style={{ textAlign: 'right', fontWeight: 700, color: cust.totalDebt > 0 ? '#F87171' : '#34D399' }} className="ceo-font-mono">
                   {formatCurrency(cust.totalDebt)}
                 </td>
                 <td>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div style={{ width: '80px', height: '6px', backgroundColor: '#12151B', borderRadius: '3px', overflow: 'hidden', display: 'flex' }}>
+                    <div style={{ width: '80px', height: '6px', backgroundColor: '#F8FAFC', borderRadius: '3px', overflow: 'hidden', display: 'flex' }}>
                       <div style={{ width: `${(cust.aging.current / (cust.totalDebt || 1)) * 100}%`, backgroundColor: '#34D399' }} />
-                      <div style={{ width: `${(cust.aging.days30to60 / (cust.totalDebt || 1)) * 100}%`, backgroundColor: '#C6A15B' }} />
+                      <div style={{ width: `${(cust.aging.days30to60 / (cust.totalDebt || 1)) * 100}%`, backgroundColor: '#D97706' }} />
                       <div style={{ width: `${(cust.aging.days60plus / (cust.totalDebt || 1)) * 100}%`, backgroundColor: '#F87171' }} />
                     </div>
-                    <span style={{ fontSize: '10px', fontWeight: 600, color: cust.riskLevel === 'Low' ? '#34D399' : '#C6A15B' }}>
+                    <span style={{ fontSize: '10px', fontWeight: 600, color: cust.riskLevel === 'Low' ? '#34D399' : '#D97706' }}>
                       {cust.riskLevel}
                     </span>
                   </div>
                 </td>
                 <td style={{ textAlign: 'center' }}>
-                  <span style={{ fontSize: '11px', color: '#C6A15B', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                  <span style={{ fontSize: '11px', color: '#D97706', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
                     Ledger <ChevronRight style={{ width: '12px', height: '12px' }} />
                   </span>
                 </td>
@@ -355,7 +355,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ branch }) => {
             ))}
             {filteredCustomers.length === 0 && (
               <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: '32px', color: '#8B93A1' }}>
+                <td colSpan={7} style={{ textAlign: 'center', padding: '32px', color: '#64748B' }}>
                   {loading ? 'Loading customer accounts...' : 'No customer accounts found. Add clients in the POS or Financial Ledgers to track debt balances.'}
                 </td>
               </tr>

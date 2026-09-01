@@ -45,8 +45,8 @@ export const ExecutiveHeader: React.FC<ExecutiveHeaderProps> = ({
     <header
       style={{
         minHeight: '60px',
-        backgroundColor: '#10141B',
-        borderBottom: '1px solid #2A2F38',
+        backgroundColor: '#FFFFFF',
+        borderBottom: '1px solid #E2E8F0',
         padding: '0 24px',
         display: 'flex',
         alignItems: 'center',
@@ -76,7 +76,7 @@ export const ExecutiveHeader: React.FC<ExecutiveHeaderProps> = ({
           }}
           aria-label="Open navigation"
         >
-          <Menu style={{ width: '18px', height: '18px', color: '#C6A15B' }} />
+          <Menu style={{ width: '18px', height: '18px', color: '#D97706' }} />
         </button>
 
         {/* Branch Name + Code */}
@@ -87,7 +87,7 @@ export const ExecutiveHeader: React.FC<ExecutiveHeaderProps> = ({
               style={{
                 fontSize: '14px',
                 fontWeight: 700,
-                color: '#E5E7EB',
+                color: '#0F172A',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -103,16 +103,16 @@ export const ExecutiveHeader: React.FC<ExecutiveHeaderProps> = ({
                 fontWeight: 700,
                 padding: '2px 8px',
                 borderRadius: '4px',
-                backgroundColor: '#1C2128',
-                border: '1px solid #2A2F38',
-                color: '#C6A15B',
+                backgroundColor: '#FFFFFF',
+                border: '1px solid #E2E8F0',
+                color: '#D97706',
                 flexShrink: 0,
               }}
             >
               {branch.code || 'PK-01'}
             </span>
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '2px', whiteSpace: 'nowrap' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px', whiteSpace: 'nowrap' }}>
             Lead: {branch.manager || 'Executive Lead'} &nbsp;•&nbsp;
             <span style={{ color: '#34D399', fontWeight: 600 }}>{branch.activeRegisters || 2} Active Registers</span>
           </div>
@@ -126,9 +126,9 @@ export const ExecutiveHeader: React.FC<ExecutiveHeaderProps> = ({
                 type="button"
                 onClick={onBackToHub}
                 style={{
-                  backgroundColor: '#1C2128',
-                  border: '1px solid #2A2F38',
-                  color: '#C6A15B',
+                  backgroundColor: '#FFFFFF',
+                  border: '1px solid #E2E8F0',
+                  color: '#D97706',
                   fontSize: '11px',
                   fontWeight: 600,
                   borderRadius: '6px',
@@ -150,9 +150,9 @@ export const ExecutiveHeader: React.FC<ExecutiveHeaderProps> = ({
                 if (found) onSwitchBranch(found);
               }}
               style={{
-                backgroundColor: '#1C2128',
-                border: '1px solid #2A2F38',
-                color: '#E5E7EB',
+                backgroundColor: '#FFFFFF',
+                border: '1px solid #E2E8F0',
+                color: '#0F172A',
                 fontSize: '12px',
                 borderRadius: '6px',
                 padding: '6px 10px',
@@ -161,7 +161,7 @@ export const ExecutiveHeader: React.FC<ExecutiveHeaderProps> = ({
               }}
             >
               {branches.map((b) => (
-                <option key={b.id} value={b.id} style={{ backgroundColor: '#1C2128' }}>
+                <option key={b.id} value={b.id} style={{ backgroundColor: '#FFFFFF' }}>
                   Branch: {b.shortName || b.name}
                 </option>
               ))}
@@ -179,18 +179,18 @@ export const ExecutiveHeader: React.FC<ExecutiveHeaderProps> = ({
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            backgroundColor: '#1C2128',
-            border: '1px solid #2A2F38',
+            backgroundColor: '#FFFFFF',
+            border: '1px solid #E2E8F0',
             padding: '6px 12px',
             borderRadius: '6px',
             fontSize: '12px',
-            color: '#8B93A1',
+            color: '#64748B',
             whiteSpace: 'nowrap',
           }}
         >
           <span>{formattedDate}</span>
           <span style={{ color: '#4B5563' }}>|</span>
-          <span style={{ color: '#E5E7EB', fontWeight: 600 }}>{formattedTime} PKT</span>
+          <span style={{ color: '#0F172A', fontWeight: 600 }}>{formattedTime} PKT</span>
         </div>
 
         {/* CEO Badge */}
@@ -200,7 +200,7 @@ export const ExecutiveHeader: React.FC<ExecutiveHeaderProps> = ({
             borderRadius: '6px',
             backgroundColor: 'rgba(198,161,91,0.12)',
             border: '1px solid rgba(198,161,91,0.3)',
-            color: '#C6A15B',
+            color: '#D97706',
             fontWeight: 700,
             fontSize: '12px',
             display: 'flex',

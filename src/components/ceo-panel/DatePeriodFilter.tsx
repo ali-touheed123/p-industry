@@ -19,9 +19,9 @@ export const DatePeriodFilter: React.FC<DatePeriodFilterProps> = ({
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
       {/* Label with Calendar Icon */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#C6A15B' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#D97706' }}>
         <Calendar style={{ width: '15px', height: '15px' }} />
-        <span style={{ fontSize: '12px', fontWeight: 700, color: '#E5E7EB' }}>
+        <span style={{ fontSize: '12px', fontWeight: 700, color: '#0F172A' }}>
           Date Period:
         </span>
       </div>
@@ -32,15 +32,15 @@ export const DatePeriodFilter: React.FC<DatePeriodFilterProps> = ({
           display: 'flex',
           alignItems: 'center',
           gap: '6px',
-          backgroundColor: '#10141B',
-          border: '1px solid #2A2F38',
+          backgroundColor: '#FFFFFF',
+          border: '1px solid #E2E8F0',
           borderRadius: '6px',
           padding: '4px 10px',
         }}
       >
         <span
           className="ceo-font-mono"
-          style={{ fontSize: '11px', fontWeight: 700, color: '#8B93A1' }}
+          style={{ fontSize: '11px', fontWeight: 700, color: '#64748B' }}
         >
           FROM:
         </span>
@@ -54,7 +54,7 @@ export const DatePeriodFilter: React.FC<DatePeriodFilterProps> = ({
             backgroundColor: 'transparent',
             fontSize: '12px',
             fontWeight: 600,
-            color: '#E5E7EB',
+            color: '#0F172A',
             outline: 'none',
             cursor: 'pointer',
           }}
@@ -62,7 +62,7 @@ export const DatePeriodFilter: React.FC<DatePeriodFilterProps> = ({
       </div>
 
       {/* Arrow separator */}
-      <span style={{ color: '#8B93A1', fontSize: '12px' }}>→</span>
+      <span style={{ color: '#64748B', fontSize: '12px' }}>→</span>
 
       {/* TO Date Box */}
       <div
@@ -70,15 +70,15 @@ export const DatePeriodFilter: React.FC<DatePeriodFilterProps> = ({
           display: 'flex',
           alignItems: 'center',
           gap: '6px',
-          backgroundColor: '#10141B',
-          border: '1px solid #2A2F38',
+          backgroundColor: '#FFFFFF',
+          border: '1px solid #E2E8F0',
           borderRadius: '6px',
           padding: '4px 10px',
         }}
       >
         <span
           className="ceo-font-mono"
-          style={{ fontSize: '11px', fontWeight: 700, color: '#8B93A1' }}
+          style={{ fontSize: '11px', fontWeight: 700, color: '#64748B' }}
         >
           TO:
         </span>
@@ -92,7 +92,7 @@ export const DatePeriodFilter: React.FC<DatePeriodFilterProps> = ({
             backgroundColor: 'transparent',
             fontSize: '12px',
             fontWeight: 600,
-            color: '#E5E7EB',
+            color: '#0F172A',
             outline: 'none',
             cursor: 'pointer',
           }}

@@ -104,7 +104,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <h2 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 700, color: '#E5E7EB', margin: 0 }}>
+          <h2 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
             Branch Rules &amp; Commission Settings
           </h2>
           <p className="ceo-font-sans" style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '2px' }}>
@@ -138,7 +138,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
         <div className="ceo-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(198, 161, 91, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#C6A15B' }}>
+              <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(198, 161, 91, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#D97706' }}>
                 <Percent style={{ width: 18, height: 18 }} />
               </div>
               <div>
@@ -157,7 +157,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
                 type="checkbox"
                 checked={commissionEnabled}
                 onChange={e => setCommissionEnabled(e.target.checked)}
-                style={{ width: '18px', height: '18px', accentColor: '#C6A15B', cursor: 'pointer' }}
+                style={{ width: '18px', height: '18px', accentColor: '#D97706', cursor: 'pointer' }}
               />
               <span className="ceo-font-mono" style={{ fontSize: '12px', fontWeight: 700, color: commissionEnabled ? '#34D399' : '#9CA3AF' }}>
                 {commissionEnabled ? 'ENABLED (ACTIVE)' : 'DISABLED (OFF)'}
@@ -166,14 +166,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
           </div>
 
           {commissionEnabled && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', paddingTop: '1rem', borderTop: '1px solid #2A2F38' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', paddingTop: '1rem', borderTop: '1px solid #E2E8F0' }}>
               {/* Pool Rate Setting */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1rem', alignItems: 'center' }}>
                 <div>
-                  <label className="ceo-font-mono" style={{ fontSize: '11px', color: '#C6A15B', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                  <label className="ceo-font-mono" style={{ fontSize: '11px', color: '#D97706', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
                     Sales Commission Rate (%)
                   </label>
-                  <div style={{ display: 'flex', alignItems: 'center', background: '#11141A', border: '1px solid #2A2F38', borderRadius: '8px', padding: '6px 10px', gap: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', background: '#11141A', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '6px 10px', gap: '6px' }}>
                     <input
                       type="number"
                       step="0.1"
@@ -196,7 +196,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
               {/* Staff Split Allocation */}
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <label className="ceo-font-mono" style={{ fontSize: '11px', color: '#C6A15B', textTransform: 'uppercase', fontWeight: 700 }}>
+                  <label className="ceo-font-mono" style={{ fontSize: '11px', color: '#D97706', textTransform: 'uppercase', fontWeight: 700 }}>
                     Commission Pool Distribution (% of Pool)
                   </label>
                   <span
@@ -213,7 +213,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.875rem' }}>
                   {/* Lead Staff Share */}
-                  <div style={{ background: '#11141A', border: '1px solid #2A2F38', borderRadius: '8px', padding: '10px' }}>
+                  <div style={{ background: '#11141A', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '10px' }}>
                     <div style={{ fontSize: '11px', color: '#9CA3AF', marginBottom: '4px' }}>Lead Staff / Cashier</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <input
@@ -231,7 +231,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
                   </div>
 
                   {/* Floor Staff Share */}
-                  <div style={{ background: '#11141A', border: '1px solid #2A2F38', borderRadius: '8px', padding: '10px' }}>
+                  <div style={{ background: '#11141A', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '10px' }}>
                     <div style={{ fontSize: '11px', color: '#9CA3AF', marginBottom: '4px' }}>Floor Staff / Junior</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <input
@@ -249,7 +249,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
                   </div>
 
                   {/* Shop Reserve / Retained */}
-                  <div style={{ background: '#11141A', border: '1px solid #2A2F38', borderRadius: '8px', padding: '10px' }}>
+                  <div style={{ background: '#11141A', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '10px' }}>
                     <div style={{ fontSize: '11px', color: '#9CA3AF', marginBottom: '4px' }}>Shop Reserve / Bonus</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <input
@@ -301,7 +301,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
                 required
                 value={name}
                 onChange={e => setName(e.target.value)}
-                style={{ width: '100%', background: '#11141A', border: '1px solid #2A2F38', borderRadius: '8px', padding: '8px 10px', color: '#F3F4F6', fontSize: '13px', outline: 'none' }}
+                style={{ width: '100%', background: '#11141A', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '8px 10px', color: '#F3F4F6', fontSize: '13px', outline: 'none' }}
               />
             </div>
 
@@ -314,7 +314,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
                 value={phone}
                 onChange={e => setPhone(e.target.value)}
                 placeholder="+92 300 1234567"
-                style={{ width: '100%', background: '#11141A', border: '1px solid #2A2F38', borderRadius: '8px', padding: '8px 10px', color: '#F3F4F6', fontSize: '13px', outline: 'none' }}
+                style={{ width: '100%', background: '#11141A', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '8px 10px', color: '#F3F4F6', fontSize: '13px', outline: 'none' }}
               />
             </div>
 
@@ -327,7 +327,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
                 value={city}
                 onChange={e => setCity(e.target.value)}
                 placeholder="Karachi / Lahore / Rawalpindi"
-                style={{ width: '100%', background: '#11141A', border: '1px solid #2A2F38', borderRadius: '8px', padding: '8px 10px', color: '#F3F4F6', fontSize: '13px', outline: 'none' }}
+                style={{ width: '100%', background: '#11141A', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '8px 10px', color: '#F3F4F6', fontSize: '13px', outline: 'none' }}
               />
             </div>
 
@@ -340,7 +340,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
                 value={address}
                 onChange={e => setAddress(e.target.value)}
                 placeholder="Main Market, Shop # 4"
-                style={{ width: '100%', background: '#11141A', border: '1px solid #2A2F38', borderRadius: '8px', padding: '8px 10px', color: '#F3F4F6', fontSize: '13px', outline: 'none' }}
+                style={{ width: '100%', background: '#11141A', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '8px 10px', color: '#F3F4F6', fontSize: '13px', outline: 'none' }}
               />
             </div>
           </div>
@@ -352,7 +352,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
           disabled={saving || (commissionEnabled && !isSplitBalanced)}
           style={{
             padding: '12px 24px',
-            background: saving ? '#4B5563' : '#C6A15B',
+            background: saving ? '#4B5563' : '#D97706',
             color: '#0D1117',
             fontWeight: 800,
             fontSize: '13px',

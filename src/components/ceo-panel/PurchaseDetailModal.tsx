@@ -22,11 +22,11 @@ export const PurchaseDetailModal: React.FC<PurchaseDetailModalProps> = ({
     <div className="ceo-modal-overlay">
       <div id="purchase-detail-modal" className="ceo-modal-box">
         {/* Header */}
-        <div style={{ padding: '16px 24px', borderBottom: '1px solid #2A2F38', backgroundColor: '#10141B', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ padding: '16px 24px', borderBottom: '1px solid #E2E8F0', backgroundColor: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <ShoppingBag style={{ width: '18px', height: '18px', color: '#C6A15B' }} />
-              <h3 className="ceo-font-heading" style={{ fontSize: '18px', fontWeight: 700, color: '#E5E7EB', margin: 0 }}>
+              <ShoppingBag style={{ width: '18px', height: '18px', color: '#D97706' }} />
+              <h3 className="ceo-font-heading" style={{ fontSize: '18px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
                 {purchase.poNumber}
               </h3>
               <span style={{
@@ -40,36 +40,36 @@ export const PurchaseDetailModal: React.FC<PurchaseDetailModalProps> = ({
                 {purchase.paymentStatus}
               </span>
             </div>
-            <p style={{ fontSize: '12px', color: '#8B93A1', margin: '4px 0 0' }}>
+            <p style={{ fontSize: '12px', color: '#64748B', margin: '4px 0 0' }}>
               Received at {purchase.time} on {purchase.date} • {branchName}
             </p>
           </div>
           <button
             id="close-purchase-modal-btn"
             onClick={onClose}
-            style={{ color: '#8B93A1', padding: '6px', borderRadius: '6px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', cursor: 'pointer' }}
+            style={{ color: '#64748B', padding: '6px', borderRadius: '6px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', cursor: 'pointer' }}
           >
             <X style={{ width: '18px', height: '18px' }} />
           </button>
         </div>
 
         {/* PO Meta */}
-        <div style={{ padding: '16px 24px', backgroundColor: '#12151B', borderBottom: '1px solid #2A2F38', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
-          <div style={{ padding: '12px', backgroundColor: '#1C2128', borderRadius: '8px', border: '1px solid #2A2F38' }}>
-            <div style={{ fontSize: '11px', color: '#8B93A1', fontWeight: 600, marginBottom: '2px' }}>Supplier Entity</div>
-            <div className="ceo-font-heading" style={{ fontSize: '14px', fontWeight: 700, color: '#E5E7EB' }}>{purchase.supplierName}</div>
-            <div className="ceo-font-mono" style={{ fontSize: '11px', color: '#8B93A1', marginTop: '2px' }}>Bill Ref: {purchase.invoiceBillRef}</div>
+        <div style={{ padding: '16px 24px', backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+          <div style={{ padding: '12px', backgroundColor: '#FFFFFF', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+            <div style={{ fontSize: '11px', color: '#64748B', fontWeight: 600, marginBottom: '2px' }}>Supplier Entity</div>
+            <div className="ceo-font-heading" style={{ fontSize: '14px', fontWeight: 700, color: '#0F172A' }}>{purchase.supplierName}</div>
+            <div className="ceo-font-mono" style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>Bill Ref: {purchase.invoiceBillRef}</div>
           </div>
 
-          <div style={{ padding: '12px', backgroundColor: '#1C2128', borderRadius: '8px', border: '1px solid #2A2F38' }}>
-            <div style={{ fontSize: '11px', color: '#8B93A1', fontWeight: 600, marginBottom: '2px' }}>Procurement Category</div>
-            <div className="ceo-font-heading" style={{ fontSize: '14px', fontWeight: 700, color: '#C6A15B' }}>{purchase.category}</div>
-            <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '2px' }}>Received By: {purchase.receivedBy}</div>
+          <div style={{ padding: '12px', backgroundColor: '#FFFFFF', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+            <div style={{ fontSize: '11px', color: '#64748B', fontWeight: 600, marginBottom: '2px' }}>Procurement Category</div>
+            <div className="ceo-font-heading" style={{ fontSize: '14px', fontWeight: 700, color: '#D97706' }}>{purchase.category}</div>
+            <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>Received By: {purchase.receivedBy}</div>
           </div>
 
-          <div style={{ padding: '12px', backgroundColor: '#1C2128', borderRadius: '8px', border: '1px solid #2A2F38' }}>
-            <div style={{ fontSize: '11px', color: '#8B93A1', fontWeight: 600, marginBottom: '2px' }}>Total Consignment Cost</div>
-            <div className="ceo-font-mono" style={{ fontSize: '15px', fontWeight: 700, color: '#E5E7EB' }}>
+          <div style={{ padding: '12px', backgroundColor: '#FFFFFF', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+            <div style={{ fontSize: '11px', color: '#64748B', fontWeight: 600, marginBottom: '2px' }}>Total Consignment Cost</div>
+            <div className="ceo-font-mono" style={{ fontSize: '15px', fontWeight: 700, color: '#0F172A' }}>
               {formatCurrency(purchase.totalCost)}
             </div>
             <div className="ceo-font-mono" style={{ fontSize: '11px', color: purchase.dueAmount > 0 ? '#F87171' : '#34D399', marginTop: '2px' }}>
@@ -79,8 +79,8 @@ export const PurchaseDetailModal: React.FC<PurchaseDetailModalProps> = ({
         </div>
 
         {/* Items Table */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', backgroundColor: '#12151B' }}>
-          <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1', marginBottom: '10px' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', backgroundColor: '#F8FAFC' }}>
+          <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B', marginBottom: '10px' }}>
             Received Consignment Items ({purchase.items.length})
           </div>
           <div className="ceo-table-container">
@@ -99,17 +99,17 @@ export const PurchaseDetailModal: React.FC<PurchaseDetailModalProps> = ({
               <tbody>
                 {purchase.items.map((item, idx) => (
                   <tr key={idx}>
-                    <td className="ceo-font-mono" style={{ color: '#8B93A1' }}>{idx + 1}</td>
-                    <td className="ceo-font-mono" style={{ color: '#8B93A1' }}>{item.code}</td>
-                    <td style={{ fontWeight: 600, color: '#E5E7EB' }}>{item.product}</td>
-                    <td style={{ color: '#8B93A1' }}>{item.packUnit}</td>
-                    <td style={{ textAlign: 'center', fontWeight: 700, color: '#E5E7EB' }} className="ceo-font-mono">
+                    <td className="ceo-font-mono" style={{ color: '#64748B' }}>{idx + 1}</td>
+                    <td className="ceo-font-mono" style={{ color: '#64748B' }}>{item.code}</td>
+                    <td style={{ fontWeight: 600, color: '#0F172A' }}>{item.product}</td>
+                    <td style={{ color: '#64748B' }}>{item.packUnit}</td>
+                    <td style={{ textAlign: 'center', fontWeight: 700, color: '#0F172A' }} className="ceo-font-mono">
                       {item.qty} {item.unit}
                     </td>
-                    <td style={{ textAlign: 'right', color: '#8B93A1' }} className="ceo-font-mono">
+                    <td style={{ textAlign: 'right', color: '#64748B' }} className="ceo-font-mono">
                       {item.costRate.toFixed(2)}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: '#E5E7EB' }} className="ceo-font-mono">
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: '#0F172A' }} className="ceo-font-mono">
                       {formatCurrency(item.amount)}
                     </td>
                   </tr>
@@ -120,8 +120,8 @@ export const PurchaseDetailModal: React.FC<PurchaseDetailModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div style={{ padding: '16px 24px', backgroundColor: '#10141B', borderTop: '1px solid #2A2F38', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ fontSize: '12px', color: '#8B93A1' }}>
+        <div style={{ padding: '16px 24px', backgroundColor: '#FFFFFF', borderTop: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ fontSize: '12px', color: '#64748B' }}>
             Stock automatically reconciled into warehouse inventory.
           </div>
           <button onClick={onClose} className="ceo-btn-gold">

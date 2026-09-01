@@ -62,17 +62,17 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({ branch }) => {
   });
 
   return (
-    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', color: '#E5E7EB' }}>
+    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', color: '#0F172A' }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <ShieldCheck style={{ width: '22px', height: '22px', color: '#C6A15B' }} />
+            <ShieldCheck style={{ width: '22px', height: '22px', color: '#D97706' }} />
             <h1 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 800, margin: 0 }}>
               Audit &amp; Activity Log
             </h1>
           </div>
-          <p style={{ fontSize: '12px', color: '#8B93A1', margin: '4px 0 0 0' }}>
+          <p style={{ fontSize: '12px', color: '#64748B', margin: '4px 0 0 0' }}>
             Immutable chronological record of sales, inward stock receipts, and administrative changes for {branch.name}
           </p>
         </div>
@@ -85,9 +85,9 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({ branch }) => {
             gap: '6px',
             padding: '8px 14px',
             backgroundColor: '#1E232B',
-            border: '1px solid #2A2F38',
+            border: '1px solid #E2E8F0',
             borderRadius: '6px',
-            color: '#E5E7EB',
+            color: '#0F172A',
             fontSize: '12px',
             cursor: 'pointer',
           }}
@@ -98,7 +98,7 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({ branch }) => {
       </div>
 
       {/* Filter Bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', backgroundColor: '#161B22', border: '1px solid #2A2F38', borderRadius: '8px', padding: '12px 16px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', backgroundColor: '#161B22', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '12px 16px' }}>
         <DatePeriodFilter
           startDate={startDate}
           endDate={endDate}
@@ -117,10 +117,10 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({ branch }) => {
               style={{
                 width: '100%',
                 padding: '8px 12px 8px 36px',
-                backgroundColor: '#10141B',
-                border: '1px solid #2A2F38',
+                backgroundColor: '#FFFFFF',
+                border: '1px solid #E2E8F0',
                 borderRadius: '6px',
-                color: '#E5E7EB',
+                color: '#0F172A',
                 fontSize: '12px',
                 outline: 'none',
               }}
@@ -132,10 +132,10 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({ branch }) => {
             onChange={(e) => setActionFilter(e.target.value)}
             style={{
               padding: '8px 14px',
-              backgroundColor: '#10141B',
-              border: '1px solid #2A2F38',
+              backgroundColor: '#FFFFFF',
+              border: '1px solid #E2E8F0',
               borderRadius: '6px',
-              color: '#E5E7EB',
+              color: '#0F172A',
               fontSize: '12px',
               outline: 'none',
               cursor: 'pointer',
@@ -151,10 +151,10 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({ branch }) => {
       </div>
 
       {/* Logs Table */}
-      <div style={{ backgroundColor: '#161B22', border: '1px solid #2A2F38', borderRadius: '8px', overflow: 'hidden' }}>
+      <div style={{ backgroundColor: '#161B22', border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
           <thead>
-            <tr style={{ backgroundColor: '#10141B', borderBottom: '1px solid #2A2F38', color: '#8B93A1', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '0.05em' }}>
+            <tr style={{ backgroundColor: '#FFFFFF', borderBottom: '1px solid #E2E8F0', color: '#64748B', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '0.05em' }}>
               <th style={{ padding: '12px 16px' }}>Timestamp</th>
               <th style={{ padding: '12px 16px' }}>User / Cashier</th>
               <th style={{ padding: '12px 16px' }}>Action</th>
@@ -165,13 +165,13 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({ branch }) => {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: '#8B93A1' }}>
+                <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: '#64748B' }}>
                   Loading activity logs...
                 </td>
               </tr>
             ) : filteredLogs.length === 0 ? (
               <tr>
-                <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: '#8B93A1' }}>
+                <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: '#64748B' }}>
                   No audit logs recorded for this filter.
                 </td>
               </tr>
@@ -180,10 +180,10 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({ branch }) => {
                 const date = log.created_at ? new Date(log.created_at).toLocaleString() : '—';
                 return (
                   <tr key={log.id} style={{ borderBottom: '1px solid #1E232B' }}>
-                    <td style={{ padding: '12px 16px', color: '#8B93A1', fontFamily: 'JetBrains Mono, monospace', fontSize: '11px', whiteSpace: 'nowrap' }}>
+                    <td style={{ padding: '12px 16px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', fontSize: '11px', whiteSpace: 'nowrap' }}>
                       {date}
                     </td>
-                    <td style={{ padding: '12px 16px', fontWeight: 600, color: '#E5E7EB' }}>
+                    <td style={{ padding: '12px 16px', fontWeight: 600, color: '#0F172A' }}>
                       {log.user_name || 'System / Staff'}
                     </td>
                     <td style={{ padding: '12px 16px' }}>
@@ -195,7 +195,7 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({ branch }) => {
                           fontFamily: 'JetBrains Mono, monospace',
                           fontWeight: 600,
                           backgroundColor: log.action.includes('return') ? 'rgba(239,68,68,0.15)' : 'rgba(198,161,91,0.15)',
-                          color: log.action.includes('return') ? '#FCA5A5' : '#C6A15B',
+                          color: log.action.includes('return') ? '#FCA5A5' : '#D97706',
                           border: `1px solid ${log.action.includes('return') ? 'rgba(239,68,68,0.3)' : 'rgba(198,161,91,0.3)'}`,
                         }}
                       >

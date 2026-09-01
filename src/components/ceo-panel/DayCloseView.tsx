@@ -272,22 +272,22 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
   if (!activeRecord) {
     return (
       <div id="executive-day-close-view" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #2A2F38', paddingBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '16px' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <h2 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 700, color: '#E5E7EB', margin: 0 }}>
+              <h2 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
                 Shift-End Cash Drawer Reconciliation
               </h2>
             </div>
-            <p style={{ fontSize: '12px', color: '#8B93A1', margin: '4px 0 0' }}>
+            <p style={{ fontSize: '12px', color: '#64748B', margin: '4px 0 0' }}>
               {branch.name} • End-of-shift drawer balancing, cash counting &amp; variance audits
             </p>
           </div>
         </div>
-        <div style={{ padding: '48px', textAlign: 'center', border: '1px solid #2A2F38', borderRadius: '8px', color: '#8B93A1', backgroundColor: '#1C2128' }}>
-          <CalendarCheck style={{ width: '32px', height: '32px', color: '#C6A15B', margin: '0 auto 12px' }} />
-          <div style={{ fontSize: '14px', fontWeight: 600, color: '#E5E7EB', marginBottom: '4px' }}>No Shift Reconciliation Records</div>
-          <div style={{ fontSize: '12px', color: '#8B93A1' }}>
+        <div style={{ padding: '48px', textAlign: 'center', border: '1px solid #E2E8F0', borderRadius: '8px', color: '#64748B', backgroundColor: '#FFFFFF' }}>
+          <CalendarCheck style={{ width: '32px', height: '32px', color: '#D97706', margin: '0 auto 12px' }} />
+          <div style={{ fontSize: '14px', fontWeight: 600, color: '#0F172A', marginBottom: '4px' }}>No Shift Reconciliation Records</div>
+          <div style={{ fontSize: '12px', color: '#64748B' }}>
             {loading ? 'Loading shift records...' : 'When counter staff close shifts in the POS Day Close module, reconciliation summaries will appear here.'}
           </div>
         </div>
@@ -300,19 +300,19 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
   return (
     <div id="executive-day-close-view" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       {/* Shift Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #2A2F38', paddingBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <h2 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 700, color: '#E5E7EB', margin: 0 }}>
+            <h2 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
               Shift-End Cash Drawer Reconciliation
             </h2>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#8B93A1', marginTop: '4px' }}>
-            <span style={{ color: '#E5E7EB', fontWeight: 600 }}>{activeRecord.date}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#64748B', marginTop: '4px' }}>
+            <span style={{ color: '#0F172A', fontWeight: 600 }}>{activeRecord.date}</span>
             <span>•</span>
-            <span className="ceo-font-mono" style={{ color: '#E5E7EB' }}>{activeRecord.shiftTime}</span>
+            <span className="ceo-font-mono" style={{ color: '#0F172A' }}>{activeRecord.shiftTime}</span>
             <span>•</span>
-            <span style={{ color: '#E5E7EB' }}>{activeRecord.cashierName} (Reg {activeRecord.registerNo})</span>
+            <span style={{ color: '#0F172A' }}>{activeRecord.cashierName} (Reg {activeRecord.registerNo})</span>
           </div>
         </div>
 
@@ -326,15 +326,15 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
           />
 
           {filteredShifts.length > 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', borderRadius: '8px', padding: '6px 12px' }}>
-              <span style={{ fontSize: '12px', color: '#8B93A1', fontWeight: 600 }}>Shift:</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '6px 12px' }}>
+              <span style={{ fontSize: '12px', color: '#64748B', fontWeight: 600 }}>Shift:</span>
               <select
                 value={activeRecord.id}
                 onChange={(e) => setSelectedRecordId(e.target.value)}
-                style={{ backgroundColor: '#12151B', border: '1px solid #2A2F38', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', color: '#E5E7EB', outline: 'none', cursor: 'pointer' }}
+                style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '6px', padding: '4px 10px', fontSize: '12px', color: '#0F172A', outline: 'none', cursor: 'pointer' }}
               >
                 {filteredShifts.map((r) => (
-                  <option key={r.id} value={r.id} style={{ backgroundColor: '#1C2128', color: '#E5E7EB' }}>
+                  <option key={r.id} value={r.id} style={{ backgroundColor: '#FFFFFF', color: '#0F172A' }}>
                     {r.date} — {r.shiftTime} {r.status === 'open' ? '🟢 (Open / Live)' : `(${r.financialSummary.varianceStatus})`}
                   </option>
                 ))}
@@ -365,7 +365,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
               <div style={{ fontSize: '13px', fontWeight: 700, color: activeRecord.handover.handoverStatus === 'SHORT' ? '#EF4444' : activeRecord.handover.handoverStatus === 'EXCESS' ? '#F59E0B' : '#34D399' }}>
                 Shift Handover — {activeRecord.handover.handoverStatus === 'SHORT' ? 'Cash Shortage Detected' : activeRecord.handover.handoverStatus === 'EXCESS' ? 'Excess Cash Found' : 'Cash Matched'}
               </div>
-              <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '2px' }}>
+              <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
                 Prev shift closed with {formatCurrency(activeRecord.handover.previousClosingCash)} →
                 This shift opened with {formatCurrency(activeRecord.handover.openingCountedCash)}
               </div>
@@ -378,7 +378,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
           </div>
 
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '11px', color: '#8B93A1', marginBottom: '2px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Handover Variance</div>
+            <div style={{ fontSize: '11px', color: '#64748B', marginBottom: '2px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Handover Variance</div>
             <div className="ceo-font-mono" style={{
               fontSize: '22px',
               fontWeight: 800,
@@ -396,39 +396,39 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
         {/* CARD 1: Financial Summary */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div className="ceo-card">
-            <h3 className="ceo-font-heading" style={{ fontSize: '16px', fontWeight: 700, color: '#E5E7EB', margin: '0 0 16px' }}>
+            <h3 className="ceo-font-heading" style={{ fontSize: '16px', fontWeight: 700, color: '#0F172A', margin: '0 0 16px' }}>
               Cash Flow Breakdown
             </h3>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '12px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#8B93A1' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B' }}>
                 <span>Opening Cash Drawer</span>
-                <span className="ceo-font-mono" style={{ color: '#E5E7EB', fontWeight: 600 }}>{formatCurrency(financialSummary.openingBalance)}</span>
+                <span className="ceo-font-mono" style={{ color: '#0F172A', fontWeight: 600 }}>{formatCurrency(financialSummary.openingBalance)}</span>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#8B93A1' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B' }}>
                 <span>Total Register Sales (Cash)</span>
                 <span className="ceo-font-mono" style={{ color: '#34D399', fontWeight: 600 }}>{formatCurrency(financialSummary.cashSales)}</span>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#8B93A1' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B' }}>
                 <span style={{ paddingLeft: '8px' }}>Sales (Credit / Udhaar)</span>
-                <span className="ceo-font-mono" style={{ color: '#E5E7EB' }}>{formatCurrency(financialSummary.creditSales)}</span>
+                <span className="ceo-font-mono" style={{ color: '#0F172A' }}>{formatCurrency(financialSummary.creditSales)}</span>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#8B93A1' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B' }}>
                 <span style={{ paddingLeft: '8px' }}>Sales (Bank / Card)</span>
-                <span className="ceo-font-mono" style={{ color: '#E5E7EB' }}>{formatCurrency(financialSummary.bankCardSales)}</span>
+                <span className="ceo-font-mono" style={{ color: '#0F172A' }}>{formatCurrency(financialSummary.bankCardSales)}</span>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#8B93A1' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B' }}>
                 <span>Petty Cash Expenses</span>
                 <span className="ceo-font-mono" style={{ color: '#F87171' }}>{formatCurrency(financialSummary.pettyExpenses)}</span>
               </div>
 
-              <div style={{ paddingTop: '12px', borderTop: '1px solid #2A2F38', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '12px', fontWeight: 700, color: '#E5E7EB', textTransform: 'uppercase' }}>Expected Cash</span>
-                <span className="ceo-font-mono" style={{ fontSize: '18px', fontWeight: 700, color: '#E5E7EB' }}>
+              <div style={{ paddingTop: '12px', borderTop: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#0F172A', textTransform: 'uppercase' }}>Expected Cash</span>
+                <span className="ceo-font-mono" style={{ fontSize: '18px', fontWeight: 700, color: '#0F172A' }}>
                   {formatCurrency(financialSummary.expectedCash)}
                 </span>
               </div>
@@ -436,11 +436,11 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
               {/* Feature #3: Same-day shift-to-shift delta */}
               {activeRecord.sameDayDelta && (
                 <div style={{ marginTop: '10px', padding: '8px 10px', borderRadius: '6px', background: activeRecord.sameDayDelta.direction === 'less' ? 'rgba(248,113,113,0.1)' : 'rgba(52,211,153,0.1)', border: `1px solid ${activeRecord.sameDayDelta.direction === 'less' ? '#7F1D1D' : '#064E3B'}` }}>
-                  <div style={{ fontSize: '11px', color: '#8B93A1', marginBottom: '2px' }}>vs Previous Shift Today</div>
+                  <div style={{ fontSize: '11px', color: '#64748B', marginBottom: '2px' }}>vs Previous Shift Today</div>
                   <div className="ceo-font-mono" style={{ fontSize: '13px', fontWeight: 700, color: activeRecord.sameDayDelta.direction === 'less' ? '#F87171' : '#34D399' }}>
                     {formatCurrency(activeRecord.sameDayDelta.amount)} {activeRecord.sameDayDelta.direction === 'same' ? '— same as' : activeRecord.sameDayDelta.direction} than previous shift
                   </div>
-                  <div style={{ fontSize: '10px', color: '#8B93A1', marginTop: '2px' }}>
+                  <div style={{ fontSize: '10px', color: '#64748B', marginTop: '2px' }}>
                     Previous shift net sales: {formatCurrency(activeRecord.sameDayDelta.previousShiftNetSales)}
                   </div>
                 </div>
@@ -451,7 +451,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
           {/* Variance Status Card */}
           <div className="ceo-card">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <h3 className="ceo-font-heading" style={{ fontSize: '14px', fontWeight: 700, color: '#E5E7EB', margin: 0 }}>
+              <h3 className="ceo-font-heading" style={{ fontSize: '14px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
                 Physical Cash Audit
               </h3>
               <span style={{
@@ -465,13 +465,13 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
                 {activeRecord.status === 'open' ? 'OPEN / LIVE' : financialSummary.varianceStatus}
               </span>
             </div>
-            <p style={{ fontSize: '11px', color: '#8B93A1', margin: '4px 0 0' }}>
+            <p style={{ fontSize: '11px', color: '#64748B', margin: '4px 0 0' }}>
               {activeRecord.status === 'open' ? 'Shift currently active. Reconciliation will be verified at shift close.' : 'Physical counted drawer vs Expected system register balance'}
             </p>
 
-            <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid #2A2F38', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div style={{ fontSize: '10px', color: '#8B93A1', textTransform: 'uppercase' }}>
+                <div style={{ fontSize: '10px', color: '#64748B', textTransform: 'uppercase' }}>
                   {activeRecord.status === 'open' ? 'EXPECTED DRAWER' : 'ACTUAL COUNTED CASH'}
                 </div>
                 <div className="ceo-font-mono" style={{ fontSize: '18px', fontWeight: 700, color: '#34D399', marginTop: '2px' }}>
@@ -479,7 +479,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '10px', color: '#8B93A1', textTransform: 'uppercase' }}>
+                <div style={{ fontSize: '10px', color: '#64748B', textTransform: 'uppercase' }}>
                   {activeRecord.status === 'open' ? 'AUDIT STATUS' : 'DRAWER VARIANCE'}
                 </div>
                 <div className="ceo-font-mono" style={{ fontSize: '18px', fontWeight: 700, color: activeRecord.status === 'open' ? '#60A5FA' : (financialSummary.varianceAmount < 0 ? '#F87171' : '#34D399'), marginTop: '2px' }}>
@@ -493,20 +493,20 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
         {/* CARD 2: Staff Commission Pool */}
         <div className="ceo-card">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-            <Users style={{ width: '18px', height: '18px', color: '#C6A15B' }} />
-            <h3 className="ceo-font-heading" style={{ fontSize: '16px', fontWeight: 700, color: '#E5E7EB', margin: 0 }}>
+            <Users style={{ width: '18px', height: '18px', color: '#D97706' }} />
+            <h3 className="ceo-font-heading" style={{ fontSize: '16px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
               Staff Sales Commission Pool
             </h3>
           </div>
-          <p style={{ fontSize: '11px', color: '#8B93A1', margin: '0 0 16px' }}>
+          <p style={{ fontSize: '11px', color: '#64748B', margin: '0 0 16px' }}>
             {commissionBreakdown.commissionRate}% allocated pool from total shift revenue
           </p>
 
-          <div style={{ padding: '14px', backgroundColor: '#12151B', border: '1px solid #2A2F38', borderRadius: '8px', marginBottom: '16px' }}>
+          <div style={{ padding: '14px', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', marginBottom: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div style={{ fontSize: '10px', color: '#8B93A1', textTransform: 'uppercase' }}>COMMISSION POOL VALUE</div>
-                <div className="ceo-font-mono" style={{ fontSize: '20px', fontWeight: 700, color: '#C6A15B', marginTop: '2px' }}>
+                <div style={{ fontSize: '10px', color: '#64748B', textTransform: 'uppercase' }}>COMMISSION POOL VALUE</div>
+                <div className="ceo-font-mono" style={{ fontSize: '20px', fontWeight: 700, color: '#D97706', marginTop: '2px' }}>
                   {formatCurrency(commissionBreakdown.commissionPool)}
                 </div>
               </div>
@@ -517,22 +517,22 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', color: '#8B93A1', letterSpacing: '0.05em' }}>
+            <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.05em' }}>
               Staff Distribution Shares
             </div>
             {commissionBreakdown.staffShares.map((staff) => (
-              <div key={staff.id} style={{ padding: '10px 12px', backgroundColor: '#12151B', border: '1px solid #2A2F38', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px' }}>
+              <div key={staff.id} style={{ padding: '10px 12px', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px' }}>
                 <div>
-                  <div style={{ fontWeight: 600, color: '#E5E7EB' }}>{staff.name}</div>
-                  <div style={{ fontSize: '10px', color: '#8B93A1', marginTop: '1px' }}>Role: {staff.role} ({staff.sharePct}%)</div>
+                  <div style={{ fontWeight: 600, color: '#0F172A' }}>{staff.name}</div>
+                  <div style={{ fontSize: '10px', color: '#64748B', marginTop: '1px' }}>Role: {staff.role} ({staff.sharePct}%)</div>
                 </div>
-                <div className="ceo-font-mono" style={{ fontWeight: 700, color: '#C6A15B' }}>
+                <div className="ceo-font-mono" style={{ fontWeight: 700, color: '#D97706' }}>
                   {formatCurrency(staff.amount)}
                 </div>
               </div>
             ))}
             {commissionBreakdown.staffShares.length === 0 && (
-              <div style={{ textAlign: 'center', padding: '16px', color: '#8B93A1', fontSize: '11px' }}>
+              <div style={{ textAlign: 'center', padding: '16px', color: '#64748B', fontSize: '11px' }}>
                 Pool calculated automatically based on register activity.
               </div>
             )}
@@ -543,20 +543,20 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
         <div className="ceo-card">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
             <Coffee style={{ width: '18px', height: '18px', color: '#F87171' }} />
-            <h3 className="ceo-font-heading" style={{ fontSize: '16px', fontWeight: 700, color: '#E5E7EB', margin: 0 }}>
+            <h3 className="ceo-font-heading" style={{ fontSize: '16px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
               Petty Cash Vouchers
             </h3>
           </div>
-          <p style={{ fontSize: '11px', color: '#8B93A1', margin: '0 0 16px' }}>
+          <p style={{ fontSize: '11px', color: '#64748B', margin: '0 0 16px' }}>
             Counter petty expenses deducted during this shift
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {pettyCashLogs.map((log) => (
-              <div key={log.id} style={{ padding: '10px 12px', backgroundColor: '#12151B', border: '1px solid #2A2F38', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px' }}>
+              <div key={log.id} style={{ padding: '10px 12px', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px' }}>
                 <div>
-                  <div style={{ fontWeight: 600, color: '#E5E7EB' }}>{log.title}</div>
-                  <div style={{ fontSize: '10px', color: '#8B93A1', marginTop: '1px' }}>Dept: {log.department} • Time: {log.time}</div>
+                  <div style={{ fontWeight: 600, color: '#0F172A' }}>{log.title}</div>
+                  <div style={{ fontSize: '10px', color: '#64748B', marginTop: '1px' }}>Dept: {log.department} • Time: {log.time}</div>
                 </div>
                 <div className="ceo-font-mono" style={{ fontWeight: 700, color: '#F87171' }}>
                   -{formatCurrency(log.amount)}
@@ -564,7 +564,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
               </div>
             ))}
             {pettyCashLogs.length === 0 && (
-              <div style={{ textAlign: 'center', padding: '24px', color: '#8B93A1', fontSize: '12px' }}>
+              <div style={{ textAlign: 'center', padding: '24px', color: '#64748B', fontSize: '12px' }}>
                 No petty expenses recorded.
               </div>
             )}

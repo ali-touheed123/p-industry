@@ -78,21 +78,21 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
     <div className="ceo-modal-overlay">
       <div id="customer-detail-modal" className="ceo-modal-box">
         {/* Header */}
-        <div style={{ padding: '16px 24px', borderBottom: '1px solid #2A2F38', backgroundColor: '#10141B', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ padding: '16px 24px', borderBottom: '1px solid #E2E8F0', backgroundColor: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{ width: '40px', height: '40px', borderRadius: '6px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#C6A15B', fontWeight: 700, fontSize: '16px' }} className="ceo-font-heading">
+            <div style={{ width: '40px', height: '40px', borderRadius: '6px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#D97706', fontWeight: 700, fontSize: '16px' }} className="ceo-font-heading">
               {customer.name.substring(0, 2).toUpperCase()}
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <h3 className="ceo-font-heading" style={{ fontSize: '18px', fontWeight: 700, color: '#E5E7EB', margin: 0 }}>
+                <h3 className="ceo-font-heading" style={{ fontSize: '18px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
                   {customer.name}
                 </h3>
-                <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', color: '#8B93A1', fontWeight: 600 }}>
+                <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', color: '#64748B', fontWeight: 600 }}>
                   {customer.category}
                 </span>
               </div>
-              <div style={{ fontSize: '12px', color: '#8B93A1', marginTop: '2px', display: 'flex', gap: '8px' }}>
+              <div style={{ fontSize: '12px', color: '#64748B', marginTop: '2px', display: 'flex', gap: '8px' }}>
                 <span className="ceo-font-mono">{customer.phone}</span>
                 <span>•</span>
                 <span>{customer.city}</span>
@@ -102,51 +102,51 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
           <button
             id="close-customer-modal-btn"
             onClick={onClose}
-            style={{ color: '#8B93A1', padding: '6px', borderRadius: '6px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', cursor: 'pointer' }}
+            style={{ color: '#64748B', padding: '6px', borderRadius: '6px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', cursor: 'pointer' }}
           >
             <X style={{ width: '18px', height: '18px' }} />
           </button>
         </div>
 
         {/* Executive KPI Bar */}
-        <div style={{ padding: '16px 24px', backgroundColor: '#12151B', borderBottom: '1px solid #2A2F38', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
-          <div style={{ padding: '12px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', borderRadius: '8px' }}>
-            <div style={{ fontSize: '10px', color: '#8B93A1', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '2px' }}>Current Debt (Udhaar)</div>
+        <div style={{ padding: '16px 24px', backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
+          <div style={{ padding: '12px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px' }}>
+            <div style={{ fontSize: '10px', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '2px' }}>Current Debt (Udhaar)</div>
             <div className="ceo-font-mono" style={{ fontSize: '16px', fontWeight: 700, color: customer.totalDebt > 0 ? '#F87171' : '#34D399' }}>
               {formatCurrency(customer.totalDebt)}
             </div>
-            <div className="ceo-font-mono" style={{ fontSize: '11px', color: '#8B93A1', marginTop: '2px' }}>
+            <div className="ceo-font-mono" style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
               Limit: {formatCurrency(customer.creditLimit)}
             </div>
           </div>
 
-          <div style={{ padding: '12px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', borderRadius: '8px' }}>
-            <div style={{ fontSize: '10px', color: '#8B93A1', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '2px' }}>Total Paid to Date</div>
+          <div style={{ padding: '12px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px' }}>
+            <div style={{ fontSize: '10px', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '2px' }}>Total Paid to Date</div>
             <div className="ceo-font-mono" style={{ fontSize: '16px', fontWeight: 700, color: '#34D399' }}>
               {formatCurrency(customer.amountPaidToDate)}
             </div>
-            <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '2px' }}>Cleared balances</div>
+            <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>Cleared balances</div>
           </div>
 
-          <div style={{ padding: '12px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', borderRadius: '8px' }}>
-            <div style={{ fontSize: '10px', color: '#8B93A1', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '2px' }}>Lifetime Purchases</div>
-            <div className="ceo-font-mono" style={{ fontSize: '16px', fontWeight: 700, color: '#C6A15B' }}>
+          <div style={{ padding: '12px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px' }}>
+            <div style={{ fontSize: '10px', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '2px' }}>Lifetime Purchases</div>
+            <div className="ceo-font-mono" style={{ fontSize: '16px', fontWeight: 700, color: '#D97706' }}>
               {formatCurrency(customer.lifetimePurchases)}
             </div>
-            <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '2px' }}>Gross billing volume</div>
+            <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>Gross billing volume</div>
           </div>
 
-          <div style={{ padding: '12px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', borderRadius: '8px' }}>
-            <div style={{ fontSize: '10px', color: '#8B93A1', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '2px' }}>Credit Risk</div>
-            <div style={{ fontSize: '14px', fontWeight: 700, color: customer.riskLevel === 'Low' ? '#34D399' : '#C6A15B', marginTop: '2px' }}>
+          <div style={{ padding: '12px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px' }}>
+            <div style={{ fontSize: '10px', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '2px' }}>Credit Risk</div>
+            <div style={{ fontSize: '14px', fontWeight: 700, color: customer.riskLevel === 'Low' ? '#34D399' : '#D97706', marginTop: '2px' }}>
               {customer.riskLevel} Risk
             </div>
-            <div className="ceo-font-mono" style={{ fontSize: '11px', color: '#8B93A1', marginTop: '2px' }}>Last: {customer.lastTransactionDate}</div>
+            <div className="ceo-font-mono" style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>Last: {customer.lastTransactionDate}</div>
           </div>
         </div>
 
         {/* Tab Controls */}
-        <div style={{ padding: '10px 24px 0', borderBottom: '1px solid #2A2F38', backgroundColor: '#12151B', display: 'flex', gap: '8px' }}>
+        <div style={{ padding: '10px 24px 0', borderBottom: '1px solid #E2E8F0', backgroundColor: '#F8FAFC', display: 'flex', gap: '8px' }}>
           <button
             onClick={() => setActiveTab('transactions')}
             style={{
@@ -156,8 +156,8 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
               border: 'none',
               background: 'none',
               cursor: 'pointer',
-              color: activeTab === 'transactions' ? '#C6A15B' : '#8B93A1',
-              borderBottom: activeTab === 'transactions' ? '2px solid #C6A15B' : '2px solid transparent',
+              color: activeTab === 'transactions' ? '#D97706' : '#64748B',
+              borderBottom: activeTab === 'transactions' ? '2px solid #D97706' : '2px solid transparent',
             }}
           >
             Ledger Statements ({customer.transactions.length})
@@ -171,8 +171,8 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
               border: 'none',
               background: 'none',
               cursor: 'pointer',
-              color: activeTab === 'aging' ? '#C6A15B' : '#8B93A1',
-              borderBottom: activeTab === 'aging' ? '2px solid #C6A15B' : '2px solid transparent',
+              color: activeTab === 'aging' ? '#D97706' : '#64748B',
+              borderBottom: activeTab === 'aging' ? '2px solid #D97706' : '2px solid transparent',
             }}
           >
             Debt Aging Analysis
@@ -180,7 +180,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
         </div>
 
         {/* Tab Body */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', backgroundColor: '#12151B' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', backgroundColor: '#F8FAFC' }}>
           {activeTab === 'transactions' && (
             <div className="ceo-table-container">
               <table className="ceo-table">
@@ -198,7 +198,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                 <tbody>
                   {customer.transactions.map((tx) => (
                     <tr key={tx.id}>
-                      <td className="ceo-font-mono" style={{ color: '#8B93A1' }}>{tx.date}</td>
+                      <td className="ceo-font-mono" style={{ color: '#64748B' }}>{tx.date}</td>
                       <td>
                         <span style={{
                           fontSize: '10px',
@@ -211,22 +211,22 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                           {tx.type}
                         </span>
                       </td>
-                      <td className="ceo-font-mono" style={{ color: '#E5E7EB' }}>{tx.referenceNo}</td>
-                      <td style={{ color: '#8B93A1' }}>{tx.description}</td>
+                      <td className="ceo-font-mono" style={{ color: '#0F172A' }}>{tx.referenceNo}</td>
+                      <td style={{ color: '#64748B' }}>{tx.description}</td>
                       <td style={{ textAlign: 'right', color: '#F87171' }} className="ceo-font-mono">
                         {tx.debit > 0 ? formatCurrency(tx.debit) : '—'}
                       </td>
                       <td style={{ textAlign: 'right', color: '#34D399' }} className="ceo-font-mono">
                         {tx.credit > 0 ? formatCurrency(tx.credit) : '—'}
                       </td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: '#C6A15B' }} className="ceo-font-mono">
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: '#D97706' }} className="ceo-font-mono">
                         {formatCurrency(tx.balanceAfter)}
                       </td>
                     </tr>
                   ))}
                   {customer.transactions.length === 0 && (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: 'center', padding: '24px', color: '#8B93A1' }}>
+                      <td colSpan={7} style={{ textAlign: 'center', padding: '24px', color: '#64748B' }}>
                         No ledger transactions recorded yet.
                       </td>
                     </tr>
@@ -239,36 +239,36 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
           {activeTab === 'aging' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
-                <div style={{ padding: '16px', backgroundColor: '#1C2128', borderRadius: '8px', border: '1px solid #2A2F38' }}>
-                  <div style={{ fontSize: '11px', color: '#8B93A1', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Current (0 - 30 Days)</div>
+                <div style={{ padding: '16px', backgroundColor: '#FFFFFF', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                  <div style={{ fontSize: '11px', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Current (0 - 30 Days)</div>
                   <div className="ceo-font-mono" style={{ fontSize: '20px', fontWeight: 700, color: '#34D399', marginTop: '6px' }}>
                     {formatCurrency(customer.aging.current)}
                   </div>
-                  <p style={{ fontSize: '11px', color: '#8B93A1', margin: '4px 0 0' }}>Fresh credit within acceptable payment cycle.</p>
+                  <p style={{ fontSize: '11px', color: '#64748B', margin: '4px 0 0' }}>Fresh credit within acceptable payment cycle.</p>
                 </div>
 
-                <div style={{ padding: '16px', backgroundColor: '#1C2128', borderRadius: '8px', border: '1px solid #2A2F38' }}>
-                  <div style={{ fontSize: '11px', color: '#8B93A1', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Due (31 - 60 Days)</div>
-                  <div className="ceo-font-mono" style={{ fontSize: '20px', fontWeight: 700, color: '#C6A15B', marginTop: '6px' }}>
+                <div style={{ padding: '16px', backgroundColor: '#FFFFFF', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                  <div style={{ fontSize: '11px', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Due (31 - 60 Days)</div>
+                  <div className="ceo-font-mono" style={{ fontSize: '20px', fontWeight: 700, color: '#D97706', marginTop: '6px' }}>
                     {formatCurrency(customer.aging.days30to60)}
                   </div>
-                  <p style={{ fontSize: '11px', color: '#8B93A1', margin: '4px 0 0' }}>Overdue cycle. Reminder recommended.</p>
+                  <p style={{ fontSize: '11px', color: '#64748B', margin: '4px 0 0' }}>Overdue cycle. Reminder recommended.</p>
                 </div>
 
-                <div style={{ padding: '16px', backgroundColor: '#1C2128', borderRadius: '8px', border: '1px solid #2A2F38' }}>
-                  <div style={{ fontSize: '11px', color: '#8B93A1', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Critical (60+ Days)</div>
+                <div style={{ padding: '16px', backgroundColor: '#FFFFFF', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                  <div style={{ fontSize: '11px', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Critical (60+ Days)</div>
                   <div className="ceo-font-mono" style={{ fontSize: '20px', fontWeight: 700, color: '#F87171', marginTop: '6px' }}>
                     {formatCurrency(customer.aging.days60plus)}
                   </div>
-                  <p style={{ fontSize: '11px', color: '#8B93A1', margin: '4px 0 0' }}>High risk debt. Hold credit billing.</p>
+                  <p style={{ fontSize: '11px', color: '#64748B', margin: '4px 0 0' }}>High risk debt. Hold credit billing.</p>
                 </div>
               </div>
 
-              <div style={{ padding: '16px', backgroundColor: '#1C2128', borderRadius: '8px', border: '1px solid #2A2F38' }}>
-                <div style={{ fontSize: '12px', fontWeight: 700, color: '#E5E7EB', marginBottom: '8px' }}>Aging Percentage Split</div>
-                <div style={{ height: '12px', width: '100%', backgroundColor: '#12151B', borderRadius: '6px', overflow: 'hidden', display: 'flex' }}>
+              <div style={{ padding: '16px', backgroundColor: '#FFFFFF', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: '#0F172A', marginBottom: '8px' }}>Aging Percentage Split</div>
+                <div style={{ height: '12px', width: '100%', backgroundColor: '#F8FAFC', borderRadius: '6px', overflow: 'hidden', display: 'flex' }}>
                   <div style={{ width: `${(customer.aging.current / (customer.totalDebt || 1)) * 100}%`, backgroundColor: '#34D399' }} />
-                  <div style={{ width: `${(customer.aging.days30to60 / (customer.totalDebt || 1)) * 100}%`, backgroundColor: '#C6A15B' }} />
+                  <div style={{ width: `${(customer.aging.days30to60 / (customer.totalDebt || 1)) * 100}%`, backgroundColor: '#D97706' }} />
                   <div style={{ width: `${(customer.aging.days60plus / (customer.totalDebt || 1)) * 100}%`, backgroundColor: '#F87171' }} />
                 </div>
               </div>
@@ -277,7 +277,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div style={{ padding: '14px 24px', backgroundColor: '#10141B', borderTop: '1px solid #2A2F38', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ padding: '14px 24px', backgroundColor: '#FFFFFF', borderTop: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             {customer.totalDebt > 0 ? (
               <button
@@ -290,8 +290,8 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                   alignItems: 'center',
                   gap: '6px',
                   padding: '8px 14px',
-                  backgroundColor: '#C6A15B',
-                  color: '#10141B',
+                  backgroundColor: '#D97706',
+                  color: '#FFFFFF',
                   borderRadius: '6px',
                   border: 'none',
                   fontSize: '12px',
@@ -319,24 +319,24 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
       {/* ── Sub-Modal: CEO Record Payment / Recovery ── */}
       {showPayModal && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 100, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
-          <div style={{ width: '100%', maxWidth: '420px', backgroundColor: '#161B22', border: '1px solid #2A2F38', borderRadius: '8px', overflow: 'hidden' }}>
-            <div style={{ padding: '16px', borderBottom: '1px solid #2A2F38', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#10141B' }}>
+          <div style={{ width: '100%', maxWidth: '420px', backgroundColor: '#161B22', border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden' }}>
+            <div style={{ padding: '16px', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <DollarSign style={{ width: '18px', height: '18px', color: '#C6A15B' }} />
-                <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#E5E7EB', margin: 0 }}>
+                <DollarSign style={{ width: '18px', height: '18px', color: '#D97706' }} />
+                <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
                   Record Payment Receipt
                 </h3>
               </div>
               <button
                 onClick={() => setShowPayModal(false)}
-                style={{ background: 'none', border: 'none', color: '#8B93A1', cursor: 'pointer' }}
+                style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer' }}
               >
                 <X style={{ width: '16px', height: '16px' }} />
               </button>
             </div>
 
-            <div style={{ padding: '12px 16px', backgroundColor: '#10141B', borderBottom: '1px solid #2A2F38', fontSize: '12px' }}>
-              <div style={{ color: '#8B93A1' }}>Client: <strong style={{ color: '#E5E7EB' }}>{customer.name}</strong></div>
+            <div style={{ padding: '12px 16px', backgroundColor: '#FFFFFF', borderBottom: '1px solid #E2E8F0', fontSize: '12px' }}>
+              <div style={{ color: '#64748B' }}>Client: <strong style={{ color: '#0F172A' }}>{customer.name}</strong></div>
               <div style={{ color: '#F87171', fontWeight: 600, marginTop: '2px' }}>
                 Outstanding Debt: {formatCurrency(customer.totalDebt)}
               </div>
@@ -350,7 +350,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
 
             <form onSubmit={handleRecordPayment} style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#8B93A1', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748B', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>
                   Received Amount (PKR) *
                 </label>
                 <input
@@ -364,10 +364,10 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                   style={{
                     width: '100%',
                     padding: '8px 12px',
-                    backgroundColor: '#10141B',
-                    border: '1px solid #2A2F38',
+                    backgroundColor: '#FFFFFF',
+                    border: '1px solid #E2E8F0',
                     borderRadius: '6px',
-                    color: '#E5E7EB',
+                    color: '#0F172A',
                     fontSize: '13px',
                     fontFamily: 'JetBrains Mono, monospace',
                     fontWeight: 700,
@@ -377,7 +377,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
               </div>
 
               <div>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#8B93A1', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748B', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>
                   Payment Mode
                 </label>
                 <select
@@ -386,10 +386,10 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                   style={{
                     width: '100%',
                     padding: '8px 12px',
-                    backgroundColor: '#10141B',
-                    border: '1px solid #2A2F38',
+                    backgroundColor: '#FFFFFF',
+                    border: '1px solid #E2E8F0',
                     borderRadius: '6px',
-                    color: '#E5E7EB',
+                    color: '#0F172A',
                     fontSize: '12px',
                     outline: 'none',
                   }}
@@ -404,7 +404,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
               {/* Reference number only when not Cash */}
               {payMode !== 'Cash' && (
                 <div>
-                  <label style={{ fontSize: '11px', fontWeight: 700, color: '#8B93A1', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>
+                  <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748B', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>
                     {payMode === 'Cheque' ? 'Cheque # / Bank Details *' : 'Transaction Ref # / ID *'}
                   </label>
                   <input
@@ -416,10 +416,10 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                     style={{
                       width: '100%',
                       padding: '8px 12px',
-                      backgroundColor: '#10141B',
-                      border: '1px solid #2A2F38',
+                      backgroundColor: '#FFFFFF',
+                      border: '1px solid #E2E8F0',
                       borderRadius: '6px',
-                      color: '#E5E7EB',
+                      color: '#0F172A',
                       fontSize: '12px',
                       outline: 'none',
                     }}
@@ -428,7 +428,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
               )}
 
               <div>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#8B93A1', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748B', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>
                   Remarks / Notes (Optional)
                 </label>
                 <input
@@ -439,26 +439,26 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                   style={{
                     width: '100%',
                     padding: '8px 12px',
-                    backgroundColor: '#10141B',
-                    border: '1px solid #2A2F38',
+                    backgroundColor: '#FFFFFF',
+                    border: '1px solid #E2E8F0',
                     borderRadius: '6px',
-                    color: '#E5E7EB',
+                    color: '#0F172A',
                     fontSize: '12px',
                     outline: 'none',
                   }}
                 />
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px', paddingTop: '10px', borderTop: '1px solid #2A2F38' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px', paddingTop: '10px', borderTop: '1px solid #E2E8F0' }}>
                 <button
                   type="button"
                   onClick={() => setShowPayModal(false)}
                   style={{
                     padding: '8px 14px',
                     backgroundColor: '#1E232B',
-                    border: '1px solid #2A2F38',
+                    border: '1px solid #E2E8F0',
                     borderRadius: '6px',
-                    color: '#8B93A1',
+                    color: '#64748B',
                     fontSize: '12px',
                     cursor: 'pointer',
                   }}
@@ -470,8 +470,8 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                   disabled={submitting}
                   style={{
                     padding: '8px 16px',
-                    backgroundColor: '#C6A15B',
-                    color: '#10141B',
+                    backgroundColor: '#D97706',
+                    color: '#FFFFFF',
                     border: 'none',
                     borderRadius: '6px',
                     fontSize: '12px',

@@ -139,17 +139,17 @@ export const PurchaseView: React.FC<PurchaseViewProps> = ({ branch }) => {
   return (
     <div id="executive-purchase-view" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #2A2F38', paddingBottom: '16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '16px' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <h2 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 700, color: '#E5E7EB', margin: 0 }}>
+            <h2 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
               Procurement &amp; Purchases
             </h2>
-            <span className="ceo-font-mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '9999px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', color: '#8B93A1' }}>
+            <span className="ceo-font-mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '9999px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', color: '#64748B' }}>
               {stats.poCount} POs Received
             </span>
           </div>
-          <p style={{ fontSize: '12px', color: '#8B93A1', margin: '4px 0 0' }}>
+          <p style={{ fontSize: '12px', color: '#64748B', margin: '4px 0 0' }}>
             {branch.name} • Raw materials, base emulsions, colorants &amp; supplier invoice payables
           </p>
         </div>
@@ -158,48 +158,48 @@ export const PurchaseView: React.FC<PurchaseViewProps> = ({ branch }) => {
       {/* 4 Stat Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Total Purchase Cost</div>
-          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#E5E7EB', marginTop: '6px' }}>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Total Purchase Cost</div>
+          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#0F172A', marginTop: '6px' }}>
             {formatCurrency(stats.totalCost)}
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
             Across {stats.poCount} supplier consignments
           </div>
         </div>
 
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Paid to Suppliers</div>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Paid to Suppliers</div>
           <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#34D399', marginTop: '6px' }}>
             {formatCurrency(stats.paidAmount)}
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
             Disbursed via bank &amp; cheques
           </div>
         </div>
 
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Outstanding Payables</div>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Outstanding Payables</div>
           <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#F87171', marginTop: '6px' }}>
             {formatCurrency(stats.dueAmount)}
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
             Supplier credit balances pending
           </div>
         </div>
 
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Stock Units Received</div>
-          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#E5E7EB', marginTop: '6px' }}>
-            {stats.totalStockUnits} <span style={{ fontSize: '12px', color: '#8B93A1', fontWeight: 400 }}>containers</span>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Stock Units Received</div>
+          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#0F172A', marginTop: '6px' }}>
+            {stats.totalStockUnits} <span style={{ fontSize: '12px', color: '#64748B', fontWeight: 400 }}>containers</span>
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
             Added to warehouse inventory
           </div>
         </div>
       </div>
 
       {/* Filter toolbar */}
-      <div style={{ padding: '12px 16px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+      <div style={{ padding: '12px 16px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
         {/* Date Period Filter */}
         <DatePeriodFilter
           startDate={startDate}
@@ -210,14 +210,14 @@ export const PurchaseView: React.FC<PurchaseViewProps> = ({ branch }) => {
 
         {/* Right Controls: Search + Status Filter */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#12151B', border: '1px solid #2A2F38', borderRadius: '6px', padding: '6px 12px', minWidth: '240px' }}>
-            <Search style={{ width: '14px', height: '14px', color: '#8B93A1' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '6px', padding: '6px 12px', minWidth: '240px' }}>
+            <Search style={{ width: '14px', height: '14px', color: '#64748B' }} />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search PO #, supplier, consignment..."
-              style={{ background: 'none', border: 'none', color: '#E5E7EB', fontSize: '12px', outline: 'none', width: '100%' }}
+              style={{ background: 'none', border: 'none', color: '#0F172A', fontSize: '12px', outline: 'none', width: '100%' }}
             />
           </div>
 
@@ -232,9 +232,9 @@ export const PurchaseView: React.FC<PurchaseViewProps> = ({ branch }) => {
                   fontSize: '11px',
                   fontWeight: 600,
                   cursor: 'pointer',
-                  border: statusFilter === st ? '1px solid rgba(198, 161, 91, 0.6)' : '1px solid #2A2F38',
-                  backgroundColor: statusFilter === st ? '#12151B' : '#1C2128',
-                  color: statusFilter === st ? '#C6A15B' : '#8B93A1',
+                  border: statusFilter === st ? '1px solid rgba(198, 161, 91, 0.6)' : '1px solid #E2E8F0',
+                  backgroundColor: statusFilter === st ? '#F8FAFC' : '#FFFFFF',
+                  color: statusFilter === st ? '#D97706' : '#64748B',
                 }}
               >
                 {st}
@@ -263,18 +263,18 @@ export const PurchaseView: React.FC<PurchaseViewProps> = ({ branch }) => {
           <tbody>
             {filteredPurchases.map((po) => (
               <tr key={po.id} onClick={() => setSelectedPurchase(po)} style={{ cursor: 'pointer' }}>
-                <td className="ceo-font-mono" style={{ fontWeight: 700, color: '#C6A15B' }}>{po.poNumber}</td>
-                <td style={{ color: '#8B93A1' }} className="ceo-font-mono">{po.date} {po.time}</td>
-                <td style={{ fontWeight: 600, color: '#E5E7EB' }}>{po.supplierName}</td>
-                <td style={{ color: '#8B93A1' }}>{po.category}</td>
-                <td className="ceo-font-mono" style={{ color: '#8B93A1' }}>{po.invoiceBillRef}</td>
-                <td style={{ textAlign: 'center', color: '#8B93A1' }} className="ceo-font-mono">{po.stockReceivedQty} units</td>
-                <td style={{ textAlign: 'right', fontWeight: 700, color: '#E5E7EB' }} className="ceo-font-mono">{formatCurrency(po.totalCost)}</td>
+                <td className="ceo-font-mono" style={{ fontWeight: 700, color: '#D97706' }}>{po.poNumber}</td>
+                <td style={{ color: '#64748B' }} className="ceo-font-mono">{po.date} {po.time}</td>
+                <td style={{ fontWeight: 600, color: '#0F172A' }}>{po.supplierName}</td>
+                <td style={{ color: '#64748B' }}>{po.category}</td>
+                <td className="ceo-font-mono" style={{ color: '#64748B' }}>{po.invoiceBillRef}</td>
+                <td style={{ textAlign: 'center', color: '#64748B' }} className="ceo-font-mono">{po.stockReceivedQty} units</td>
+                <td style={{ textAlign: 'right', fontWeight: 700, color: '#0F172A' }} className="ceo-font-mono">{formatCurrency(po.totalCost)}</td>
                 <td style={{ textAlign: 'right', fontWeight: 700, color: po.dueAmount > 0 ? '#F87171' : '#34D399' }} className="ceo-font-mono">
                   {formatCurrency(po.dueAmount)}
                 </td>
                 <td style={{ textAlign: 'center' }}>
-                  <span style={{ fontSize: '11px', color: '#C6A15B', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                  <span style={{ fontSize: '11px', color: '#D97706', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
                     Inspect <ChevronRight style={{ width: '12px', height: '12px' }} />
                   </span>
                 </td>
@@ -282,7 +282,7 @@ export const PurchaseView: React.FC<PurchaseViewProps> = ({ branch }) => {
             ))}
             {filteredPurchases.length === 0 && (
               <tr>
-                <td colSpan={9} style={{ textAlign: 'center', padding: '32px', color: '#8B93A1' }}>
+                <td colSpan={9} style={{ textAlign: 'center', padding: '32px', color: '#64748B' }}>
                   {loading ? 'Loading procurement records...' : 'No procurement purchase orders recorded yet.'}
                 </td>
               </tr>

@@ -289,26 +289,26 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
   return (
     <div id="executive-overview-view" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       {/* Title & Quick Filter Bar */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', borderBottom: '1px solid #2A2F38', paddingBottom: '16px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', borderBottom: '1px solid #E2E8F0', paddingBottom: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <h2 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 700, color: '#E5E7EB', margin: 0 }}>
+              <h2 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
                 Executive Profit &amp; Loss (P&amp;L) Analytics
               </h2>
-              <span className="ceo-font-mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '9999px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', color: '#C6A15B' }}>
+              <span className="ceo-font-mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '9999px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', color: '#D97706' }}>
                 {totals.daysCount} Operating Days
               </span>
               <button
                 onClick={() => setRefreshTick(t => t + 1)}
                 disabled={loading}
                 title="Refresh data"
-                style={{ background: 'none', border: '1px solid #2A2F38', borderRadius: '6px', color: loading ? '#4B5563' : '#C6A15B', cursor: loading ? 'not-allowed' : 'pointer', padding: '3px 8px', fontSize: '11px' }}
+                style={{ background: 'none', border: '1px solid #E2E8F0', borderRadius: '6px', color: loading ? '#4B5563' : '#D97706', cursor: loading ? 'not-allowed' : 'pointer', padding: '3px 8px', fontSize: '11px' }}
               >
                 {loading ? '⟳ Loading...' : '⟳ Refresh'}
               </button>
             </div>
-            <p style={{ fontSize: '12px', color: '#8B93A1', margin: '4px 0 0' }}>
+            <p style={{ fontSize: '12px', color: '#64748B', margin: '4px 0 0' }}>
               {branch.name} • Live gross margin, COGS, operating expense, net profits and daily accounting
             </p>
           </div>
@@ -333,9 +333,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
                     fontSize: '11px',
                     fontWeight: 600,
                     cursor: 'pointer',
-                    border: quickFilter === filter ? '1px solid rgba(198, 161, 91, 0.6)' : '1px solid #2A2F38',
-                    backgroundColor: quickFilter === filter ? '#12151B' : '#1C2128',
-                    color: quickFilter === filter ? '#C6A15B' : '#8B93A1',
+                    border: quickFilter === filter ? '1px solid rgba(198, 161, 91, 0.6)' : '1px solid #E2E8F0',
+                    backgroundColor: quickFilter === filter ? '#F8FAFC' : '#FFFFFF',
+                    color: quickFilter === filter ? '#D97706' : '#64748B',
                   }}
                 >
                   {filter}
@@ -350,40 +350,40 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
         {/* Net Sales */}
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Net Revenue</div>
-          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#C6A15B', marginTop: '6px' }}>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Net Revenue</div>
+          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#D97706', marginTop: '6px' }}>
             {formatCurrency(totals.netSales)}
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
-            Across <span style={{ color: '#E5E7EB', fontWeight: 600 }}>{totals.invoiceCount}</span> invoices
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
+            Across <span style={{ color: '#0F172A', fontWeight: 600 }}>{totals.invoiceCount}</span> invoices
           </div>
         </div>
 
         {/* Cost of Goods Sold */}
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Cost of Goods Sold (COGS)</div>
-          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#E5E7EB', marginTop: '6px' }}>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Cost of Goods Sold (COGS)</div>
+          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#0F172A', marginTop: '6px' }}>
             {formatCurrency(totals.cogs)}
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
             Inventory product baseline cost
           </div>
         </div>
 
         {/* Total Expenses */}
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Operating &amp; Staff Pool</div>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Operating &amp; Staff Pool</div>
           <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#F87171', marginTop: '6px' }}>
             {formatCurrency(totals.expenses)}
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
             Petty: {formatCurrency(totals.pettyCash)} • Comm: {formatCurrency(totals.commission)}
           </div>
         </div>
 
         {/* Net Profit */}
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Net Profit &amp; Margin</div>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Net Profit &amp; Margin</div>
           <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#34D399', marginTop: '6px' }}>
             {formatCurrency(totals.netProfit)}
           </div>
@@ -397,10 +397,10 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
       <div className="ceo-card" style={{ padding: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
           <div>
-            <h3 className="ceo-font-heading" style={{ fontSize: '15px', fontWeight: 700, color: '#E5E7EB', margin: 0 }}>
+            <h3 className="ceo-font-heading" style={{ fontSize: '15px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
               Day-by-Day Historical P&amp;L Statements
             </h3>
-            <p style={{ fontSize: '11px', color: '#8B93A1', margin: '2px 0 0' }}>Itemized accounting ledger for each operational shift</p>
+            <p style={{ fontSize: '11px', color: '#64748B', margin: '2px 0 0' }}>Itemized accounting ledger for each operational shift</p>
           </div>
         </div>
 
@@ -423,13 +423,13 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
             <tbody>
               {filteredRecords.map((rec) => (
                 <tr key={rec.date}>
-                  <td className="ceo-font-mono" style={{ fontWeight: 600, color: '#E5E7EB' }}>{rec.displayDate}</td>
-                  <td style={{ color: '#8B93A1' }}>{rec.dayName}</td>
-                  <td style={{ textAlign: 'right', color: '#E5E7EB' }} className="ceo-font-mono">{formatCurrency(rec.grossSales)}</td>
+                  <td className="ceo-font-mono" style={{ fontWeight: 600, color: '#0F172A' }}>{rec.displayDate}</td>
+                  <td style={{ color: '#64748B' }}>{rec.dayName}</td>
+                  <td style={{ textAlign: 'right', color: '#0F172A' }} className="ceo-font-mono">{formatCurrency(rec.grossSales)}</td>
                   <td style={{ textAlign: 'right', color: '#F87171' }} className="ceo-font-mono">-{formatCurrency(rec.discounts)}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: '#C6A15B' }} className="ceo-font-mono">{formatCurrency(rec.netSales)}</td>
-                  <td style={{ textAlign: 'right', color: '#8B93A1' }} className="ceo-font-mono">{formatCurrency(rec.cogs)}</td>
-                  <td style={{ textAlign: 'right', color: '#E5E7EB' }} className="ceo-font-mono">{formatCurrency(rec.grossProfit)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: '#D97706' }} className="ceo-font-mono">{formatCurrency(rec.netSales)}</td>
+                  <td style={{ textAlign: 'right', color: '#64748B' }} className="ceo-font-mono">{formatCurrency(rec.cogs)}</td>
+                  <td style={{ textAlign: 'right', color: '#0F172A' }} className="ceo-font-mono">{formatCurrency(rec.grossProfit)}</td>
                   <td style={{ textAlign: 'right', color: '#F87171' }} className="ceo-font-mono">-{formatCurrency(rec.expenses)}</td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: '#34D399' }} className="ceo-font-mono">{formatCurrency(rec.netProfit)}</td>
                   <td style={{ textAlign: 'center' }}>
@@ -441,7 +441,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
               ))}
               {filteredRecords.length === 0 && (
                 <tr>
-                  <td colSpan={10} style={{ textAlign: 'center', padding: '32px', color: '#8B93A1' }}>
+                  <td colSpan={10} style={{ textAlign: 'center', padding: '32px', color: '#64748B' }}>
                     {loading ? 'Loading accounting records...' : 'No sales or P&L records found for the selected date range.'}
                   </td>
                 </tr>

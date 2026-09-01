@@ -80,17 +80,17 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
   };
 
   return (
-    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', color: '#E5E7EB' }}>
+    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', color: '#0F172A' }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Truck style={{ width: '22px', height: '22px', color: '#C6A15B' }} />
+            <Truck style={{ width: '22px', height: '22px', color: '#D97706' }} />
             <h1 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 800, margin: 0 }}>
               Branch Orders &amp; Stock Transfers
             </h1>
           </div>
-          <p style={{ fontSize: '12px', color: '#8B93A1', margin: '4px 0 0 0' }}>
+          <p style={{ fontSize: '12px', color: '#64748B', margin: '4px 0 0 0' }}>
             Inter-branch stock requisitions, dispatch manifests, and receipt verification across branches
           </p>
         </div>
@@ -103,9 +103,9 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
             gap: '6px',
             padding: '8px 14px',
             backgroundColor: '#1E232B',
-            border: '1px solid #2A2F38',
+            border: '1px solid #E2E8F0',
             borderRadius: '6px',
-            color: '#E5E7EB',
+            color: '#0F172A',
             fontSize: '12px',
             cursor: 'pointer',
           }}
@@ -116,7 +116,7 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
       </div>
 
       {/* Filter Bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', backgroundColor: '#161B22', border: '1px solid #2A2F38', borderRadius: '8px', padding: '12px 16px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', backgroundColor: '#161B22', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '12px 16px' }}>
         <DatePeriodFilter
           startDate={startDate}
           endDate={endDate}
@@ -135,10 +135,10 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
               style={{
                 width: '100%',
                 padding: '8px 12px 8px 36px',
-                backgroundColor: '#10141B',
-                border: '1px solid #2A2F38',
+                backgroundColor: '#FFFFFF',
+                border: '1px solid #E2E8F0',
                 borderRadius: '6px',
-                color: '#E5E7EB',
+                color: '#0F172A',
                 fontSize: '12px',
                 outline: 'none',
               }}
@@ -150,10 +150,10 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
             onChange={(e) => setStatusFilter(e.target.value)}
             style={{
               padding: '8px 14px',
-              backgroundColor: '#10141B',
-              border: '1px solid #2A2F38',
+              backgroundColor: '#FFFFFF',
+              border: '1px solid #E2E8F0',
               borderRadius: '6px',
-              color: '#E5E7EB',
+              color: '#0F172A',
               fontSize: '12px',
               outline: 'none',
               cursor: 'pointer',
@@ -169,10 +169,10 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
       </div>
 
       {/* Orders Table */}
-      <div style={{ backgroundColor: '#161B22', border: '1px solid #2A2F38', borderRadius: '8px', overflow: 'hidden' }}>
+      <div style={{ backgroundColor: '#161B22', border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
           <thead>
-            <tr style={{ backgroundColor: '#10141B', borderBottom: '1px solid #2A2F38', color: '#8B93A1', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '0.05em' }}>
+            <tr style={{ backgroundColor: '#FFFFFF', borderBottom: '1px solid #E2E8F0', color: '#64748B', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '0.05em' }}>
               <th style={{ padding: '12px 16px' }}>Order #</th>
               <th style={{ padding: '12px 16px' }}>Requested By</th>
               <th style={{ padding: '12px 16px' }}>Target Branch</th>
@@ -184,13 +184,13 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: '#8B93A1' }}>
+                <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: '#64748B' }}>
                   Loading branch orders...
                 </td>
               </tr>
             ) : filteredOrders.length === 0 ? (
               <tr>
-                <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: '#8B93A1' }}>
+                <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: '#64748B' }}>
                   No branch orders found.
                 </td>
               </tr>
@@ -204,24 +204,24 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
 
                 return (
                   <tr key={o.id} style={{ borderBottom: '1px solid #1E232B' }}>
-                    <td style={{ padding: '12px 16px', fontWeight: 700, color: '#C6A15B', fontFamily: 'JetBrains Mono, monospace' }}>
+                    <td style={{ padding: '12px 16px', fontWeight: 700, color: '#D97706', fontFamily: 'JetBrains Mono, monospace' }}>
                       {o.order_no}
                     </td>
-                    <td style={{ padding: '12px 16px', color: '#E5E7EB', fontWeight: 600 }}>
+                    <td style={{ padding: '12px 16px', color: '#0F172A', fontWeight: 600 }}>
                       {o.from_tenant?.name || 'Originating Branch'}
-                      {o.from_counter ? <span style={{ fontSize: '10px', color: '#8B93A1', display: 'block' }}>Counter: {o.from_counter}</span> : null}
+                      {o.from_counter ? <span style={{ fontSize: '10px', color: '#64748B', display: 'block' }}>Counter: {o.from_counter}</span> : null}
                     </td>
                     <td style={{ padding: '12px 16px', color: '#9CA3AF' }}>
                       {o.to_tenant?.name || 'Fulfilling Godown'}
-                      {o.target_counter ? <span style={{ fontSize: '10px', color: '#8B93A1', display: 'block' }}>Target: {o.target_counter}</span> : null}
+                      {o.target_counter ? <span style={{ fontSize: '10px', color: '#64748B', display: 'block' }}>Target: {o.target_counter}</span> : null}
                     </td>
                     <td style={{ padding: '12px 16px', color: '#D1D5DB' }}>
                       <div style={{ fontWeight: 600 }}>{itemsCount} units total</div>
-                      <div style={{ fontSize: '11px', color: '#8B93A1', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div style={{ fontSize: '11px', color: '#64748B', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {itemListStr || 'No items listed'}
                       </div>
                     </td>
-                    <td style={{ padding: '12px 16px', color: '#8B93A1', fontFamily: 'JetBrains Mono, monospace', fontSize: '11px', whiteSpace: 'nowrap' }}>
+                    <td style={{ padding: '12px 16px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', fontSize: '11px', whiteSpace: 'nowrap' }}>
                       {o.created_at ? new Date(o.created_at).toLocaleDateString() : '—'}
                     </td>
                     <td style={{ padding: '12px 16px', textAlign: 'center' }}>

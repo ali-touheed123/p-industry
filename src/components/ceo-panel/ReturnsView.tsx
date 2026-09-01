@@ -135,17 +135,17 @@ export const ReturnsView: React.FC<ReturnsViewProps> = ({ branch }) => {
   return (
     <div id="executive-returns-view" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #2A2F38', paddingBottom: '16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '16px' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <h2 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 700, color: '#E5E7EB', margin: 0 }}>
+            <h2 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
               Returns &amp; Tinting Error Audits
             </h2>
-            <span className="ceo-font-mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '9999px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', color: '#8B93A1' }}>
+            <span className="ceo-font-mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '9999px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', color: '#64748B' }}>
               {stats.returnIncidents} Incidents
             </span>
           </div>
-          <p style={{ fontSize: '12px', color: '#8B93A1', margin: '4px 0 0' }}>
+          <p style={{ fontSize: '12px', color: '#64748B', margin: '4px 0 0' }}>
             {branch.name} • Tinting discrepancies, construction overages &amp; damaged stock return audits
           </p>
         </div>
@@ -154,48 +154,48 @@ export const ReturnsView: React.FC<ReturnsViewProps> = ({ branch }) => {
       {/* 4 Stat Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Total Return Value</div>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Total Return Value</div>
           <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#F87171', marginTop: '6px' }}>
             {formatCurrency(stats.totalRefundValue)}
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
             Credit notes &amp; refunds
           </div>
         </div>
 
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Returned Units</div>
-          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#E5E7EB', marginTop: '6px' }}>
-            {stats.totalUnits} <span style={{ fontSize: '12px', color: '#8B93A1', fontWeight: 400 }}>containers</span>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Returned Units</div>
+          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#0F172A', marginTop: '6px' }}>
+            {stats.totalUnits} <span style={{ fontSize: '12px', color: '#64748B', fontWeight: 400 }}>containers</span>
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
             Across {stats.returnIncidents} vouchers
           </div>
         </div>
 
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Restocked into Inventory</div>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Restocked into Inventory</div>
           <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#34D399', marginTop: '6px' }}>
             {stats.restockedCount} Vouchers
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
             Reusable warehouse stock
           </div>
         </div>
 
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#8B93A1' }}>Damaged / Write-Off</div>
-          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#E5E7EB', marginTop: '6px' }}>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Damaged / Write-Off</div>
+          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#0F172A', marginTop: '6px' }}>
             {stats.damagedCount} Vouchers
           </div>
-          <div style={{ fontSize: '11px', color: '#8B93A1', marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
             Non-recoverable shade errors
           </div>
         </div>
       </div>
 
       {/* Filter toolbar */}
-      <div style={{ padding: '12px 16px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+      <div style={{ padding: '12px 16px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
         {/* Date Period Filter */}
         <DatePeriodFilter
           startDate={startDate}
@@ -206,14 +206,14 @@ export const ReturnsView: React.FC<ReturnsViewProps> = ({ branch }) => {
 
         {/* Right Controls: Search + Reason Filter */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#12151B', border: '1px solid #2A2F38', borderRadius: '6px', padding: '6px 12px', minWidth: '240px' }}>
-            <Search style={{ width: '14px', height: '14px', color: '#8B93A1' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '6px', padding: '6px 12px', minWidth: '240px' }}>
+            <Search style={{ width: '14px', height: '14px', color: '#64748B' }} />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search return #, original invoice..."
-              style={{ background: 'none', border: 'none', color: '#E5E7EB', fontSize: '12px', outline: 'none', width: '100%' }}
+              style={{ background: 'none', border: 'none', color: '#0F172A', fontSize: '12px', outline: 'none', width: '100%' }}
             />
           </div>
 
@@ -221,7 +221,7 @@ export const ReturnsView: React.FC<ReturnsViewProps> = ({ branch }) => {
             <select
               value={reasonFilter}
               onChange={(e) => setReasonFilter(e.target.value)}
-              style={{ backgroundColor: '#12151B', border: '1px solid #2A2F38', color: '#E5E7EB', fontSize: '12px', borderRadius: '6px', padding: '6px 10px', outline: 'none', cursor: 'pointer' }}
+              style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', color: '#0F172A', fontSize: '12px', borderRadius: '6px', padding: '6px 10px', outline: 'none', cursor: 'pointer' }}
             >
               <option value="All Reasons">All Return Reasons</option>
               <option value="Customer Return / Shade Adjustment">Customer Return / Shade Adjustment</option>
@@ -253,10 +253,10 @@ export const ReturnsView: React.FC<ReturnsViewProps> = ({ branch }) => {
             {filteredReturns.map((ret) => (
               <tr key={ret.id} onClick={() => setSelectedReturn(ret)} style={{ cursor: 'pointer' }}>
                 <td className="ceo-font-mono" style={{ fontWeight: 700, color: '#F87171' }}>{ret.returnNumber}</td>
-                <td className="ceo-font-mono" style={{ color: '#8B93A1' }}>{ret.originalInvoiceNo}</td>
-                <td style={{ fontWeight: 600, color: '#E5E7EB' }}>{ret.customerName}</td>
+                <td className="ceo-font-mono" style={{ color: '#64748B' }}>{ret.originalInvoiceNo}</td>
+                <td style={{ fontWeight: 600, color: '#0F172A' }}>{ret.customerName}</td>
                 <td style={{ color: '#F87171' }}>{ret.reason}</td>
-                <td style={{ color: '#8B93A1' }}>{ret.refundMode}</td>
+                <td style={{ color: '#64748B' }}>{ret.refundMode}</td>
                 <td>
                   <span style={{
                     fontSize: '10px',
@@ -271,7 +271,7 @@ export const ReturnsView: React.FC<ReturnsViewProps> = ({ branch }) => {
                 </td>
                 <td style={{ textAlign: 'right', fontWeight: 700, color: '#F87171' }} className="ceo-font-mono">{formatCurrency(ret.totalAmount)}</td>
                 <td style={{ textAlign: 'center' }}>
-                  <span style={{ fontSize: '11px', color: '#C6A15B', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                  <span style={{ fontSize: '11px', color: '#D97706', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
                     Inspect <ChevronRight style={{ width: '12px', height: '12px' }} />
                   </span>
                 </td>
@@ -279,7 +279,7 @@ export const ReturnsView: React.FC<ReturnsViewProps> = ({ branch }) => {
             ))}
             {filteredReturns.length === 0 && (
               <tr>
-                <td colSpan={8} style={{ textAlign: 'center', padding: '32px', color: '#8B93A1' }}>
+                <td colSpan={8} style={{ textAlign: 'center', padding: '32px', color: '#64748B' }}>
                   {loading ? 'Loading returns records...' : 'No return vouchers recorded for this branch.'}
                 </td>
               </tr>
