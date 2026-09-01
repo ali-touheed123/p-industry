@@ -38,6 +38,8 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
       const ownerName = tenant.owner_name || 'Executive Lead';
 
       try {
+        const todayIso = new Date().toISOString().split('T')[0];
+
         // Fetch all active branches/godowns from database
         const res = await fetch('/api/tenants');
         const data = await res.json();
@@ -53,27 +55,77 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
 
           const finalTenants = matchingTenants.length > 0 ? matchingTenants : data.tenants;
 
-          const mappedBranches: Branch[] = finalTenants.map((t: any, idx: number) => ({
-            id: t.id,
-            name: t.name,
-            shortName: t.name.split('—')[0].trim(),
-            city: t.city || city,
-            region: `${t.city || city} • ${t.type?.toUpperCase() || 'BRANCH'}`,
-            code: `PK-${(idx + 1).toString().padStart(2, '0')}`,
-            address: t.address || 'Commercial Market Area',
-            manager: t.owner_name || ownerName,
-            activeRegisters: t.staffCount || 1,
-            todaySales: 0,
-            monthlySales: 0,
-            totalReceivables: 0,
-            healthStatus: t.is_active ? 'Optimal' : 'Attention',
-            inventoryValue: 0,
-            slug: t.slug,
-          }));
+          // Concurrently fetch invoices & client receivables for all sister branches
+          const branchesWithKpis: Branch[] = await Promise.all(
+            finalTenants.map(async (t: any, idx: number) => {
+              let todaySales = 0;
+              let monthlySales = 0;
+              let totalReceivables = 0;
 
-          setBranches(mappedBranches);
-          const currentMatch = mappedBranches.find((b) => b.id === tenant.id || b.slug === tenant.slug);
-          setSelectedBranch(currentMatch || mappedBranches[0]);
+              try {
+                const [invRes, clientsRes] = await Promise.all([
+                  fetch(`/api/invoices?tenant_id=${t.id}`),
+                  fetch(`/api/clients?tenant_id=${t.id}`),
+                ]);
+                const [invData, clientsData] = await Promise.all([invRes.json(), clientsRes.json()]);
+
+                if (invData.success && Array.isArray(invData.invoices)) {
+                  invData.invoices.forEach((inv: any) => {
+                    const st = (inv.status || '').toLowerCase();
+                    const isRet = (inv.invoice_type || '').toLowerCase() === 'return' || st === 'return';
+                    const invDate = inv.date || (inv.created_at ? inv.created_at.split('T')[0] : '');
+                    const amount = Number(inv.net_total || 0);
+
+                    if (!isRet) {
+                      if (invDate === todayIso) {
+                        todaySales += amount;
+                      }
+                      if (invDate && invDate.substring(0, 7) === todayIso.substring(0, 7)) {
+                        monthlySales += amount;
+                      }
+                    }
+                  });
+                }
+
+                if (clientsData.success && Array.isArray(clientsData.clients)) {
+                  clientsData.clients.forEach((c: any) => {
+                    const bal = Number(c.current_balance || c.balance || 0);
+                    if (bal > 0) totalReceivables += bal;
+                  });
+                }
+              } catch (e) {
+                console.error(`Failed to load KPIs for branch ${t.id}:`, e);
+              }
+
+              return {
+                id: t.id,
+                name: t.name,
+                shortName: t.name.split('—')[0].trim(),
+                city: t.city || city,
+                region: `${t.city || city} • ${t.type?.toUpperCase() || 'BRANCH'}`,
+                code: `PK-${(idx + 1).toString().padStart(2, '0')}`,
+                address: t.address || 'Commercial Market Area',
+                manager: t.owner_name || ownerName,
+                activeRegisters: t.staffCount || 1,
+                todaySales,
+                monthlySales,
+                totalReceivables,
+                healthStatus: t.is_active ? 'Optimal' : 'Attention',
+                inventoryValue: 0,
+                slug: t.slug,
+              };
+            })
+          );
+
+          setBranches(branchesWithKpis);
+
+          // If only 1 branch exists -> open directly!
+          // If multiple branches exist -> show the Hub Selector page first!
+          if (branchesWithKpis.length === 1) {
+            setSelectedBranch(branchesWithKpis[0]);
+          } else {
+            setSelectedBranch(null);
+          }
           return;
         }
       } catch (err) {
@@ -192,6 +244,7 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
           branch={selectedBranch}
           branches={branches}
           onSwitchBranch={setSelectedBranch}
+          onBackToHub={() => setSelectedBranch(null)}
           onLogout={onLogout}
           onOpenMobileMenu={() => setIsMobileSidebarOpen(true)}
         />

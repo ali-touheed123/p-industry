@@ -8,6 +8,7 @@ interface ExecutiveHeaderProps {
   branch: Branch;
   branches: Branch[];
   onSwitchBranch: (branch: Branch) => void;
+  onBackToHub?: () => void;
   onLogout?: () => void;
   onOpenMobileMenu?: () => void;
 }
@@ -16,6 +17,7 @@ export const ExecutiveHeader: React.FC<ExecutiveHeaderProps> = ({
   branch,
   branches,
   onSwitchBranch,
+  onBackToHub,
   onLogout,
   onOpenMobileMenu,
 }) => {
@@ -118,30 +120,53 @@ export const ExecutiveHeader: React.FC<ExecutiveHeaderProps> = ({
 
         {/* Branch Switcher (only if multi-branch) */}
         {branches.length > 1 && (
-          <select
-            value={branch.id}
-            onChange={(e) => {
-              const found = branches.find((b) => b.id === e.target.value);
-              if (found) onSwitchBranch(found);
-            }}
-            style={{
-              backgroundColor: '#1C2128',
-              border: '1px solid #2A2F38',
-              color: '#E5E7EB',
-              fontSize: '12px',
-              borderRadius: '6px',
-              padding: '6px 10px',
-              outline: 'none',
-              cursor: 'pointer',
-              flexShrink: 0,
-            }}
-          >
-            {branches.map((b) => (
-              <option key={b.id} value={b.id} style={{ backgroundColor: '#1C2128' }}>
-                Branch: {b.shortName || b.name}
-              </option>
-            ))}
-          </select>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+            {onBackToHub && (
+              <button
+                type="button"
+                onClick={onBackToHub}
+                style={{
+                  backgroundColor: '#1C2128',
+                  border: '1px solid #2A2F38',
+                  color: '#C6A15B',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  borderRadius: '6px',
+                  padding: '6px 10px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+                title="Return to Multi-Branch Overview Hub"
+              >
+                ← All Branches
+              </button>
+            )}
+            <select
+              value={branch.id}
+              onChange={(e) => {
+                const found = branches.find((b) => b.id === e.target.value);
+                if (found) onSwitchBranch(found);
+              }}
+              style={{
+                backgroundColor: '#1C2128',
+                border: '1px solid #2A2F38',
+                color: '#E5E7EB',
+                fontSize: '12px',
+                borderRadius: '6px',
+                padding: '6px 10px',
+                outline: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              {branches.map((b) => (
+                <option key={b.id} value={b.id} style={{ backgroundColor: '#1C2128' }}>
+                  Branch: {b.shortName || b.name}
+                </option>
+              ))}
+            </select>
+          </div>
         )}
       </div>
 

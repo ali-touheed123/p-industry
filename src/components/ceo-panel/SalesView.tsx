@@ -111,9 +111,15 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
   }, [invoices, paymentFilter, searchQuery, startDate, endDate]);
 
   const stats = useMemo(() => {
-    // Exclude return invoices from financial summaries — only forward sales count
-    const forwardSales = filteredInvoices.filter((inv) => inv.status === 'Completed');
-    const returnInvoices = filteredInvoices.filter((inv) => inv.status === 'Returned' || inv.status === 'Partial Return');
+    // Exclude return invoices from financial summaries — all non-return sales count as forward sales
+    const forwardSales = filteredInvoices.filter((inv) => {
+      const st = (inv.status || '').toLowerCase();
+      return st !== 'return' && st !== 'returned' && st !== 'cancelled' && st !== 'void';
+    });
+    const returnInvoices = filteredInvoices.filter((inv) => {
+      const st = (inv.status || '').toLowerCase();
+      return st === 'return' || st === 'returned' || st === 'partial return';
+    });
 
     const netSales = forwardSales.reduce((acc, inv) => acc + inv.netAmount, 0);
     const cashInflow = forwardSales
@@ -123,7 +129,7 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
       .filter((inv) => inv.paymentMode === 'Credit')
       .reduce((acc, inv) => acc + inv.netAmount, 0);
     const totalUnits = forwardSales.reduce(
-      (acc, inv) => acc + inv.items.reduce((s, it) => s + it.qty, 0),
+      (acc, inv) => acc + (inv.items && inv.items.length > 0 ? inv.items.reduce((s, it) => s + (Number(it.qty) || 1), 0) : (inv.itemsCount || 1)),
       0
     );
     const totalReturnsValue = returnInvoices.reduce((acc, inv) => acc + inv.netAmount, 0);
