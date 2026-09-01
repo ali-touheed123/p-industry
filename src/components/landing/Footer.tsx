@@ -36,6 +36,27 @@ export const Footer: React.FC<FooterProps> = ({ onOpenDemo, onNavigate }) => {
             <div className="pt-2 text-xs text-slate-500 font-mono">
               Designed specifically for paint retail, trade counters, and wholesale distributors.
             </div>
+
+            {/* Direct Phone & WhatsApp Support */}
+            <div className="pt-3 flex flex-wrap gap-2.5">
+              <a
+                href="https://wa.me/923063918529"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200/80 text-emerald-800 text-xs font-semibold transition-colors group"
+              >
+                <MessageSquare className="w-3.5 h-3.5 text-emerald-600 group-hover:scale-110 transition-transform" />
+                <span>WhatsApp: 0306-3918529</span>
+              </a>
+
+              <a
+                href="tel:+923063918529"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold transition-colors group"
+              >
+                <Phone className="w-3.5 h-3.5 text-slate-500 group-hover:scale-110 transition-transform" />
+                <span>+92 306 3918529</span>
+              </a>
+            </div>
           </div>
 
           {/* Dedicated Products */}

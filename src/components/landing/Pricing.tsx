@@ -4,7 +4,7 @@ import { Check, X, ArrowRight, ShieldCheck, Plus, Minus, Building2, HelpCircle, 
 import { PRICING_PLANS } from './data/posData';
 
 interface PricingProps {
-  onSelectPlan: (planId: string) => void;
+  onSelectPlan?: (planId: string) => void;
 }
 
 export const Pricing: React.FC<PricingProps> = ({ onSelectPlan }) => {
@@ -97,39 +97,42 @@ export const Pricing: React.FC<PricingProps> = ({ onSelectPlan }) => {
                     {/* Interactive Branch Counter for Full Plan */}
                     {isFullPlan && (
                       <div className="mt-4 p-3 rounded-xl bg-slate-950 border border-slate-800">
-                        <div className="flex items-center justify-between text-xs text-slate-300 mb-2">
+                        <div className="flex items-center justify-between text-xs text-slate-300">
                           <span className="font-semibold">Branches / Outlets:</span>
-                          <span className="font-mono font-bold text-blue-400">{extraBranches} {extraBranches === 1 ? 'Location' : 'Locations'}</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setExtraBranches(Math.max(1, extraBranches - 1))}
+                              disabled={extraBranches <= 1}
+                              className={`w-7 h-7 rounded-lg bg-slate-800 text-white flex items-center justify-center transition-colors ${
+                                extraBranches <= 1
+                                  ? 'opacity-40 cursor-not-allowed'
+                                  : 'hover:bg-slate-700 hover:text-white cursor-pointer active:scale-95'
+                              }`}
+                              aria-label="Decrease branch count"
+                            >
+                              <Minus className="w-3.5 h-3.5" />
+                            </button>
+
+                            <span className="font-mono font-bold text-sm text-blue-400 min-w-[28px] text-center">
+                              {extraBranches}
+                            </span>
+
+                            <button
+                              type="button"
+                              onClick={() => setExtraBranches(extraBranches + 1)}
+                              className="w-7 h-7 rounded-lg bg-slate-800 text-white flex items-center justify-center transition-colors hover:bg-slate-700 hover:text-white cursor-pointer active:scale-95"
+                              aria-label="Increase branch count"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setExtraBranches(Math.max(1, extraBranches - 1))}
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white cursor-pointer transition-colors"
-                            aria-label="Decrease branch count"
-                          >
-                            <Minus className="w-3.5 h-3.5" />
-                          </button>
-                          <input
-                            type="range"
-                            min="1"
-                            max="10"
-                            value={extraBranches}
-                            onChange={(e) => setExtraBranches(parseInt(e.target.value, 10))}
-                            className="w-full accent-blue-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setExtraBranches(Math.min(10, extraBranches + 1))}
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white cursor-pointer transition-colors"
-                            aria-label="Increase branch count"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+
                         {extraBranches > 1 && (
-                          <div className="text-[10px] text-slate-400 mt-1.5 font-mono">
-                            Base Rs. 19,999 + {extraBranches - 1} extra branch × Rs. 2,999
+                          <div className="text-[10px] text-slate-400 mt-2 pt-2 border-t border-slate-800/80 font-mono flex items-center justify-between">
+                            <span>Base Rs. 19,999 + {extraBranches - 1} extra</span>
+                            <span className="text-blue-300 font-semibold">+Rs. {((extraBranches - 1) * branchAddonPrice).toLocaleString()}/mo</span>
                           </div>
                         )}
                       </div>
@@ -161,7 +164,7 @@ export const Pricing: React.FC<PricingProps> = ({ onSelectPlan }) => {
                 {/* Card CTA Button */}
                 <div>
                   <button
-                    onClick={() => onSelectPlan(plan.id)}
+                    onClick={() => onSelectPlan?.(plan.id)}
                     className={`w-full py-3.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98 ${
                       isRec
                         ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-xs'
@@ -293,23 +296,6 @@ export const Pricing: React.FC<PricingProps> = ({ onSelectPlan }) => {
         <div className="mt-12 text-center text-xs text-slate-600 max-w-xl mx-auto flex items-center justify-center gap-2">
           <HelpCircle className="w-4 h-4 text-blue-600 shrink-0" />
           <span>Have custom tinting machines, barcode printers, or multi-city depots? Contact our team for a tailored quote.</span>
-        </div>
-
-        {/* WhatsApp CTA */}
-        <div className="mt-8 flex flex-col items-center gap-3">
-          <a
-            href="https://wa.me/923063918529?text=Hi%2C%20I%20want%20to%20know%20more%20about%20Pyntflow%20for%20my%20paint%20shop."
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-3 px-6 py-3.5 rounded-2xl bg-[#25D366] hover:bg-[#1ebe5d] text-white text-sm font-bold shadow-lg hover:shadow-xl transition-all duration-200 active:scale-95"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
-              <path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.554 4.118 1.528 5.845L.057 23.885a.5.5 0 00.606.606l6.04-1.471A11.943 11.943 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.88 0-3.647-.49-5.18-1.348l-.372-.214-3.857.94.958-3.752-.234-.385A9.944 9.944 0 012 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/>
-            </svg>
-            WhatsApp Us — +92 306 3918529
-          </a>
-          <p className="text-[11px] text-slate-500">Mon–Sat, 9am–9pm PKT · Usually replies within minutes</p>
         </div>
 
       </div>

@@ -118,7 +118,7 @@ export const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, initialPl
                   <input
                     type="tel"
                     required
-                    placeholder="e.g. +92 300 1234567"
+                    placeholder="e.g. 0306 3918529"
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                     className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 placeholder:text-slate-400 transition-all font-mono shadow-2xs"
@@ -136,8 +136,8 @@ export const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, initialPl
                     onChange={(e) => setFormData({ ...formData, selectedPlan: e.target.value })}
                     className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-blue-600 transition-all shadow-2xs"
                   >
-                    <option value="pos-only">POS Only (Rs. 19,999/mo)</option>
-                    <option value="full-pos-ceo">Full POS + CEO (Rs. 29,999/mo base)</option>
+                    <option value="pos-only">POS Only (Rs. 14,999/mo)</option>
+                    <option value="full-pos-ceo">Full POS + CEO (Rs. 19,999/mo base)</option>
                     <option value="customized">Customized (Quoted per feature)</option>
                   </select>
                 </div>
@@ -219,7 +219,7 @@ export const DemoModal: React.FC<DemoModalProps> = ({ isOpen, onClose, initialPl
               <div className="flex justify-between">
                 <span className="text-slate-500">Selected Tier:</span>
                 <span className="font-bold text-blue-700">
-                  {formData.selectedPlan === 'pos-only' ? 'POS Only (Rs. 19,999/mo)' : formData.selectedPlan === 'customized' ? 'Customized Plan' : 'Full POS + CEO (Rs. 29,999/mo)'}
+                  {formData.selectedPlan === 'pos-only' ? 'POS Only (Rs. 14,999/mo)' : formData.selectedPlan === 'customized' ? 'Customized Plan' : 'Full POS + CEO (Rs. 19,999/mo)'}
                 </span>
               </div>
               <div className="flex justify-between">

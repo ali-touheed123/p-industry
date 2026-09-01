@@ -61,7 +61,7 @@ export const ContactUs: React.FC<ContactUsProps> = ({ onOpenDemo }) => {
 
               <div className="space-y-4">
                 <a
-                  href="tel:+920000000000"
+                  href="tel:+923063918529"
                   className="flex items-start gap-4 p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 hover:border-slate-300 hover:bg-slate-100/60 transition-colors group"
                 >
                   <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-700 shrink-0 group-hover:scale-105 transition-transform">
@@ -69,13 +69,13 @@ export const ContactUs: React.FC<ContactUsProps> = ({ onOpenDemo }) => {
                   </div>
                   <div>
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Direct Phone Line</span>
-                    <span className="text-sm font-bold text-slate-900 font-mono">+92 (000) 000-0000</span>
+                    <span className="text-sm font-bold text-slate-900 font-mono">+92 306 3918529</span>
                     <span className="text-xs text-slate-500 block mt-0.5">Mon–Sat, 9:00 AM – 9:00 PM</span>
                   </div>
                 </a>
 
                 <a
-                  href="https://wa.me/920000000000"
+                  href="https://wa.me/923063918529"
                   target="_blank"
                   rel="noreferrer"
                   className="flex items-start gap-4 p-3.5 rounded-xl bg-emerald-50/50 border border-emerald-200/80 hover:border-emerald-300 hover:bg-emerald-50 transition-colors group"
@@ -88,7 +88,7 @@ export const ContactUs: React.FC<ContactUsProps> = ({ onOpenDemo }) => {
                       <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider block">WhatsApp Desk</span>
                       <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-200 text-emerald-900 rounded-full">Instant</span>
                     </div>
-                    <span className="text-sm font-bold text-slate-900 font-mono">+92 (000) 000-0000</span>
+                    <span className="text-sm font-bold text-slate-900 font-mono">+92 306 3918529</span>
                     <span className="text-xs text-emerald-700 block mt-0.5">Quick demos, audio notes & quote PDFs</span>
                   </div>
                 </a>
@@ -206,7 +206,7 @@ export const ContactUs: React.FC<ContactUsProps> = ({ onOpenDemo }) => {
                       <input
                         type="tel"
                         required
-                        placeholder="e.g. +92 300 1234567"
+                        placeholder="e.g. 0306 3918529"
                         value={formData.phone}
                         onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                         className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 placeholder:text-slate-400 font-mono transition-all shadow-2xs"

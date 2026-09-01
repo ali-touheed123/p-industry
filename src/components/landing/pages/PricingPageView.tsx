@@ -76,7 +76,7 @@ export const PricingPageView: React.FC<PricingPageViewProps> = ({ onNavigate, on
         <Breadcrumb items={[{ name: 'Pricing', url: '/pricing' }]} onNavigate={onNavigate} />
 
         {/* Pricing Component */}
-        <Pricing onSelectPlan={() => {}} />
+        <Pricing onSelectPlan={() => onOpenDemo()} />
 
         {/* Commercial FAQ */}
         <div className="bg-white p-8 sm:p-10 rounded-3xl border border-slate-200/90 shadow-sm mt-12 space-y-6">

@@ -11,20 +11,46 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({ onOpenDemo, onNavigate, currentPath }) => {
   const [isScrolled, setIsScrolled] = useState(false);
+  const [isVisible, setIsVisible] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [productDropdownOpen, setProductDropdownOpen] = useState(false);
+  const [featuresDropdownOpen, setFeaturesDropdownOpen] = useState(false);
 
   useEffect(() => {
+    let lastScrollY = window.scrollY;
+
     const handleScroll = () => {
-      setIsScrolled(window.scrollY > 20);
+      const currentScrollY = window.scrollY;
+      setIsScrolled(currentScrollY > 20);
+
+      // Keep navbar visible if mobile drawer is currently open
+      if (mobileMenuOpen) {
+        setIsVisible(true);
+        lastScrollY = currentScrollY;
+        return;
+      }
+
+      // If near the very top, always show navbar
+      if (currentScrollY < 15) {
+        setIsVisible(true);
+      } else if (currentScrollY > lastScrollY && currentScrollY > 60) {
+        // Scrolling down -> hide navbar
+        setIsVisible(false);
+        setFeaturesDropdownOpen(false);
+      } else if (currentScrollY < lastScrollY) {
+        // Scrolling back up -> show navbar
+        setIsVisible(true);
+      }
+
+      lastScrollY = currentScrollY > 0 ? currentScrollY : 0;
     };
+
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+  }, [mobileMenuOpen]);
 
   const handleLinkClick = (href: string) => {
     setMobileMenuOpen(false);
-    setProductDropdownOpen(false);
+    setFeaturesDropdownOpen(false);
 
     if (href.startsWith('/')) {
       onNavigate(href);
@@ -40,21 +66,24 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenDemo, onNavigate, currentP
     }
   };
 
-  const productLinks = [
-    { title: 'Paint Shop POS Software', path: '/paint-shop-pos', desc: 'Fast counter billing & hotkey checkout' },
-    { title: 'Paint Store Management', path: '/paint-store-management-software', desc: 'All-in-one inventory & store ops' },
-    { title: 'Paint Shop Billing Software', path: '/paint-shop-billing-software', desc: 'Receipts, discounts & split tender' },
-    { title: 'Paint Inventory Software', path: '/paint-inventory-management-software', desc: 'Multi-vault godown & batch control' },
-    { title: 'Software for Paint Dealers', path: '/paint-dealer-software', desc: 'Multi-counter wholesale & vendor ledgers' },
-    { title: 'POS Software in Pakistan', path: '/pos-software-pakistan', desc: 'Udhaar khata, daraz hisab & local workflows' },
+  const featureLinks = [
+    { title: 'POS Billing Register', path: '/features/pos', desc: 'F2-F9 counter keys, tint lookup & hold cart' },
+    { title: 'Multi-Vault Inventory', path: '/features/inventory', desc: 'Godown stock, gallon & drum pack multipliers' },
+    { title: 'Sales & Contractor Khata', path: '/features/sales', desc: 'Customer ledgers, credit limits & invoices' },
+    { title: 'Sales Returns & Credits', path: '/features/sales-returns', desc: 'Return against bill & automated credit notes' },
+    { title: 'Purchases & Procurement', path: '/features/purchases', desc: 'Supplier bills, landed freight & khata' },
+    { title: 'Purchase Returns (Debit Notes)', path: '/features/purchase-returns', desc: 'Supplier returns & instant debit notes' },
+    { title: 'Shift & Margin Reports', path: '/features/reports', desc: 'Daily daraz hisab & itemized profit margins' },
   ];
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 px-4 sm:px-8 pt-3 pb-2 transition-all duration-300">
-      <motion.div
-        initial={{ y: -16, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.4, ease: 'easeOut' }}
+    <motion.header
+      initial={{ y: 0 }}
+      animate={{ y: isVisible ? 0 : -96 }}
+      transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+      className="fixed top-0 left-0 right-0 z-50 px-4 sm:px-8 pt-3 pb-2"
+    >
+      <div
         className={`max-w-7xl mx-auto rounded-2xl transition-all duration-300 ${
           isScrolled
             ? 'bg-white/95 backdrop-blur-md shadow-sm border border-slate-200/90 py-2.5 px-5 sm:px-6'
@@ -74,30 +103,30 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenDemo, onNavigate, currentP
 
           {/* Desktop Navigation Links */}
           <nav className="hidden lg:flex items-center gap-5 xl:gap-7 text-sm font-medium text-slate-600">
-            {/* Products Dropdown */}
+            {/* Features Dropdown */}
             <div 
               className="relative"
-              onMouseEnter={() => setProductDropdownOpen(true)}
-              onMouseLeave={() => setProductDropdownOpen(false)}
+              onMouseEnter={() => setFeaturesDropdownOpen(true)}
+              onMouseLeave={() => setFeaturesDropdownOpen(false)}
             >
               <button
                 className="flex items-center gap-1 hover:text-slate-900 transition-colors py-1 cursor-pointer"
-                onClick={() => setProductDropdownOpen(!productDropdownOpen)}
+                onClick={() => setFeaturesDropdownOpen(!featuresDropdownOpen)}
               >
-                <span>Products</span>
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${productDropdownOpen ? 'rotate-180 text-[#FF6B00]' : ''}`} />
+                <span>Features</span>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${featuresDropdownOpen ? 'rotate-180 text-[#FF6B00]' : ''}`} />
               </button>
 
               <AnimatePresence>
-                {productDropdownOpen && (
+                {featuresDropdownOpen && (
                   <motion.div
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 8 }}
                     transition={{ duration: 0.15 }}
-                    className="absolute top-full left-0 w-80 bg-white rounded-2xl border border-slate-200/90 shadow-xl p-3 grid gap-1.5 z-50 mt-1"
+                    className="absolute top-full left-0 w-88 bg-white rounded-2xl border border-slate-200/90 shadow-xl p-3 grid gap-1 z-50 mt-1"
                   >
-                    {productLinks.map((item) => (
+                    {featureLinks.map((item) => (
                       <button
                         key={item.path}
                         onClick={() => handleLinkClick(item.path)}
@@ -111,17 +140,20 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenDemo, onNavigate, currentP
                         </div>
                       </button>
                     ))}
+
+                    <div className="pt-2 mt-1 border-t border-slate-100">
+                      <button
+                        onClick={() => handleLinkClick('/features')}
+                        className="w-full p-2 text-center text-xs font-bold text-[#FF6B00] hover:bg-orange-50/80 rounded-lg transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <span>Explore All 7 Modules</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
             </div>
-
-            <button
-              onClick={() => handleLinkClick('/features')}
-              className="hover:text-slate-900 transition-colors cursor-pointer"
-            >
-              Features
-            </button>
 
             <button
               onClick={() => handleLinkClick('/pricing')}
@@ -209,9 +241,9 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenDemo, onNavigate, currentP
               className="lg:hidden pt-3 pb-2 border-t border-slate-200 mt-3 flex flex-col gap-1 max-h-[80vh] overflow-y-auto"
             >
               <div className="px-3 py-1.5 text-xs font-bold text-slate-400 uppercase font-mono">
-                Products & Solutions
+                Features & Modules
               </div>
-              {productLinks.map((item) => (
+              {featureLinks.map((item) => (
                 <button
                   key={item.path}
                   onClick={() => handleLinkClick(item.path)}
@@ -221,15 +253,16 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenDemo, onNavigate, currentP
                 </button>
               ))}
 
+              <button
+                onClick={() => handleLinkClick('/features')}
+                className="px-3 py-1.5 text-xs font-bold text-[#FF6B00] hover:underline text-left"
+              >
+                View All Features Hub →
+              </button>
+
               <div className="px-3 py-1.5 text-xs font-bold text-slate-400 uppercase font-mono mt-2">
                 Pages & Guides
               </div>
-              <button
-                onClick={() => handleLinkClick('/features')}
-                className="px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 rounded-lg text-left"
-              >
-                Features Overview
-              </button>
               <button
                 onClick={() => handleLinkClick('/pricing')}
                 className="px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 rounded-lg text-left"
@@ -284,7 +317,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenDemo, onNavigate, currentP
             </motion.div>
           )}
         </AnimatePresence>
-      </motion.div>
-    </header>
+      </div>
+    </motion.header>
   );
 };

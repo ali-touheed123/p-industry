@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="pynt-grad-main" x1="15%" y1="10%" x2="85%" y2="90%">
+      <stop offset="0%" stop-color="#0080FF" />
+      <stop offset="30%" stop-color="#0066FE" />
+      <stop offset="65%" stop-color="#4F46E5" />
+      <stop offset="85%" stop-color="#8B24D2" />
+      <stop offset="100%" stop-color="#C026D3" />
+    </linearGradient>
+    <linearGradient id="pynt-grad-accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="50%" stop-color="#0080FF" />
+      <stop offset="100%" stop-color="#6366F1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Transparent Background with Glowing Gradient Fluid 'P' Mark -->
+  <path 
+    d="M168 84 C168 66.3269 182.327 52 200 52 H304 C381.32 52 444 114.68 444 192 C444 269.32 381.32 332 304 332 H236 V428 C236 445.673 221.673 460 204 460 C184.118 460 168 443.882 168 424 V84 Z" 
+    fill="url(#pynt-grad-main)" 
+  />
+  
+  <path 
+    d="M236 124 H300 C337.555 124 368 154.445 368 192 C368 229.555 337.555 260 300 260 H236 V124 Z" 
+    fill="#FFFFFF" 
+  />
+  
+  <path 
+    d="M104 220 C104 180 136 148 176 148 C184.837 148 192 155.163 192 164 C192 172.837 184.837 180 176 180 C153.909 180 136 197.909 136 220 C136 264.183 171.817 300 216 300 C224.837 300 232 307.163 232 316 C232 324.837 224.837 332 216 332 C154.144 332 104 281.856 104 220 Z" 
+    fill="url(#pynt-grad-accent)"
+    opacity="0.9"
+  />
+</svg>

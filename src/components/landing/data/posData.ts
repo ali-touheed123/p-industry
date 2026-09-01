@@ -294,7 +294,7 @@ export const FAQ_ITEMS: FAQItem[] = [
   {
     id: 'faq-8',
     question: 'How do multi-branch add-ons and custom features work?',
-    answer: 'With the Full (POS + CEO) plan, you can connect additional branches or store outlets for Rs. 2,999/month per branch with unified live inventory sync. If you require one-off bespoke development—such as specialized tinting machine drivers, custom bank reconciliations, unique accounting formulas, or bespoke report formats—we scope and quote them separately per feature.'
+    answer: 'With the Full (POS + CEO) plan, you can connect additional branches or store outlets for ~Rs. 2,999/month per branch with unified live inventory sync. If you require one-off bespoke development—such as specialized tinting machine drivers, custom bank reconciliations, unique accounting formulas, or bespoke report formats—we scope and quote them separately per feature.'
   },
   {
     id: 'faq-9',
