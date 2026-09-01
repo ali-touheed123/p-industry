@@ -109,6 +109,37 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // ── Server-side stock validation ─────────────────────────────────────────
+    // Validate every requested item's qty against the source branch's live stock_qty.
+    // This guards against stale client-side stock numbers bypassing the client cap.
+    for (const item of items) {
+      const cleanCode = (item.item_code || '').trim().toUpperCase();
+      if (!cleanCode) continue;
+
+      const { data: sourceItem } = await supabaseAdmin
+        .from('items')
+        .select('stock_qty, name')
+        .eq('tenant_id', to_tenant_id)
+        .ilike('code', cleanCode)
+        .maybeSingle();
+
+      if (sourceItem) {
+        const availableQty = Number(sourceItem.stock_qty || 0);
+        const requestedQty = Number(item.qty || 1);
+        const displayName = item.item_name || sourceItem.name || cleanCode;
+        if (requestedQty > availableQty) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `Only ${availableQty} unit${availableQty !== 1 ? 's' : ''} of "${displayName}" available at this branch.`,
+            },
+            { status: 422 }
+          );
+        }
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     const order_no = `BO-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
 
     // 1. Insert the order

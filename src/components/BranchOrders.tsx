@@ -83,12 +83,21 @@ export default function BranchOrders({
 
   // Add Item to Order Cart
   const handleAddItemToCart = (item: Item) => {
+    setFormError('');
     setOrderCart(prev => {
       const existingIdx = prev.findIndex(ci => ci.item.id === item.id);
       if (existingIdx >= 0) {
-        const updated = [...prev];
-        updated[existingIdx].qty += 1;
-        return updated;
+        const existingQty = prev[existingIdx].qty;
+        const maxQty = item.stock_qty;
+        if (existingQty + 1 > maxQty) {
+          // Block increment — will show error after state update
+          setFormError(`Only ${maxQty} unit${maxQty !== 1 ? 's' : ''} of "${item.name}" available at this branch.`);
+          return prev; // no change
+        }
+        // Immutable update — create a new object for the updated cart item
+        return prev.map((ci, idx) =>
+          idx === existingIdx ? { ...ci, qty: Math.min(ci.qty + 1, maxQty) } : ci
+        );
       }
       return [...prev, { item, qty: 1 }];
     });
@@ -97,11 +106,24 @@ export default function BranchOrders({
   };
 
   const handleUpdateCartQty = (idx: number, newQty: number) => {
+    setFormError('');
     if (newQty < 1) return;
     setOrderCart(prev => {
-      const updated = [...prev];
-      updated[idx].qty = newQty;
-      return updated;
+      const cartItem = prev[idx];
+      if (!cartItem) return prev;
+      const maxQty = cartItem.item.stock_qty;
+      if (newQty > maxQty) {
+        // Clamp to max available and surface a clear error
+        setFormError(`Only ${maxQty} unit${maxQty !== 1 ? 's' : ''} of "${cartItem.item.name}" available at this branch.`);
+        // Immutable update — clamp to stock cap
+        return prev.map((ci, i) =>
+          i === idx ? { ...ci, qty: maxQty } : ci
+        );
+      }
+      // Immutable update — normal path
+      return prev.map((ci, i) =>
+        i === idx ? { ...ci, qty: newQty } : ci
+      );
     });
   };
 
