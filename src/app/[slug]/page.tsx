@@ -37,6 +37,7 @@ import {
   Layers,
   Lock,
   PackagePlus,
+  RefreshCw,
 } from 'lucide-react';
 
 interface PageProps {
@@ -256,6 +257,20 @@ export default function TenantAppPage({ params }: PageProps) {
       }
     } catch {
       // Silently ignore transient offline fetch failures
+    }
+  };
+
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+
+  const handleGlobalRefresh = async () => {
+    setIsManualRefreshing(true);
+    try {
+      await refreshItems();
+      await fetchPendingOrdersCount();
+    } catch (err) {
+      console.error('Refresh failed:', err);
+    } finally {
+      setTimeout(() => setIsManualRefreshing(false), 500);
     }
   };
 
@@ -594,8 +609,39 @@ export default function TenantAppPage({ params }: PageProps) {
               </div>
             </div>
 
-            {/* Right: Online Status & Bell Notification with Orange Dot */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+            {/* Right: Refresh, Online Status, Sales, Bell Notification */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={handleGlobalRefresh}
+                disabled={isManualRefreshing}
+                style={{
+                  padding: '5px 10px',
+                  color: '#475569',
+                  background: '#F8FAFC',
+                  border: '1px solid #E2E8F0',
+                  borderRadius: '7px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: isManualRefreshing ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  transition: 'all 0.15s ease',
+                }}
+                title="Refresh products, orders, and sales without reloading page"
+              >
+                <RefreshCw
+                  style={{
+                    width: 12,
+                    height: 12,
+                    color: '#F97316',
+                    animation: isManualRefreshing ? 'spin 1s linear infinite' : 'none',
+                  }}
+                />
+                {isManualRefreshing ? 'Syncing...' : 'Refresh'}
+              </button>
+
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 600, color: isOnline ? '#16A34A' : '#DC2626', background: isOnline ? '#DCFCE7' : '#FEE2E2', padding: '3px 9px', borderRadius: '6px', border: isOnline ? '1px solid #BBF7D0' : '1px solid #FECACA' }}>
                 {isOnline ? <Wifi style={{ width: 12, height: 12 }} /> : <WifiOff style={{ width: 12, height: 12 }} />}
                 {isOnline ? 'Online' : 'Offline'}

@@ -12,6 +12,7 @@ import {
   PackagePlus,
   Edit2,
   X,
+  RefreshCw,
 } from 'lucide-react';
 
 interface Props {
@@ -63,6 +64,22 @@ export default function StockInventory({
   const [showReceiveModal, setShowReceiveModal] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [notification, setNotification] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
+  // Manual live refresh
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      if (onStockUpdated) {
+        await onStockUpdated();
+      }
+      showToast('Live stock updated from database!');
+    } catch {
+      showToast('Failed to refresh stock');
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 500);
+    }
+  };
 
   // Custom Categories & Units state (Dynamic additions)
   const [customCategories, setCustomCategories] = useState<string[]>([]);
@@ -534,6 +551,25 @@ export default function StockInventory({
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={handleManualRefresh}
+                disabled={isRefreshing}
+                className="inv-btn-secondary"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: isRefreshing ? 'not-allowed' : 'pointer' }}
+                title="Sync live inventory with cloud database"
+              >
+                <RefreshCw
+                  style={{
+                    width: 14,
+                    height: 14,
+                    color: '#F97316',
+                    animation: isRefreshing ? 'spin 1s linear infinite' : 'none',
+                  }}
+                />
+                {isRefreshing ? 'Syncing...' : 'Refresh Stock'}
+              </button>
+
               <button
                 type="button"
                 onClick={handleExportCSV}
