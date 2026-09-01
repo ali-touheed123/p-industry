@@ -56,6 +56,14 @@ export const DevSidebar: React.FC<DevSidebarProps> = ({
   return (
     <aside className="aura-sidebar">
       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        {/* Brand Header */}
+        <div style={{ padding: '0 8px' }}>
+          <img src="/logo.png" alt="Pyntflow" style={{ height: '26px', width: 'auto', display: 'block', objectFit: 'contain' }} />
+          <p style={{ fontSize: '10px', color: '#D4AF37', margin: '4px 0 0', fontFamily: "'JetBrains Mono', monospace", textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            Infrastructure Console
+          </p>
+        </div>
+
         {/* Profile Card */}
         <div className="aura-user-card">
           <div className="aura-avatar">
@@ -92,7 +100,7 @@ export const DevSidebar: React.FC<DevSidebarProps> = ({
                 SUPER DEV
               </span>
             </div>
-            <p style={{ fontSize: '11px', color: '#9ca3af', margin: '2px 0 0' }}>ali.dev@painterp.com</p>
+            <p style={{ fontSize: '11px', color: '#9ca3af', margin: '2px 0 0' }}>ali.dev@pyntflow.com</p>
           </div>
         </div>
 

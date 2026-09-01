@@ -77,29 +77,19 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-            <div
+            <img
+              src="/logo.png"
+              alt="Pyntflow"
               style={{
-                width: '32px',
-                height: '32px',
-                borderRadius: '6px',
-                backgroundColor: '#C6A15B',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#12151B',
-                fontWeight: 800,
-                fontSize: '14px',
+                height: '22px',
+                width: 'auto',
+                display: 'block',
+                objectFit: 'contain',
                 flexShrink: 0,
               }}
-              className="ceo-font-heading"
-            >
-              P
-            </div>
+            />
             <div style={{ minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span className="ceo-font-heading" style={{ fontWeight: 700, fontSize: '14px', color: '#E5E7EB', whiteSpace: 'nowrap' }}>
-                  PaintERP
-                </span>
                 <span
                   className="ceo-font-mono"
                   style={{
@@ -113,7 +103,7 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
                     flexShrink: 0,
                   }}
                 >
-                  CEO
+                  CEO SUITE
                 </span>
               </div>
               <div

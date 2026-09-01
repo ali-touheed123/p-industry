@@ -17,15 +17,15 @@ export const Hero: React.FC<HeroProps> = ({ onOpenDemo, onExploreFeatures }) => 
   const [activeTab, setActiveTab] = useState<PosTabId>('pos');
 
   const tabTitles: Record<PosTabId, string> = {
-    'pos': 'PaintERP POS Billing • Counter Register #01',
-    'inventory': 'PaintERP Inventory & Vault Stock • Live Catalog',
-    'purchases': 'PaintERP Purchases & Supplier Invoices • P-INV-6835',
-    'sales': 'PaintERP Sales Register & Invoices • Live History',
-    'customers': 'PaintERP Customer & Painter Khata Directory',
-    'branch-orders': 'PaintERP Branch Orders & Inter-Transfer Requests',
-    'hold-invoices': 'PaintERP Hold Invoices & Parked Carts',
-    'credit-recovery': 'PaintERP Credit & Recovery • Udhaar Balances',
-    'day-close': 'PaintERP Day Close • Shift End Reconciliation'
+    'pos': 'Pyntflow POS Billing • Counter Register #01',
+    'inventory': 'Pyntflow Inventory & Stock Vault • Live Catalog',
+    'purchases': 'Pyntflow Purchases & Supplier Invoices • P-INV-6835',
+    'sales': 'Pyntflow Sales Register & Invoices • Live History',
+    'customers': 'Pyntflow Customer & Painter Khata Directory',
+    'branch-orders': 'Pyntflow Branch Orders & Inter-Transfer Requests',
+    'hold-invoices': 'Pyntflow Hold Invoices & Parked Carts',
+    'credit-recovery': 'Pyntflow Credit & Recovery • Udhaar Balances',
+    'day-close': 'Pyntflow Day Close • Shift End Reconciliation'
   };
 
   return (

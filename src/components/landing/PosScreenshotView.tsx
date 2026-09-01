@@ -74,15 +74,7 @@ export const PosScreenshotView: React.FC<PosScreenshotViewProps> = ({ onTabChang
             {/* Top Brand Logo */}
             <div className="flex items-center justify-between pb-4 mb-3 border-b border-slate-800/80">
               <div className="flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-md bg-[#1E293B] border border-orange-500/40 flex items-center justify-center">
-                  <div className="w-3.5 h-3.5 rounded-xs bg-[#FF6B00] flex items-center justify-center">
-                    <div className="w-1.5 h-1.5 bg-[#0A0F1D] rounded-xs" />
-                  </div>
-                </div>
-                <div>
-                  <div className="text-sm font-bold text-white tracking-tight leading-none">PaintERP</div>
-                  <div className="text-[9px] font-mono text-slate-400 uppercase tracking-wider mt-0.5">KARACHI BRANCH</div>
-                </div>
+                <img src="/logo.png" alt="Pyntflow" className="h-5 w-auto object-contain" />
               </div>
               <button className="text-slate-500 hover:text-slate-300">
                 <ChevronLeft className="w-4 h-4" />

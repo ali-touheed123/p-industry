@@ -1661,7 +1661,7 @@ export default function SalesHistory({
                 {tenantName}
               </h3>
               <p style={{ fontSize: '11px', color: '#555', marginTop: '2px' }}>
-                PaintERP Retail &amp; Wholesale POS
+                Pyntflow Retail &amp; Wholesale POS
               </p>
               <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px', fontWeight: 800, marginTop: '4px' }}>
                 {thermalPrintInvoice.invoice_no}

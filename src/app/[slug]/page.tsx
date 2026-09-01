@@ -347,12 +347,11 @@ export default function TenantAppPage({ params }: PageProps) {
       <div className="login-wrapper">
         <div style={{ width: '100%', maxWidth: '420px' }}>
           {/* Brand Header */}
-          <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-            <div style={{ width: 56, height: 56, borderRadius: '12px', background: '#0F172A', border: '1px solid rgba(249, 115, 22, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem' }}>
-              <div style={{ width: 14, height: 14, background: '#F97316', borderRadius: '3px' }} />
-            </div>
+          {/* Brand Header */}
+          <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
+            <img src="/logo.png" alt="Pyntflow" style={{ height: '36px', width: 'auto', margin: '0 auto 1rem', display: 'block', objectFit: 'contain' }} />
             <h1 className="headline-md" style={{ marginBottom: '4px', color: '#0F172A' }}>{tenant.name}</h1>
-            <p className="text-muted body-md">{isShop ? 'PaintERP Retail & Wholesale POS' : 'Warehouse & Godown Management'}</p>
+            <p className="text-muted body-md">{isShop ? 'Pyntflow Retail & Wholesale POS' : 'Warehouse & Godown Management'}</p>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem', marginTop: '0.75rem' }}>
               <span className={`status-pill ${isOnline ? 'online' : 'offline'}`}>
                 {isOnline ? <Wifi style={{ width: 12, height: 12 }} /> : <WifiOff style={{ width: 12, height: 12 }} />}
@@ -451,13 +450,12 @@ export default function TenantAppPage({ params }: PageProps) {
         {/* Brand Header */}
         <div className="sidebar-brand">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-            <div className="sidebar-brand-icon">
-              <span style={{ width: '8px', height: '8px', background: '#F97316', borderRadius: '2px', display: 'block' }} />
-            </div>
-            {!isSidebarCollapsed && (
+            {isSidebarCollapsed ? (
+              <img src="/favicon.png" alt="Pyntflow" style={{ width: '24px', height: '24px', objectFit: 'contain' }} />
+            ) : (
               <div style={{ minWidth: 0 }}>
-                <div className="sidebar-brand-name">PaintERP</div>
-                <div className="sidebar-brand-sub">{tenant.city || 'Pakistan'} Branch</div>
+                <img src="/logo.png" alt="Pyntflow" style={{ height: '22px', width: 'auto', display: 'block', objectFit: 'contain' }} />
+                <div className="sidebar-brand-sub" style={{ marginTop: '3px' }}>{tenant.city || 'Pakistan'} Branch</div>
               </div>
             )}
           </div>

@@ -25,13 +25,10 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({ branches, onSele
       {/* Top Minimal Executive Header */}
       <header style={{ borderBottom: '1px solid #2A2F38', backgroundColor: '#10141B', padding: '16px 24px' }}>
         <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{ width: '36px', height: '36px', borderRadius: '4px', backgroundColor: '#C6A15B', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#12151B', fontWeight: 800, fontSize: '15px' }} className="ceo-font-heading">
-              P
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <img src="/logo.png" alt="Pyntflow" style={{ height: '28px', width: 'auto', display: 'block', objectFit: 'contain' }} />
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span className="ceo-font-heading" style={{ fontWeight: 700, color: '#E5E7EB', fontSize: '16px' }}>PaintERP</span>
                 <span style={{ fontSize: '10px', textTransform: 'uppercase', fontFamily: "'JetBrains Mono', monospace", letterSpacing: '0.1em', padding: '2px 8px', borderRadius: '4px', backgroundColor: '#1C2128', border: '1px solid #2A2F38', color: '#C6A15B' }}>
                   CEO Executive Suite
                 </span>

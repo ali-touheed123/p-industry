@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PaintERP — Industrial Spectrum",
+  title: "Pyntflow — Paint Industry POS & Multi-Branch ERP",
   description: "Enterprise Resource Planning & POS for Paint Industry",
 };
 

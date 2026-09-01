@@ -143,17 +143,18 @@ export const DevPinLogin: React.FC<DevPinLoginProps> = ({ onSuccess }) => {
             >
               <Shield style={{ width: '32px', height: '32px', color: '#D4AF37' }} />
             </div>
+            <img src="/logo.png" alt="Pyntflow" style={{ height: '36px', width: 'auto', margin: '0 auto 12px', display: 'block', objectFit: 'contain' }} />
           </div>
           <h1
             style={{
-              fontSize: '28px',
-              fontWeight: 300,
+              fontSize: '24px',
+              fontWeight: 400,
               color: '#ffffff',
-              letterSpacing: '-0.025em',
+              letterSpacing: '-0.02em',
               margin: '0 0 4px',
             }}
           >
-            Aura <span style={{ color: '#D4AF37', fontWeight: 700 }}>Dev Hub</span>
+            Pyntflow <span style={{ color: '#D4AF37', fontWeight: 700 }}>Dev Hub</span>
           </h1>
           <p
             style={{
@@ -163,7 +164,7 @@ export const DevPinLogin: React.FC<DevPinLoginProps> = ({ onSuccess }) => {
               fontFamily: "'JetBrains Mono', monospace",
             }}
           >
-            Restricted Access • Super Administrator
+            Restricted Infrastructure Access • Super Administrator
           </p>
         </div>
 
@@ -457,7 +458,7 @@ export const DevPinLogin: React.FC<DevPinLoginProps> = ({ onSuccess }) => {
               margin: '8px 0 0',
             }}
           >
-            PaintERP Multi-Tenant Infrastructure Suite v2.4
+            Pyntflow Multi-Tenant Infrastructure Suite v2.4
           </p>
         </div>
       </div>
