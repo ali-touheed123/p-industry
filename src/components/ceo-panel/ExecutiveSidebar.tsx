@@ -13,7 +13,9 @@ import {
   LogOut,
   Truck,
   ShieldCheck,
-  X,
+  ArrowLeft,
+  ChevronRight,
+  ChevronLeft,
 } from 'lucide-react';
 
 export type CEOSection = 'overview' | 'sales' | 'returns' | 'day-close' | 'customers' | 'purchase' | 'branch-orders' | 'audit-logs' | 'settings';
@@ -25,6 +27,8 @@ interface ExecutiveSidebarProps {
   onLogout?: () => void;
   isMobileOpen?: boolean;
   onCloseMobile?: () => void;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 const NAV_ITEMS: { id: CEOSection; label: string; icon: React.ComponentType<{ style?: React.CSSProperties }> }[] = [
@@ -46,6 +50,9 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
   onLogout,
   onCloseIfMobile,
   onCloseMobile,
+  isCollapsed,
+  onToggleCollapse,
+  isMobileOpen,
 }) => {
   const handleSelect = (id: CEOSection) => {
     onSelectSection(id);
@@ -68,28 +75,31 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
         {/* Brand Header */}
         <div
           style={{
-            padding: '16px 20px',
+            padding: isCollapsed ? '16px 0' : '16px 20px',
             borderBottom: '1px solid #E2E8F0',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '10px',
+            justifyContent: isCollapsed ? 'center' : 'space-between',
+            flexDirection: isCollapsed ? 'column' : 'row',
+            gap: isCollapsed ? '16px' : '10px',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: isCollapsed ? 'center' : 'flex-start', gap: '6px', minWidth: 0 }}>
             <img
-              src="/logo.png"
+              src={isCollapsed ? "/favicon.png" : "/logo.png"}
               alt="Pyntflow"
               style={{
-                height: '22px',
+                height: isCollapsed ? '32px' : '36px',
                 width: 'auto',
                 display: 'block',
                 objectFit: 'contain',
                 flexShrink: 0,
+                margin: '0',
               }}
             />
-            <div style={{ minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {!isCollapsed && (
+            <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
                 <span
                   className="ceo-font-mono"
                   style={{
@@ -108,34 +118,44 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
               </div>
               <div
                 className="ceo-font-mono"
-                style={{ fontSize: '10px', color: '#64748B', marginTop: '1px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                style={{ fontSize: '10px', color: '#64748B', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
               >
                 {branch.code || 'PK-01'} • {branch.city || 'Karachi'}
               </div>
             </div>
+            )}
           </div>
 
-          {/* Mobile close button */}
-          {onCloseMobile && (
-            <button
-              onClick={onCloseMobile}
-              style={{
-                padding: '4px',
-                borderRadius: '6px',
-                color: '#64748B',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                flexShrink: 0,
-              }}
-              aria-label="Close navigation"
-            >
-              <X style={{ width: '16px', height: '16px' }} />
-            </button>
-          )}
+          {/* Toggle/Close Button */}
+          <button
+            onClick={isMobileOpen ? onCloseMobile : onToggleCollapse}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '6px',
+              borderRadius: '8px',
+              backgroundColor: 'transparent',
+              border: '1px solid #E2E8F0',
+              cursor: 'pointer',
+              color: '#64748B',
+              transition: 'all 0.2s',
+              flexShrink: 0,
+            }}
+            aria-label={isMobileOpen ? "Close navigation" : "Toggle Sidebar"}
+          >
+            {isMobileOpen ? (
+              <ArrowLeft style={{ width: '16px', height: '16px' }} />
+            ) : isCollapsed ? (
+              <ChevronRight style={{ width: 16, height: 16 }} />
+            ) : (
+              <ChevronLeft style={{ width: 16, height: 16 }} />
+            )}
+          </button>
         </div>
 
         {/* Active Enterprise Card */}
+        {!isCollapsed && (
         <div
           style={{
             padding: '12px 20px',
@@ -173,6 +193,7 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
             {branch.city} • {branch.manager}
           </div>
         </div>
+        )}
       </div>
 
       {/* ── Middle: Nav Items ── (scrollable if needed) */}
@@ -186,6 +207,7 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
           gap: '2px',
         }}
       >
+        {!isCollapsed && (
         <div
           style={{
             fontSize: '9px',
@@ -194,10 +216,12 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
             letterSpacing: '0.1em',
             color: '#64748B',
             padding: '4px 8px 8px',
+            textAlign: isCollapsed ? 'center' : 'left',
           }}
         >
           CEO Modules
         </div>
+        )}
 
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
@@ -213,17 +237,19 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
                 alignItems: 'center',
                 gap: '10px',
                 padding: '9px 12px',
+                justifyContent: isCollapsed ? 'center' : 'flex-start',
                 borderRadius: '6px',
                 fontSize: '12px',
                 fontWeight: isActive ? 700 : 500,
                 cursor: 'pointer',
                 border: 'none',
-                borderLeft: isActive ? '3px solid #D97706' : '3px solid transparent',
+                borderLeft: isActive ? '3px solid #D97706' : (isCollapsed ? '3px solid transparent' : '3px solid transparent'),
                 backgroundColor: isActive ? '#FFFFFF' : 'transparent',
                 color: isActive ? '#D97706' : '#64748B',
                 textAlign: 'left',
                 transition: 'all 0.15s ease',
               }}
+              title={isCollapsed ? item.label : undefined}
             >
               <Icon
                 style={{
@@ -233,8 +259,8 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
                   flexShrink: 0,
                 }}
               />
-              <span style={{ flex: 1 }}>{item.label}</span>
-              {isActive && (
+              {!isCollapsed && <span style={{ flex: 1 }}>{item.label}</span>}
+              {!isCollapsed && isActive && (
                 <span
                   style={{
                     width: '6px',
@@ -267,7 +293,7 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
             alignItems: 'center',
             justifyContent: 'center',
             gap: '8px',
-            padding: '9px 12px',
+            padding: isCollapsed ? '9px' : '9px 12px',
             borderRadius: '6px',
             fontSize: '12px',
             fontWeight: 600,
@@ -277,9 +303,10 @@ const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () =>
             cursor: 'pointer',
             transition: 'all 0.15s ease',
           }}
+          title={isCollapsed ? "Logout CEO Session" : undefined}
         >
           <LogOut style={{ width: '14px', height: '14px' }} />
-          Logout CEO Session
+          {!isCollapsed && "Logout CEO Session"}
         </button>
       </div>
     </div>
@@ -295,13 +322,14 @@ export const ExecutiveSidebar: React.FC<ExecutiveSidebarProps> = (props) => {
       <aside
         id="executive-sidebar"
         style={{
-          width: '260px',
+          width: props.isCollapsed ? '72px' : '260px',
           height: '100vh',
           position: 'sticky',
           top: 0,
           flexShrink: 0,
           display: 'flex',
           flexDirection: 'column',
+          transition: 'width 0.2s ease',
         }}
       >
         <SidebarContent {...props} />

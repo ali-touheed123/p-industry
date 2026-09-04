@@ -142,7 +142,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
                 <Percent style={{ width: 18, height: 18 }} />
               </div>
               <div>
-                <div className="ceo-font-heading" style={{ fontSize: '15px', fontWeight: 700, color: '#F3F4F6' }}>
+                <div className="ceo-font-heading" style={{ fontSize: '15px', fontWeight: 700, color: '#0F172A' }}>
                   Staff Sales Commission System
                 </div>
                 <div style={{ fontSize: '11.5px', color: '#9CA3AF' }}>
@@ -173,7 +173,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
                   <label className="ceo-font-mono" style={{ fontSize: '11px', color: '#D97706', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
                     Sales Commission Rate (%)
                   </label>
-                  <div style={{ display: 'flex', alignItems: 'center', background: '#11141A', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '6px 10px', gap: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '6px 10px', gap: '6px' }}>
                     <input
                       type="number"
                       step="0.1"
@@ -182,7 +182,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
                       required
                       value={commissionRate}
                       onChange={e => setCommissionRate(parseFloat(e.target.value) || 0)}
-                      style={{ background: 'transparent', border: 'none', color: '#F3F4F6', fontSize: '15px', fontWeight: 700, width: '100%', outline: 'none', fontFamily: 'JetBrains Mono, monospace' }}
+                      style={{ background: 'transparent', border: 'none', color: '#0F172A', fontSize: '15px', fontWeight: 700, width: '100%', outline: 'none', fontFamily: 'JetBrains Mono, monospace' }}
                     />
                     <span style={{ color: '#9CA3AF', fontWeight: 700 }}>%</span>
                   </div>
@@ -213,7 +213,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.875rem' }}>
                   {/* Lead Staff Share */}
-                  <div style={{ background: '#11141A', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '10px' }}>
+                  <div style={{ background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '10px' }}>
                     <div style={{ fontSize: '11px', color: '#9CA3AF', marginBottom: '4px' }}>Lead Staff / Cashier</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <input
@@ -224,14 +224,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
                         required
                         value={splitLead}
                         onChange={e => setSplitLead(parseFloat(e.target.value) || 0)}
-                        style={{ width: '100%', background: 'transparent', border: 'none', color: '#F3F4F6', fontSize: '14px', fontWeight: 700, outline: 'none', fontFamily: 'JetBrains Mono, monospace' }}
+                        style={{ width: '100%', background: 'transparent', border: 'none', color: '#0F172A', fontSize: '14px', fontWeight: 700, outline: 'none', fontFamily: 'JetBrains Mono, monospace' }}
                       />
                       <span style={{ color: '#9CA3AF', fontSize: '12px' }}>%</span>
                     </div>
                   </div>
 
                   {/* Floor Staff Share */}
-                  <div style={{ background: '#11141A', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '10px' }}>
+                  <div style={{ background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '10px' }}>
                     <div style={{ fontSize: '11px', color: '#9CA3AF', marginBottom: '4px' }}>Floor Staff / Junior</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <input
@@ -242,14 +242,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
                         required
                         value={splitStaff}
                         onChange={e => setSplitStaff(parseFloat(e.target.value) || 0)}
-                        style={{ width: '100%', background: 'transparent', border: 'none', color: '#F3F4F6', fontSize: '14px', fontWeight: 700, outline: 'none', fontFamily: 'JetBrains Mono, monospace' }}
+                        style={{ width: '100%', background: 'transparent', border: 'none', color: '#0F172A', fontSize: '14px', fontWeight: 700, outline: 'none', fontFamily: 'JetBrains Mono, monospace' }}
                       />
                       <span style={{ color: '#9CA3AF', fontSize: '12px' }}>%</span>
                     </div>
                   </div>
 
                   {/* Shop Reserve / Retained */}
-                  <div style={{ background: '#11141A', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '10px' }}>
+                  <div style={{ background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '10px' }}>
                     <div style={{ fontSize: '11px', color: '#9CA3AF', marginBottom: '4px' }}>Shop Reserve / Bonus</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <input
@@ -260,7 +260,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
                         required
                         value={splitReserve}
                         onChange={e => setSplitReserve(parseFloat(e.target.value) || 0)}
-                        style={{ width: '100%', background: 'transparent', border: 'none', color: '#F3F4F6', fontSize: '14px', fontWeight: 700, outline: 'none', fontFamily: 'JetBrains Mono, monospace' }}
+                        style={{ width: '100%', background: 'transparent', border: 'none', color: '#0F172A', fontSize: '14px', fontWeight: 700, outline: 'none', fontFamily: 'JetBrains Mono, monospace' }}
                       />
                       <span style={{ color: '#9CA3AF', fontSize: '12px' }}>%</span>
                     </div>
@@ -269,16 +269,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
               </div>
 
               {/* Live Preview Box */}
-              <div style={{ background: 'rgba(30, 41, 59, 0.4)', border: '1px dashed #3B82F6', borderRadius: '8px', padding: '10px 14px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', fontWeight: 700, color: '#60A5FA', marginBottom: '4px' }}>
+              <div style={{ background: '#F0F9FF', border: '1px dashed #3B82F6', borderRadius: '8px', padding: '10px 14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', fontWeight: 700, color: '#2563EB', marginBottom: '4px' }}>
                   <Sparkles style={{ width: 14, height: 14 }} />
                   Live Calculation Example (on Rs. 100,000 Net Sales):
                 </div>
-                <div style={{ fontSize: '11px', color: '#94A3B8', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-                  <span>Pool ({commissionRate}%): <strong style={{ color: '#F3F4F6' }}>Rs. {samplePool.toLocaleString()}</strong></span>
-                  <span>Lead Staff ({splitLead}%): <strong style={{ color: '#34D399' }}>Rs. {sampleLead.toLocaleString()}</strong></span>
-                  <span>Floor Staff ({splitStaff}%): <strong style={{ color: '#34D399' }}>Rs. {sampleStaff.toLocaleString()}</strong></span>
-                  <span>Shop Reserve ({splitReserve}%): <strong style={{ color: '#9CA3AF' }}>Rs. {sampleReserve.toLocaleString()}</strong></span>
+                <div style={{ fontSize: '11px', color: '#475569', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                  <span>Pool ({commissionRate}%): <strong style={{ color: '#0F172A' }}>Rs. {samplePool.toLocaleString()}</strong></span>
+                  <span>Lead Staff ({splitLead}%): <strong style={{ color: '#059669' }}>Rs. {sampleLead.toLocaleString()}</strong></span>
+                  <span>Floor Staff ({splitStaff}%): <strong style={{ color: '#059669' }}>Rs. {sampleStaff.toLocaleString()}</strong></span>
+                  <span>Shop Reserve ({splitReserve}%): <strong style={{ color: '#475569' }}>Rs. {sampleReserve.toLocaleString()}</strong></span>
                 </div>
               </div>
             </div>
@@ -287,7 +287,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
 
         {/* ── CARD 2: Branch Info ── */}
         <div className="ceo-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div className="ceo-font-heading" style={{ fontSize: '15px', fontWeight: 700, color: '#F3F4F6' }}>
+          <div className="ceo-font-heading" style={{ fontSize: '15px', fontWeight: 700, color: '#0F172A' }}>
             Branch Contact &amp; Details
           </div>
 
@@ -301,7 +301,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
                 required
                 value={name}
                 onChange={e => setName(e.target.value)}
-                style={{ width: '100%', background: '#11141A', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '8px 10px', color: '#F3F4F6', fontSize: '13px', outline: 'none' }}
+                style={{ width: '100%', background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '8px 10px', color: '#0F172A', fontSize: '13px', outline: 'none' }}
               />
             </div>
 
@@ -314,7 +314,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
                 value={phone}
                 onChange={e => setPhone(e.target.value)}
                 placeholder="+92 300 1234567"
-                style={{ width: '100%', background: '#11141A', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '8px 10px', color: '#F3F4F6', fontSize: '13px', outline: 'none' }}
+                style={{ width: '100%', background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '8px 10px', color: '#0F172A', fontSize: '13px', outline: 'none' }}
               />
             </div>
 
@@ -327,7 +327,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
                 value={city}
                 onChange={e => setCity(e.target.value)}
                 placeholder="Karachi / Lahore / Rawalpindi"
-                style={{ width: '100%', background: '#11141A', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '8px 10px', color: '#F3F4F6', fontSize: '13px', outline: 'none' }}
+                style={{ width: '100%', background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '8px 10px', color: '#0F172A', fontSize: '13px', outline: 'none' }}
               />
             </div>
 
@@ -340,7 +340,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
                 value={address}
                 onChange={e => setAddress(e.target.value)}
                 placeholder="Main Market, Shop # 4"
-                style={{ width: '100%', background: '#11141A', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '8px 10px', color: '#F3F4F6', fontSize: '13px', outline: 'none' }}
+                style={{ width: '100%', background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '8px 10px', color: '#0F172A', fontSize: '13px', outline: 'none' }}
               />
             </div>
           </div>
@@ -353,7 +353,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
           style={{
             padding: '12px 24px',
             background: saving ? '#4B5563' : '#D97706',
-            color: '#0D1117',
+            color: '#FFFFFF',
             fontWeight: 800,
             fontSize: '13px',
             borderRadius: '8px',

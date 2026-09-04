@@ -349,7 +349,7 @@ export default function TenantAppPage({ params }: PageProps) {
           {/* Brand Header */}
           {/* Brand Header */}
           <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
-            <img src="/logo.png" alt="Pyntflow" style={{ height: '36px', width: 'auto', margin: '0 auto 1rem', display: 'block', objectFit: 'contain' }} />
+            <img src="/logo.png" alt="Pyntflow" style={{ height: '56px', width: 'auto', margin: '0 auto 1rem', display: 'block', objectFit: 'contain' }} />
             <h1 className="headline-md" style={{ marginBottom: '4px', color: '#0F172A' }}>{tenant.name}</h1>
             <p className="text-muted body-md">{isShop ? 'Pyntflow Retail & Wholesale POS' : 'Warehouse & Godown Management'}</p>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem', marginTop: '0.75rem' }}>
@@ -451,10 +451,10 @@ export default function TenantAppPage({ params }: PageProps) {
         <div className="sidebar-brand">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
             {isSidebarCollapsed ? (
-              <img src="/favicon.png" alt="Pyntflow" style={{ width: '24px', height: '24px', objectFit: 'contain' }} />
+              <img src="/favicon.png" alt="Pyntflow" style={{ width: '32px', height: '32px', objectFit: 'contain' }} />
             ) : (
               <div style={{ minWidth: 0 }}>
-                <img src="/logo.png" alt="Pyntflow" style={{ height: '22px', width: 'auto', display: 'block', objectFit: 'contain' }} />
+                <img src="/logo.png" alt="Pyntflow" style={{ height: '36px', width: 'auto', display: 'block', objectFit: 'contain' }} />
                 <div className="sidebar-brand-sub" style={{ marginTop: '3px' }}>{tenant.city || 'Pakistan'} Branch</div>
               </div>
             )}

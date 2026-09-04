@@ -102,7 +102,7 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
             alignItems: 'center',
             gap: '6px',
             padding: '8px 14px',
-            backgroundColor: '#1E232B',
+            backgroundColor: '#FFFFFF',
             border: '1px solid #E2E8F0',
             borderRadius: '6px',
             color: '#0F172A',
@@ -116,7 +116,7 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
       </div>
 
       {/* Filter Bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', backgroundColor: '#161B22', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '12px 16px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '12px 16px' }}>
         <DatePeriodFilter
           startDate={startDate}
           endDate={endDate}
@@ -169,7 +169,7 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
       </div>
 
       {/* Orders Table */}
-      <div style={{ backgroundColor: '#161B22', border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden' }}>
+      <div style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
           <thead>
             <tr style={{ backgroundColor: '#FFFFFF', borderBottom: '1px solid #E2E8F0', color: '#64748B', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '0.05em' }}>
@@ -203,7 +203,7 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
                   .join(', ');
 
                 return (
-                  <tr key={o.id} style={{ borderBottom: '1px solid #1E232B' }}>
+                  <tr key={o.id} style={{ borderBottom: '1px solid #E2E8F0' }}>
                     <td style={{ padding: '12px 16px', fontWeight: 700, color: '#D97706', fontFamily: 'JetBrains Mono, monospace' }}>
                       {o.order_no}
                     </td>

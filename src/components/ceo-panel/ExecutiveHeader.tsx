@@ -60,24 +60,7 @@ export const ExecutiveHeader: React.FC<ExecutiveHeaderProps> = ({
     >
       {/* Left: Mobile Hamburger + Branch Info */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
-        {/* Mobile Hamburger */}
-        <button
-          id="mobile-sidebar-toggle-btn"
-          onClick={onOpenMobileMenu}
-          style={{
-            padding: '6px',
-            borderRadius: '6px',
-            backgroundColor: 'rgba(198,161,91,0.1)',
-            border: '1px solid rgba(198,161,91,0.2)',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-          aria-label="Open navigation"
-        >
-          <Menu style={{ width: '18px', height: '18px', color: '#D97706' }} />
-        </button>
+
 
         {/* Branch Name + Code */}
         <div style={{ minWidth: 0 }}>

@@ -26,6 +26,7 @@ interface CeoSuiteProps {
 export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, onLogout }) => {
   const [currentSection, setCurrentSection] = useState<CEOSection>('overview');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null);
 
@@ -209,8 +210,8 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
         />
       )}
 
-      {/* Executive Sidebar — fixed width 260px */}
-      <div style={{ width: '260px', flexShrink: 0, position: 'relative', zIndex: 10 }}>
+      {/* Executive Sidebar — dynamic width */}
+      <div style={{ width: isSidebarCollapsed ? '72px' : '260px', flexShrink: 0, position: 'relative', zIndex: 10, transition: 'width 0.2s ease' }}>
         <ExecutiveSidebar
           currentSection={currentSection}
           onSelectSection={setCurrentSection}
@@ -224,6 +225,8 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
           }}
           isMobileOpen={isMobileSidebarOpen}
           onCloseMobile={() => setIsMobileSidebarOpen(false)}
+          isCollapsed={isSidebarCollapsed}
+          onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
         />
       </div>
 
