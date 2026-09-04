@@ -4,7 +4,8 @@ import React from 'react';
 import { 
   LayoutDashboard,
   Building2, 
-  Users
+  Users,
+  Printer
 } from 'lucide-react';
 import { DevActiveTab } from '@/types/dev';
 
@@ -50,6 +51,12 @@ export const DevSidebar: React.FC<DevSidebarProps> = ({
       description: 'Developers, CEOs, staff & incharges',
       icon: Users,
       count: counts.users,
+    },
+    {
+      id: 'receipt-templates',
+      label: 'Receipt Templates',
+      description: 'Thermal & A4 designer & assign',
+      icon: Printer,
     },
   ];
 

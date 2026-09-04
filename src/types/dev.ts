@@ -38,4 +38,4 @@ export interface InitialAccountsData {
   staffPassword?: string;
 }
 
-export type DevActiveTab = 'overview' | 'branches' | 'users';
+export type DevActiveTab = 'overview' | 'branches' | 'users' | 'receipt-templates';

@@ -10,6 +10,7 @@ import { DevUsersView } from './DevUsersView';
 import { DevBranchModal } from './DevBranchModal';
 import { DevUserModal } from './DevUserModal';
 import { DevBranchPortalModal } from './DevBranchPortalModal';
+import { DevReceiptTemplatesView } from './DevReceiptTemplatesView';
 import { DevPinLogin } from './DevPinLogin';
 import { CheckCheck, AlertCircle } from 'lucide-react';
 import './aura-panel.css';
@@ -374,6 +375,10 @@ export default function AuraDevPanel() {
               }}
               onDeleteUser={handleDeleteUser}
             />
+          )}
+
+          {activeTab === 'receipt-templates' && (
+            <DevReceiptTemplatesView onShowToast={showToast} />
           )}
         </main>
       </div>
