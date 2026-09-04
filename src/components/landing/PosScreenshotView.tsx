@@ -74,15 +74,15 @@ export const PosScreenshotView: React.FC<PosScreenshotViewProps> = ({ onTabChang
             {/* Top Brand Logo */}
             <div className="flex items-center justify-between pb-4 mb-3 border-b border-slate-800/80">
               <div className="flex items-center gap-2.5">
-                <img src="/logo.png" alt="Pyntflow" className="h-5 w-auto object-contain" />
+                <img src="/logo.png" alt="Pyntflow" className="h-5 w-auto object-contain" width={60} height={20} />
               </div>
-              <button className="text-slate-500 hover:text-slate-300">
+              <button type="button" aria-label="Toggle sidebar" className="text-slate-400 hover:text-slate-200">
                 <ChevronLeft className="w-4 h-4" />
               </button>
             </div>
 
             {/* Section: WORKSPACE */}
-            <div className="text-[10px] font-mono font-semibold text-slate-500 tracking-wider uppercase px-2 mb-2">
+            <div className="text-[10px] font-mono font-semibold text-slate-400 tracking-wider uppercase px-2 mb-2">
               WORKSPACE
             </div>
 
@@ -114,7 +114,7 @@ export const PosScreenshotView: React.FC<PosScreenshotViewProps> = ({ onTabChang
 
           {/* Bottom Branch & User Info */}
           <div className="pt-3 border-t border-slate-800/80 space-y-2">
-            <div className="text-[10px] font-mono text-slate-500 uppercase px-1">BRANCH</div>
+            <div className="text-[10px] font-mono text-slate-400 uppercase px-1">BRANCH</div>
             <div className="flex items-center justify-between px-2.5 py-1.5 bg-[#141B2D] border border-slate-800 rounded-lg text-xs font-medium text-slate-200">
               <span>hamza paint</span>
               <ArrowUpDown className="w-3.5 h-3.5 text-[#FF6B00]" />

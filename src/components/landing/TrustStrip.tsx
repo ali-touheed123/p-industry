@@ -48,9 +48,9 @@ export const TrustStrip: React.FC = () => {
                   <div className="w-6 h-6 rounded-md bg-slate-100 flex items-center justify-center shrink-0">
                     {item.icon}
                   </div>
-                  <h3 className="text-sm font-bold text-slate-900 tracking-tight">
+                  <h2 className="text-sm font-bold text-slate-900 tracking-tight">
                     {item.label}
-                  </h3>
+                  </h2>
                 </div>
                 <p className="text-xs text-slate-600 leading-relaxed">
                   {item.desc}

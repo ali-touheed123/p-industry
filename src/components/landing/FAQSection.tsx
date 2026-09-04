@@ -88,7 +88,7 @@ export const FAQSection: React.FC<FAQProps> = ({ onOpenDemo }) => {
         {/* Bottom Help Box */}
         <div className="mt-12 p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs text-center flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="text-left">
-            <h4 className="text-sm font-bold text-slate-900">Have a specific question about your paint brand or shop setup?</h4>
+            <h3 className="text-sm font-bold text-slate-900">Have a specific question about your paint brand or shop setup?</h3>
             <p className="text-xs text-slate-600 mt-0.5">Our paint trade software specialists are available on phone or WhatsApp.</p>
           </div>
           <button

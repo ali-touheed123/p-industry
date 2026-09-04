@@ -1,0 +1,17 @@
+# Pyntflow
+
+> Purpose-built point of sale and inventory management software for paint retailers, authorized dealers, and multi-branch paint enterprise networks.
+
+## Core Capabilities
+- High-speed retail counter billing with multi-pack sizing (1L quarter, 4L gallon, 16L drum).
+- Computerized paint tint shade lookup and dispenser base tracking.
+- Contractor and painter khata ledger management with automated WhatsApp statements.
+- Inter-branch inventory transfers, warehouse godown stock tracking, and supplier invoices.
+- CEO executive analytics suite with real-time gross margins and branch performance.
+
+## Key Links & Documentation
+- [Home & Platform Overview](https://pyntflow.com/): Official homepage and feature overview.
+- [Features Directory](https://pyntflow.com/#features): Detailed breakdown of retail POS, stock vaults, and khata registers.
+- [Pricing Tiers](https://pyntflow.com/#pricing): Flexible subscription plans for single-counter paint shops and enterprise chains.
+- [Frequently Asked Questions](https://pyntflow.com/#faq): Technical details on offline billing, hardware compatibility, and data security.
+- [Contact & Support](https://pyntflow.com/#contact): Direct phone and WhatsApp specialist assistance for paint store owners.
