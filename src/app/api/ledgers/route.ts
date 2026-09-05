@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { requireTenantAuth } from '@/lib/session';
 
 // GET: Fetch combined chronological statement of account (Invoices + Receipts)
 export async function GET(req: NextRequest) {
@@ -11,6 +12,11 @@ export async function GET(req: NextRequest) {
 
     if (!tenantId || !partyId) {
       return NextResponse.json({ success: false, error: 'Tenant ID and Party ID are required' }, { status: 400 });
+    }
+
+    const auth = await requireTenantAuth(req, tenantId);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
     // 1. Fetch Invoices, Purchases, or Branch Transfers depending on partyType

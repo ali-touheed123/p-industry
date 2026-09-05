@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { requireTenantAuth } from '@/lib/session';
 
 // GET: Fetch invoices for a tenant / branch or shift with date filtering and search
 export async function GET(req: NextRequest) {
@@ -17,6 +18,11 @@ export async function GET(req: NextRequest) {
 
     if (!tenantId) {
       return NextResponse.json({ success: false, error: 'Tenant ID required' }, { status: 400 });
+    }
+
+    const auth = await requireTenantAuth(req, tenantId);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
     let query = supabaseAdmin
@@ -91,6 +97,11 @@ export async function POST(req: NextRequest) {
         { success: false, error: 'Tenant ID, Invoice No, and at least 1 item are required' },
         { status: 400 }
       );
+    }
+
+    const auth = await requireTenantAuth(req, tenant_id);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
     // 0. Ensure unique collision-safe invoice number
@@ -311,6 +322,11 @@ export async function PATCH(req: NextRequest) {
         { success: false, error: 'Invoice ID, Tenant ID, and at least 1 item are required' },
         { status: 400 }
       );
+    }
+
+    const auth = await requireTenantAuth(req, tenant_id);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
     // 1. Fetch old invoice and previous line items

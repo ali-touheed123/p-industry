@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { requireTenantAuth } from '@/lib/session';
 
 // GET: Fetch audit logs for a tenant
 export async function GET(req: NextRequest) {
@@ -12,6 +13,11 @@ export async function GET(req: NextRequest) {
 
     if (!tenantId) {
       return NextResponse.json({ success: false, error: 'Tenant ID is required' }, { status: 400 });
+    }
+
+    const auth = await requireTenantAuth(req, tenantId);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
     let query = supabaseAdmin

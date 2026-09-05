@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { DEFAULT_TEMPLATE_JSON } from '@/types/receipt';
+import { requireDevAuth, requireTenantAuth } from '@/lib/session';
 
 // GET: Fetch assignment for single tenant or all tenants
 export async function GET(req: NextRequest) {
@@ -10,6 +11,11 @@ export async function GET(req: NextRequest) {
 
     // 1. Single tenant lookup: returns the assigned template, or falls back to platform default
     if (tenant_id) {
+      const auth = await requireTenantAuth(req, tenant_id);
+      if (!auth.authorized) {
+        return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+      }
+
       const { data: assignment, error: assignErr } = await supabaseAdmin
         .from('tenant_receipt_template')
         .select('template_id, receipt_templates(*)')
@@ -63,6 +69,11 @@ export async function GET(req: NextRequest) {
     }
 
     // 2. Fetch all tenants with their assigned template (for Dev Panel Assignment table)
+    const devAuth = await requireDevAuth(req);
+    if (!devAuth.authorized) {
+      return NextResponse.json({ success: false, error: devAuth.error }, { status: devAuth.status });
+    }
+
     const { data: tenants, error: tenantErr } = await supabaseAdmin
       .from('tenants')
       .select('id, name, slug, type, is_active')
@@ -105,6 +116,11 @@ export async function GET(req: NextRequest) {
 // POST: Set template assignment for tenant (upsert)
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireDevAuth(req);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
     const body = await req.json();
     const { tenant_id, template_id } = body;
 
@@ -153,6 +169,11 @@ export async function POST(req: NextRequest) {
 // DELETE: Remove assignment (revert tenant to platform default)
 export async function DELETE(req: NextRequest) {
   try {
+    const auth = await requireDevAuth(req);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
     const { searchParams } = new URL(req.url);
     const tenant_id = searchParams.get('tenant_id');
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { requireTenantAuth } from '@/lib/session';
 
 // POST: Receive inward stock (GRN) with audit logging & sequential reference number
 export async function POST(req: NextRequest) {
@@ -20,6 +21,11 @@ export async function POST(req: NextRequest) {
         { success: false, error: 'Tenant ID, Item ID, and positive Quantity are required' },
         { status: 400 }
       );
+    }
+
+    const auth = await requireTenantAuth(req, tenant_id);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
     // 1. Fetch current item

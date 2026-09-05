@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { requireTenantAuth } from '@/lib/session';
 
 async function resolveTenantId(idOrSlug: string): Promise<string | null> {
   if (!idOrSlug) return null;
@@ -32,6 +33,11 @@ export async function GET(req: NextRequest) {
     const tenantId = await resolveTenantId(tenantIdParam);
     if (!tenantId) {
       return NextResponse.json({ success: false, error: 'Tenant not found' }, { status: 404 });
+    }
+
+    const auth = await requireTenantAuth(req, tenantId);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
     // Special: return only last closed shift (for handover pre-fill)
@@ -128,6 +134,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Tenant not found' }, { status: 404 });
     }
 
+    const auth = await requireTenantAuth(req, tenant_id);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
     const { data: shift, error } = await supabaseAdmin
       .from('shifts')
       .insert({
@@ -167,6 +178,12 @@ export async function PATCH(req: NextRequest) {
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Shift ID required' }, { status: 400 });
+    }
+
+    const { data: existingShift } = await supabaseAdmin.from('shifts').select('tenant_id').eq('id', id).maybeSingle();
+    const auth = await requireTenantAuth(req, existingShift?.tenant_id);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
     const { data: shift, error } = await supabaseAdmin

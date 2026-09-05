@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { requireTenantAuth } from '@/lib/session';
 
 // GET: Fetch clients for a tenant
 export async function GET(req: NextRequest) {
@@ -9,6 +10,11 @@ export async function GET(req: NextRequest) {
 
     if (!tenantId) {
       return NextResponse.json({ success: false, error: 'Tenant ID required' }, { status: 400 });
+    }
+
+    const auth = await requireTenantAuth(req, tenantId);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
     const { data: clients, error } = await supabaseAdmin
@@ -42,6 +48,11 @@ export async function POST(req: NextRequest) {
 
     if (!tenant_id || !name) {
       return NextResponse.json({ success: false, error: 'Tenant ID and Name are required' }, { status: 400 });
+    }
+
+    const auth = await requireTenantAuth(req, tenant_id);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
     const code = `CL-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -78,6 +89,17 @@ export async function PATCH(req: NextRequest) {
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Client ID is required' }, { status: 400 });
+    }
+
+    let targetTenantId = tenant_id;
+    if (!targetTenantId) {
+      const { data: existingClient } = await supabaseAdmin.from('clients').select('tenant_id').eq('id', id).maybeSingle();
+      targetTenantId = existingClient?.tenant_id;
+    }
+
+    const auth = await requireTenantAuth(req, targetTenantId);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
     const updates: Record<string, any> = {};

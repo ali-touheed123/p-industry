@@ -40,13 +40,13 @@ export async function POST(req: NextRequest) {
     const user = userList && userList.length > 0 ? userList[0] : null;
 
     if (userErr || !user) {
-      return NextResponse.json({ success: false, error: 'Invalid username or inactive account' }, { status: 401 });
+      return NextResponse.json({ success: false, error: 'Invalid username or password' }, { status: 401 });
     }
 
     // 3. Verify password securely using bcrypt (with automatic fallback for plaintext)
     const isValid = await verifyPassword(password, user.password_hash);
     if (!isValid) {
-      return NextResponse.json({ success: false, error: 'Incorrect password' }, { status: 401 });
+      return NextResponse.json({ success: false, error: 'Invalid username or password' }, { status: 401 });
     }
 
     // Auto-upgrade plain-text password to bcrypt hash on successful authentication

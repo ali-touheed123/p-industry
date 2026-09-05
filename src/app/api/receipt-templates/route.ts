@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { DEFAULT_TEMPLATE_JSON, ReceiptTemplate } from '@/types/receipt';
+import { requireDevAuth, requireTenantAuth } from '@/lib/session';
 
 // GET all non-deleted receipt templates (or single template by ?id=...)
 export async function GET(req: NextRequest) {
   try {
+    const auth = await requireTenantAuth(req, null);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
 
@@ -64,6 +70,11 @@ export async function GET(req: NextRequest) {
 // POST: Create a new template or clone
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireDevAuth(req);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
     const body = await req.json();
     const { name, description, paper_size, template_json, is_default } = body;
 
@@ -106,6 +117,11 @@ export async function POST(req: NextRequest) {
 // PATCH: Update template
 export async function PATCH(req: NextRequest) {
   try {
+    const auth = await requireDevAuth(req);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
     const body = await req.json();
     const { id, name, description, paper_size, template_json, is_default } = body;
 
@@ -147,6 +163,11 @@ export async function PATCH(req: NextRequest) {
 // DELETE: Soft delete template
 export async function DELETE(req: NextRequest) {
   try {
+    const auth = await requireDevAuth(req);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
 

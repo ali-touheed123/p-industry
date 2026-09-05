@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SignJWT } from 'jose';
 
-const DEV_SECRET = new TextEncoder().encode(
-  process.env.DEV_ADMIN_SECRET || process.env.SESSION_SECRET || 'pyntflow-dev-secret-super-key-32-chars-min!'
-);
+function getDevAdminSecret(): Uint8Array {
+  const secret = process.env.DEV_ADMIN_SECRET || process.env.SESSION_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('CRITICAL SECURITY ERROR: DEV_ADMIN_SECRET or SESSION_SECRET must be configured in production.');
+    }
+    return new TextEncoder().encode('pyntflow-dev-secret-super-key-32-chars-min!');
+  }
+  return new TextEncoder().encode(secret);
+}
 
 const DEV_ADMIN_COOKIE = 'aura_dev_token';
 
@@ -36,7 +43,7 @@ export async function POST(req: NextRequest) {
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuedAt()
       .setExpirationTime('8h')
-      .sign(DEV_SECRET);
+      .sign(getDevAdminSecret());
 
     const res = NextResponse.json({
       success: true,

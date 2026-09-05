@@ -1,13 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { hashPassword } from '@/lib/auth-passwords';
-import { getSession } from '@/lib/session';
+import { requireDevAuth, requireTenantAuth } from '@/lib/session';
 
 // GET: Fetch all users or users by tenant
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const tenantId = searchParams.get('tenant_id');
+
+    if (tenantId) {
+      const auth = await requireTenantAuth(req, tenantId);
+      if (!auth.authorized) {
+        return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+      }
+    } else {
+      const auth = await requireDevAuth(req);
+      if (!auth.authorized) {
+        return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+      }
+    }
 
     let query = supabaseAdmin
       .from('app_users')
@@ -30,6 +42,11 @@ export async function GET(req: NextRequest) {
 // POST: Create a new user (with bcrypt password hashing)
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireDevAuth(req);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
     const body = await req.json();
     const { username, password, full_name, role, tenant_id, email } = body;
 
@@ -76,6 +93,11 @@ export async function POST(req: NextRequest) {
 // PUT: Update an existing user
 export async function PUT(req: NextRequest) {
   try {
+    const auth = await requireDevAuth(req);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
     const body = await req.json();
     const { id, username, password, full_name, role, tenant_id, email, is_active } = body;
 
@@ -113,6 +135,11 @@ export async function PUT(req: NextRequest) {
 // DELETE: Remove a user
 export async function DELETE(req: NextRequest) {
   try {
+    const auth = await requireDevAuth(req);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
     const { searchParams } = new URL(req.url);
     let id = searchParams.get('id');
 

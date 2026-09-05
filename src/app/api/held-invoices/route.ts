@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { requireTenantAuth } from '@/lib/session';
 
 // GET: Fetch parked / held invoices for a tenant
 export async function GET(req: NextRequest) {
@@ -9,6 +10,11 @@ export async function GET(req: NextRequest) {
 
     if (!tenantId) {
       return NextResponse.json({ success: false, error: 'Tenant ID required' }, { status: 400 });
+    }
+
+    const auth = await requireTenantAuth(req, tenantId);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
     const { data: heldInvoices, error } = await supabaseAdmin
@@ -50,6 +56,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const auth = await requireTenantAuth(req, tenant_id);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
     const { data: heldOrder, error } = await supabaseAdmin
       .from('held_invoices')
       .insert({
@@ -84,6 +95,12 @@ export async function DELETE(req: NextRequest) {
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'ID required' }, { status: 400 });
+    }
+
+    const { data: existingHeld } = await supabaseAdmin.from('held_invoices').select('tenant_id').eq('id', id).maybeSingle();
+    const auth = await requireTenantAuth(req, existingHeld?.tenant_id);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
     const { error } = await supabaseAdmin

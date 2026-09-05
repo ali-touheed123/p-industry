@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { hashPassword } from '@/lib/auth-passwords';
+import { requireDevAuth, requireTenantAuth } from '@/lib/session';
 
 // GET all tenants or single tenant by slug
 export async function GET(req: NextRequest) {
@@ -35,6 +36,12 @@ export async function GET(req: NextRequest) {
           counters: staffCounters,
         }
       });
+    }
+
+    // Full system tenant list requires authenticated session
+    const auth = await requireTenantAuth(req, null);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
     const { data: tenants, error: tenantErr } = await supabaseAdmin
@@ -72,6 +79,11 @@ export async function GET(req: NextRequest) {
 // POST: Create a new Shop / Godown / Factory with default CEO & Staff accounts
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireDevAuth(req);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
     const body = await req.json();
     const {
       name,
@@ -235,6 +247,11 @@ export async function POST(req: NextRequest) {
 // DELETE: Remove tenant
 export async function DELETE(req: NextRequest) {
   try {
+    const auth = await requireDevAuth(req);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
     const { searchParams } = new URL(req.url);
     let id = searchParams.get('id');
 
@@ -341,6 +358,11 @@ export async function PATCH(req: NextRequest) {
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Tenant ID required' }, { status: 400 });
+    }
+
+    const auth = await requireTenantAuth(req, id);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
     const updateData: any = { updated_at: new Date().toISOString() };
