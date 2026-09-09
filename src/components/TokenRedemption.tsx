@@ -57,6 +57,13 @@ export default function TokenRedemption({
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Loose / External Brand Token State
+  const [isLooseToken, setIsLooseToken] = useState<boolean>(false);
+  const [looseBrand, setLooseBrand] = useState<string>('Master Paints');
+  const [looseItemName, setLooseItemName] = useState<string>('');
+  const [looseTokenCount, setLooseTokenCount] = useState<number>(1);
+  const [looseUnitValue, setLooseUnitValue] = useState<string>('500');
+
   // Success Voucher State
   const [completedTxn, setCompletedTxn] = useState<{
     id: string;
@@ -108,9 +115,13 @@ export default function TokenRedemption({
 
   const clientTokenBalance = Number((selectedClient as any)?.token_balance || 0);
 
-  // Effective cap: lower of item redeemable pool and (for registered) client balance
+  // Effective cap: if loose token, cap is client balance (if registered); otherwise check item redeemable balance
   const effectiveCap: number | undefined =
-    itemRedeemableBalance !== null
+    isLooseToken
+      ? customerMode === 'registered' && selectedClient
+        ? clientTokenBalance
+        : undefined
+      : itemRedeemableBalance !== null
       ? customerMode === 'registered' && selectedClient
         ? Math.min(itemRedeemableBalance, clientTokenBalance)
         : itemRedeemableBalance
@@ -171,9 +182,9 @@ export default function TokenRedemption({
       return;
     }
 
-    // Item is mandatory
-    if (!selectedItemId || !selectedItem) {
-      setErrorMsg('Please select the paint item whose token is being redeemed.');
+    // Item is mandatory if not loose token
+    if (!isLooseToken && (!selectedItemId || !selectedItem)) {
+      setErrorMsg('Please select the paint item whose token is being redeemed, or toggle "Accept Loose / External Brand Token".');
       return;
     }
 
@@ -182,15 +193,15 @@ export default function TokenRedemption({
       return;
     }
 
-    // Per-item redeemable balance check (client-side guard — server re-validates authoritatively)
-    if (itemRedeemableBalance !== null) {
+    // Per-item redeemable balance check (client-side guard — skipped if loose/external)
+    if (!isLooseToken && itemRedeemableBalance !== null) {
       if (itemRedeemableBalance <= 0) {
-        setErrorMsg(`All tokens for "${selectedItem.name}" have already been redeemed.`);
+        setErrorMsg(`All tokens for "${selectedItem?.name}" have already been redeemed. Toggle "Accept Loose / External Brand Token" if accepting an older or non-system token.`);
         return;
       }
       if (parsedRedeemAmount > itemRedeemableBalance) {
         setErrorMsg(
-          `Only Rs. ${itemRedeemableBalance.toLocaleString()} left to redeem for "${selectedItem.name}".`
+          `Only Rs. ${itemRedeemableBalance.toLocaleString()} left to redeem for "${selectedItem?.name}".`
         );
         return;
       }
@@ -212,6 +223,11 @@ export default function TokenRedemption({
     setSubmitting(true);
 
     try {
+      const resolvedItemName = isLooseToken
+        ? (looseItemName.trim() || `${looseBrand} Token`)
+        : selectedItem!.name;
+      const resolvedBrand = isLooseToken ? looseBrand : (selectedItem?.brand || null);
+
       const payload = {
         type: 'redeemed',
         tenant_id: tenantId,
@@ -220,12 +236,18 @@ export default function TokenRedemption({
           customerMode === 'registered'
             ? selectedClient?.name
             : walkinName.trim() || 'Walk-in Customer',
-        item_id: selectedItemId,
-        item_name: selectedItem.name,
-        brand: selectedItem.brand || null,
+        item_id: isLooseToken ? (selectedItemId || null) : selectedItemId,
+        item_name: resolvedItemName,
+        brand: resolvedBrand,
         redeemed_amount: parsedRedeemAmount,
+        token_count: isLooseToken ? Math.max(1, looseTokenCount) : 1,
+        unit_token_value: isLooseToken ? (parseFloat(looseUnitValue) || (parsedRedeemAmount / looseTokenCount)) : parsedRedeemAmount,
+        allow_external: isLooseToken,
+        is_external: isLooseToken,
         shift_id: shiftId || null,
-        notes: notes.trim() || undefined,
+        notes: notes.trim()
+          ? `${notes.trim()}${isLooseToken ? ' (Loose / External Token)' : ''}`
+          : (isLooseToken ? 'Loose / External Token' : undefined),
       };
 
       const res = await fetch('/api/tokens', {
@@ -248,7 +270,7 @@ export default function TokenRedemption({
           customerMode === 'registered'
             ? selectedClient?.name || 'Customer'
             : walkinName.trim() || 'Walk-in Customer',
-        itemName: selectedItem.name,
+        itemName: resolvedItemName,
         amount: parsedRedeemAmount,
         remainingBalance: data.remaining_balance ?? remainingBalanceAfter,
         date: new Date().toLocaleString(),
@@ -721,151 +743,275 @@ export default function TokenRedemption({
               </div>
             )}
 
-            {/* ── Paint Item Selector (mandatory) ── */}
-            <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '12px' }}>
-              <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
-                Select Paint / Item Being Redeemed *
-              </label>
-              <div style={{ position: 'relative', marginBottom: '8px' }}>
-                <Package
-                  style={{
-                    position: 'absolute',
-                    left: '10px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    width: 14,
-                    height: 14,
-                    color: '#94A3B8',
-                  }}
-                />
-                <input
-                  type="text"
-                  value={itemSearch}
-                  onChange={(e) => {
-                    setItemSearch(e.target.value);
-                    if (selectedItemId) {
-                      setSelectedItemId('');
-                      setItemRedeemableBalance(null);
-                    }
-                  }}
-                  placeholder="Search paint by name, brand, or code..."
-                  className="pos-text-input"
-                  style={{ paddingLeft: '32px', fontSize: '12px' }}
-                />
+            {/* ── Loose / External Brand Token Toggle ── */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 14px',
+                background: isLooseToken ? '#EFF6FF' : '#F8FAFC',
+                border: `1px solid ${isLooseToken ? '#93C5FD' : '#E2E8F0'}`,
+                borderRadius: '8px',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              onClick={() => {
+                const next = !isLooseToken;
+                setIsLooseToken(next);
+                if (next) {
+                  const autoAmt = (looseTokenCount * (parseFloat(looseUnitValue) || 500)).toString();
+                  setRedeemAmount(autoAmt);
+                  setErrorMsg(null);
+                }
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Ticket style={{ width: 16, height: 16, color: isLooseToken ? '#2563EB' : '#64748B' }} />
+                <div>
+                  <div style={{ fontSize: '11.5px', fontWeight: 700, color: isLooseToken ? '#1E40AF' : '#1E293B' }}>
+                    Accept Loose / External Brand Token
+                  </div>
+                  <div style={{ fontSize: '10px', color: isLooseToken ? '#3B82F6' : '#64748B' }}>
+                    Accept tokens from previous stock or company promos without POS sales history
+                  </div>
+                </div>
               </div>
+              <input
+                type="checkbox"
+                checked={isLooseToken}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  setIsLooseToken(e.target.checked);
+                  if (e.target.checked) {
+                    const autoAmt = (looseTokenCount * (parseFloat(looseUnitValue) || 500)).toString();
+                    setRedeemAmount(autoAmt);
+                    setErrorMsg(null);
+                  }
+                }}
+                style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#2563EB' }}
+              />
+            </div>
 
-              {/* Item dropdown suggestions */}
-              {!selectedItemId && (
-                <div
-                  style={{
-                    maxHeight: '160px',
-                    overflowY: 'auto',
-                    border: '1px solid #CBD5E1',
-                    borderRadius: '6px',
-                    background: '#FFFFFF',
-                    marginBottom: '8px',
-                  }}
-                >
-                  {filteredItems.length === 0 ? (
-                    <div style={{ padding: '8px', fontSize: '11px', color: '#94A3B8', textAlign: 'center' }}>
-                      {itemSearch.trim() ? 'No items found' : 'No token-enabled items — type to search all products'}
-                    </div>
-                  ) : (
-                    filteredItems.map((item) => (
-                      <div
-                        key={item.id}
-                        onClick={() => handleSelectItem(item)}
-                        style={{
-                          padding: '8px 10px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          borderBottom: '1px solid #F1F5F9',
-                          fontSize: '11.5px',
-                        }}
-                        onMouseEnter={(e) => (e.currentTarget.style.background = '#F8FAFC')}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = '#FFFFFF')}
-                      >
-                        <div>
-                          <span style={{ fontWeight: 700, color: '#0F172A' }}>{item.name}</span>
-                          {item.brand && (
-                            <span style={{ color: '#64748B', marginLeft: '6px', fontSize: '10.5px' }}>
-                              {item.brand}
+            {isLooseToken ? (
+              /* ── Loose Token Details (Brand, Count, Unit Value) ── */
+              <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#1E3A8A', display: 'block', marginBottom: '4px' }}>
+                      Paint Brand *
+                    </label>
+                    <select
+                      value={looseBrand}
+                      onChange={(e) => setLooseBrand(e.target.value)}
+                      className="pos-text-input"
+                      style={{ fontSize: '12px', background: '#FFFFFF' }}
+                    >
+                      {['Master Paints', 'Berger Paints', 'Dulux / AkzoNobel', 'Nippon Paint', 'Brighto Paints', 'Diamond Paints', 'Happilac Paints', 'Jotun Paints', 'Gobies Paints', 'General / Other'].map((b) => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#1E3A8A', display: 'block', marginBottom: '4px' }}>
+                      Token Count *
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={looseTokenCount}
+                      onChange={(e) => {
+                        const count = Math.max(1, parseInt(e.target.value) || 1);
+                        setLooseTokenCount(count);
+                        const autoAmt = (count * (parseFloat(looseUnitValue) || 0)).toString();
+                        setRedeemAmount(autoAmt);
+                      }}
+                      className="pos-text-input"
+                      style={{ fontSize: '12px', background: '#FFFFFF' }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#1E3A8A', display: 'block', marginBottom: '4px' }}>
+                      Value Per Token (Rs.) *
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={looseUnitValue}
+                      onChange={(e) => {
+                        setLooseUnitValue(e.target.value);
+                        const autoAmt = (looseTokenCount * (parseFloat(e.target.value) || 0)).toString();
+                        setRedeemAmount(autoAmt);
+                      }}
+                      className="pos-text-input"
+                      style={{ fontSize: '12px', background: '#FFFFFF' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#1E3A8A', display: 'block', marginBottom: '4px' }}>
+                      Token Description / Campaign
+                    </label>
+                    <input
+                      type="text"
+                      value={looseItemName}
+                      onChange={(e) => setLooseItemName(e.target.value)}
+                      placeholder="e.g. Weathercoat 16L Token"
+                      className="pos-text-input"
+                      style={{ fontSize: '12px', background: '#FFFFFF' }}
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* ── Paint Item Selector (standard POS linked) ── */
+              <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '12px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
+                  Select Paint / Item Being Redeemed *
+                </label>
+                <div style={{ position: 'relative', marginBottom: '8px' }}>
+                  <Package
+                    style={{
+                      position: 'absolute',
+                      left: '10px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      width: 14,
+                      height: 14,
+                      color: '#94A3B8',
+                    }}
+                  />
+                  <input
+                    type="text"
+                    value={itemSearch}
+                    onChange={(e) => {
+                      setItemSearch(e.target.value);
+                      if (selectedItemId) {
+                        setSelectedItemId('');
+                        setItemRedeemableBalance(null);
+                      }
+                    }}
+                    placeholder="Search paint by name, brand, or code..."
+                    className="pos-text-input"
+                    style={{ paddingLeft: '32px', fontSize: '12px' }}
+                  />
+                </div>
+
+                {/* Item dropdown suggestions */}
+                {!selectedItemId && (
+                  <div
+                    style={{
+                      maxHeight: '160px',
+                      overflowY: 'auto',
+                      border: '1px solid #CBD5E1',
+                      borderRadius: '6px',
+                      background: '#FFFFFF',
+                      marginBottom: '8px',
+                    }}
+                  >
+                    {filteredItems.length === 0 ? (
+                      <div style={{ padding: '8px', fontSize: '11px', color: '#94A3B8', textAlign: 'center' }}>
+                        {itemSearch.trim() ? 'No items found' : 'No token-enabled items — type to search all products'}
+                      </div>
+                    ) : (
+                      filteredItems.map((item) => (
+                        <div
+                          key={item.id}
+                          onClick={() => handleSelectItem(item)}
+                          style={{
+                            padding: '8px 10px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            borderBottom: '1px solid #F1F5F9',
+                            fontSize: '11.5px',
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = '#F8FAFC')}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = '#FFFFFF')}
+                        >
+                          <div>
+                            <span style={{ fontWeight: 700, color: '#0F172A' }}>{item.name}</span>
+                            {item.brand && (
+                              <span style={{ color: '#64748B', marginLeft: '6px', fontSize: '10.5px' }}>
+                                {item.brand}
+                              </span>
+                            )}
+                            <span style={{ color: '#94A3B8', marginLeft: '6px', fontSize: '10px', fontFamily: 'JetBrains Mono, monospace' }}>
+                              {item.code}
+                            </span>
+                          </div>
+                          {item.has_token && (
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                background: '#FEF3C7',
+                                color: '#92400E',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                border: '1px solid #FDE68A',
+                              }}
+                            >
+                              🎫 Token
                             </span>
                           )}
-                          <span style={{ color: '#94A3B8', marginLeft: '6px', fontSize: '10px', fontFamily: 'JetBrains Mono, monospace' }}>
-                            {item.code}
-                          </span>
                         </div>
-                        {item.has_token && (
-                          <span
-                            style={{
-                              fontSize: '10px',
-                              fontWeight: 700,
-                              background: '#FEF3C7',
-                              color: '#92400E',
-                              padding: '2px 6px',
-                              borderRadius: '4px',
-                              border: '1px solid #FDE68A',
-                            }}
-                          >
-                            🎫 Token
-                          </span>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
+                      ))
+                    )}
+                  </div>
+                )}
 
-              {/* Selected Item Card */}
-              {selectedItem && (
-                <div
-                  style={{
-                    background: selectedItemId ? '#FFFBEB' : '#F8FAFC',
-                    border: `1px solid ${selectedItemId ? '#FDE68A' : '#E2E8F0'}`,
-                    borderRadius: '8px',
-                    padding: '10px 12px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 800, color: '#92400E', fontSize: '13px' }}>
-                      {selectedItem.name}
+                {/* Selected Item Card */}
+                {selectedItem && (
+                  <div
+                    style={{
+                      background: selectedItemId ? '#FFFBEB' : '#F8FAFC',
+                      border: `1px solid ${selectedItemId ? '#FDE68A' : '#E2E8F0'}`,
+                      borderRadius: '8px',
+                      padding: '10px 12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 800, color: '#92400E', fontSize: '13px' }}>
+                        {selectedItem.name}
+                      </div>
+                      <div style={{ fontSize: '10.5px', color: '#B45309' }}>
+                        {selectedItem.brand || 'No brand'} · {selectedItem.code}
+                      </div>
                     </div>
-                    <div style={{ fontSize: '10.5px', color: '#B45309' }}>
-                      {selectedItem.brand || 'No brand'} · {selectedItem.code}
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '10px', color: '#92400E', textTransform: 'uppercase', fontWeight: 700 }}>
+                        Redeemable Pool
+                      </div>
+                      <div
+                        style={{
+                          fontSize: '15px',
+                          fontWeight: 800,
+                          fontFamily: 'JetBrains Mono, monospace',
+                          color: loadingItemBalance
+                            ? '#94A3B8'
+                            : (itemRedeemableBalance ?? 0) > 0
+                            ? '#B45309'
+                            : '#DC2626',
+                        }}
+                      >
+                        {loadingItemBalance
+                          ? 'Loading...'
+                          : itemRedeemableBalance !== null
+                          ? `Rs. ${itemRedeemableBalance.toLocaleString()}`
+                          : '—'}
+                      </div>
                     </div>
                   </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '10px', color: '#92400E', textTransform: 'uppercase', fontWeight: 700 }}>
-                      Redeemable Pool
-                    </div>
-                    <div
-                      style={{
-                        fontSize: '15px',
-                        fontWeight: 800,
-                        fontFamily: 'JetBrains Mono, monospace',
-                        color: loadingItemBalance
-                          ? '#94A3B8'
-                          : (itemRedeemableBalance ?? 0) > 0
-                          ? '#B45309'
-                          : '#DC2626',
-                      }}
-                    >
-                      {loadingItemBalance
-                        ? 'Loading...'
-                        : itemRedeemableBalance !== null
-                        ? `Rs. ${itemRedeemableBalance.toLocaleString()}`
-                        : '—'}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
             {/* Redeem Amount Input & Quick Chips */}
             <div>

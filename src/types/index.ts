@@ -166,7 +166,7 @@ export interface InvoiceItem {
 export interface TokenTransaction {
   id: string;
   tenant_id: string;
-  transaction_type: 'issued' | 'redeemed' | 'shop_retained';
+  transaction_type: 'issued' | 'redeemed' | 'shop_retained' | 'opening_stock' | 'write_off';
   invoice_id?: string;
   client_id?: string;
   client_name?: string;
@@ -175,6 +175,10 @@ export interface TokenTransaction {
   brand?: string;
   category?: string;
   token_value: number;
+  token_count?: number;
+  unit_token_value?: number;
+  remaining_count?: number;
+  is_external?: boolean;
   redeemed_amount?: number;
   remaining_balance?: number;
   shift_id?: string;
@@ -182,7 +186,10 @@ export interface TokenTransaction {
   claim_status?: 'pending' | 'claimed' | null;
   claimed_date?: string | null;
   claim_reference?: string | null;
-  usage_status?: 'available' | 'used' | null;
+  usage_status?: 'available' | 'used' | 'written_off' | null;
+  write_off_reason?: string | null;
+  settlement_type?: 'purchase' | 'voucher' | 'vendor_rep_cash' | 'vendor_rep_credit' | null;
+  parent_transaction_id?: string | null;
   used_against_purchase_id?: string | null;
   used_against_voucher_id?: string | null;
   used_date?: string | null;

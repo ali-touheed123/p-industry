@@ -80,12 +80,55 @@ export default function TokenLedger({
 
   // Search & Tab Filters
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [retainedTab, setRetainedTab] = useState<'available' | 'used'>('available');
+  const [retainedTab, setRetainedTab] = useState<'available' | 'used' | 'written_off'>('available');
   const [customerTypeFilter, setCustomerTypeFilter] = useState<'all' | 'issued' | 'redeemed'>('all');
+
+  // Suppliers list for vendor credit settlement
+  const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
+
+  // Opening Stockpile Modal State
+  const [showOpeningModal, setShowOpeningModal] = useState<boolean>(false);
+  const [openingBrand, setOpeningBrand] = useState<string>('Master Paints');
+  const [openingItemName, setOpeningItemName] = useState<string>('');
+  const [openingTokenCount, setOpeningTokenCount] = useState<number>(10);
+  const [openingUnitValue, setOpeningUnitValue] = useState<string>('500');
+  const [openingNotes, setOpeningNotes] = useState<string>('Safe Drawer Initial Count');
+  const [submittingOpening, setSubmittingOpening] = useState<boolean>(false);
+
+  // Settle with Vendor Rep Modal State
+  const [showSettleModal, setShowSettleModal] = useState<boolean>(false);
+  const [settleToken, setSettleToken] = useState<TokenTransaction | null>(null);
+  const [settleCount, setSettleCount] = useState<number>(1);
+  const [settleMode, setSettleMode] = useState<'vendor_rep_cash' | 'vendor_rep_credit'>('vendor_rep_cash');
+  const [settleRefCode, setSettleRefCode] = useState<string>('');
+  const [settleSupplierId, setSettleSupplierId] = useState<string>('');
+  const [submittingSettle, setSubmittingSettle] = useState<boolean>(false);
+
+  // Write-Off Modal State
+  const [showWriteOffModal, setShowWriteOffModal] = useState<boolean>(false);
+  const [writeOffToken, setWriteOffToken] = useState<TokenTransaction | null>(null);
+  const [writeOffReason, setWriteOffReason] = useState<string>('Company Rep Rejected');
+  const [submittingWriteOff, setSubmittingWriteOff] = useState<boolean>(false);
 
   // Data & Loading States
   const [transactions, setTransactions] = useState<TokenTransaction[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+
+  // Load suppliers on mount
+  useEffect(() => {
+    if (!tenantId) return;
+    fetch(`/api/suppliers?tenant_id=${tenantId}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success && Array.isArray(d.suppliers)) {
+          setSuppliers(d.suppliers);
+          if (d.suppliers.length > 0) {
+            setSettleSupplierId(d.suppliers[0].id);
+          }
+        }
+      })
+      .catch(() => {});
+  }, [tenantId]);
 
   // Fetch all token transactions for the selected period
   const fetchTokenTransactions = useCallback(async () => {
@@ -118,6 +161,116 @@ export default function TokenLedger({
   useEffect(() => {
     fetchTokenTransactions();
   }, [fetchTokenTransactions]);
+
+  // Handlers for Opening Stock, Settle Rep, and Write-Off
+  const handleSaveOpeningStock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tenantId) return;
+    setSubmittingOpening(true);
+    try {
+      const count = Math.max(1, Number(openingTokenCount) || 1);
+      const unitVal = parseFloat(openingUnitValue) || 0;
+      const totalVal = count * unitVal;
+
+      const res = await fetch('/api/tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'opening_stock',
+          tenant_id: tenantId,
+          brand: openingBrand,
+          item_name: openingItemName.trim() || `${openingBrand} Opening Token`,
+          token_count: count,
+          unit_token_value: unitVal,
+          token_value: totalVal,
+          notes: openingNotes.trim() || 'Opening safe stockpile balance',
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setShowOpeningModal(false);
+        fetchTokenTransactions();
+      } else {
+        alert(data.error || 'Failed to record opening stock');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error recording opening stock');
+    } finally {
+      setSubmittingOpening(false);
+    }
+  };
+
+  const handleSettleVendorRep = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tenantId || !settleToken) return;
+    setSubmittingSettle(true);
+    try {
+      const supplierObj = suppliers.find((s) => s.id === settleSupplierId);
+      const res = await fetch('/api/tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'settle_vendor',
+          tenant_id: tenantId,
+          token_allocations: [
+            {
+              id: settleToken.id,
+              count: Math.max(1, Number(settleCount) || 1),
+            },
+          ],
+          settlement_type: settleMode,
+          claim_reference: settleRefCode.trim() || `REP-${Date.now().toString().slice(-6)}`,
+          supplier_id: settleMode === 'vendor_rep_credit' ? settleSupplierId : undefined,
+          supplier_name: settleMode === 'vendor_rep_credit' ? supplierObj?.name : undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setShowSettleModal(false);
+        setSettleToken(null);
+        fetchTokenTransactions();
+      } else {
+        alert(data.error || 'Failed to settle with rep');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error settling with vendor rep');
+    } finally {
+      setSubmittingSettle(false);
+    }
+  };
+
+  const handleWriteOffToken = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tenantId || !writeOffToken) return;
+    setSubmittingWriteOff(true);
+    try {
+      const res = await fetch('/api/tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'write_off',
+          tenant_id: tenantId,
+          token_id: writeOffToken.id,
+          write_off_reason: writeOffReason,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setShowWriteOffModal(false);
+        setWriteOffToken(null);
+        fetchTokenTransactions();
+      } else {
+        alert(data.error || 'Failed to write off token');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error writing off token');
+    } finally {
+      setSubmittingWriteOff(false);
+    }
+  };
 
   // Handle Preset Clicks
   const handlePresetSelect = (preset: 'today' | 'yesterday' | '7days' | 'month' | 'all') => {
@@ -177,25 +330,30 @@ export default function TokenLedger({
 
     filteredTransactions.forEach((t) => {
       const val = Number(t.token_value || 0);
+      const count = Number(t.token_count) || 1;
+      const remCount = Number(t.remaining_count ?? count) || 1;
       const redeemedAmt = Number(t.redeemed_amount || val || 0);
+      const isWrittenOff = t.usage_status === 'written_off';
       const isUsed = t.usage_status === 'used' || Boolean(t.used_against_purchase_id) || Boolean(t.used_against_voucher_id);
 
-      if (t.transaction_type === 'shop_retained' || t.transaction_type === 'redeemed') {
-        if (isUsed) {
+      if (t.transaction_type === 'shop_retained' || t.transaction_type === 'redeemed' || t.transaction_type === 'opening_stock') {
+        if (isWrittenOff) {
+          // Excluded from available pool
+        } else if (isUsed) {
           retainedUsedValue += val;
-          retainedUsedCount += 1;
+          retainedUsedCount += count;
         } else {
           retainedAvailableValue += val;
-          retainedAvailableCount += 1;
+          retainedAvailableCount += remCount;
         }
       }
 
       if (t.transaction_type === 'redeemed') {
         customerRedeemedValue += redeemedAmt;
-        customerRedeemedCount += 1;
+        customerRedeemedCount += count;
       } else if (t.transaction_type === 'issued') {
         customerIssuedValue += val;
-        customerIssuedCount += 1;
+        customerIssuedCount += count;
       }
     });
 
@@ -211,12 +369,15 @@ export default function TokenLedger({
     };
   }, [filteredTransactions]);
 
-  // ── Stockpile Transactions (Shop-Retained + Customer-Redeemed) ─────────────
+  // ── Stockpile Transactions (Shop-Retained + Customer-Redeemed + Opening Stock) ─
   const stockpileTransactions = useMemo(() => {
     return filteredTransactions.filter((t) => {
-      if (t.transaction_type !== 'shop_retained' && t.transaction_type !== 'redeemed') return false;
+      if (t.transaction_type !== 'shop_retained' && t.transaction_type !== 'redeemed' && t.transaction_type !== 'opening_stock') return false;
+      const isWrittenOff = t.usage_status === 'written_off';
       const isUsed = t.usage_status === 'used' || Boolean(t.used_against_purchase_id) || Boolean(t.used_against_voucher_id);
-      return retainedTab === 'used' ? isUsed : !isUsed;
+      if (retainedTab === 'written_off') return isWrittenOff;
+      if (retainedTab === 'used') return isUsed && !isWrittenOff;
+      return !isUsed && !isWrittenOff;
     });
   }, [filteredTransactions, retainedTab]);
 
@@ -230,8 +391,9 @@ export default function TokenLedger({
     filteredTransactions
       .filter(
         (t) =>
-          (t.transaction_type === 'shop_retained' || t.transaction_type === 'redeemed') &&
+          (t.transaction_type === 'shop_retained' || t.transaction_type === 'redeemed' || t.transaction_type === 'opening_stock') &&
           t.usage_status !== 'used' &&
+          t.usage_status !== 'written_off' &&
           !t.used_against_purchase_id &&
           !t.used_against_voucher_id
       )
@@ -244,7 +406,7 @@ export default function TokenLedger({
             totalValue: 0,
           };
         }
-        groups[b].count += 1;
+        groups[b].count += (Number(t.remaining_count) || Number(t.token_count) || 1);
         groups[b].totalValue += Number(t.token_value || 0);
       });
 
@@ -421,6 +583,55 @@ export default function TokenLedger({
           >
             <FileSpreadsheet style={{ width: 14, height: 14, color: '#16A34A' }} />
             <span>Export CSV</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowOpeningModal(true)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '7px 14px',
+              background: '#D97706',
+              color: '#FFFFFF',
+              border: 'none',
+              borderRadius: '8px',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            <Coins style={{ width: 14, height: 14 }} />
+            <span>+ Opening Stockpile</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              const avail = stockpileTransactions.find(t => t.usage_status !== 'used' && t.usage_status !== 'written_off');
+              if (avail) {
+                setSettleToken(avail);
+                setSettleCount(avail.remaining_count || avail.token_count || 1);
+              }
+              setShowSettleModal(true);
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '7px 14px',
+              background: '#2563EB',
+              color: '#FFFFFF',
+              border: 'none',
+              borderRadius: '8px',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            <CheckCircle2 style={{ width: 14, height: 14 }} />
+            <span>Settle with Rep</span>
           </button>
 
           {onNavigateToPurchases && (
@@ -859,6 +1070,27 @@ export default function TokenLedger({
                   {summaryMetrics.retainedUsedCount}
                 </span>
               </button>
+
+              <button
+                onClick={() => setRetainedTab('written_off')}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  background: retainedTab === 'written_off' ? '#FFFFFF' : 'transparent',
+                  color: retainedTab === 'written_off' ? '#DC2626' : '#64748B',
+                  boxShadow: retainedTab === 'written_off' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <X style={{ width: 13, height: 13 }} />
+                <span>Written Off</span>
+              </button>
             </div>
           </div>
 
@@ -941,7 +1173,7 @@ export default function TokenLedger({
                 <thead>
                   <tr style={{ background: '#0F172A', color: '#FFFFFF', borderBottom: '1px solid #1E293B' }}>
                     <th style={{ padding: '10px 14px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '11px', fontFamily: 'JetBrains Mono, monospace' }}>
-                      {retainedTab === 'available' ? 'Date Collected' : 'Date Used'}
+                      {retainedTab === 'available' ? 'Date Collected' : retainedTab === 'used' ? 'Date Used' : 'Date Written Off'}
                     </th>
                     <th style={{ padding: '10px 14px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '11px', fontFamily: 'JetBrains Mono, monospace' }}>
                       Origin
@@ -951,6 +1183,9 @@ export default function TokenLedger({
                     </th>
                     <th style={{ padding: '10px 14px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '11px', fontFamily: 'JetBrains Mono, monospace' }}>
                       Paint Item
+                    </th>
+                    <th style={{ padding: '10px 14px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '11px', fontFamily: 'JetBrains Mono, monospace' }}>
+                      Qty &amp; Unit
                     </th>
                     <th style={{ padding: '10px 14px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', textAlign: 'right' }}>
                       Token Credit
@@ -964,6 +1199,15 @@ export default function TokenLedger({
                           Supplier
                         </th>
                       </>
+                    ) : retainedTab === 'written_off' ? (
+                      <>
+                        <th style={{ padding: '10px 14px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '11px', fontFamily: 'JetBrains Mono, monospace' }}>
+                          Reason
+                        </th>
+                        <th style={{ padding: '10px 14px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '11px', fontFamily: 'JetBrains Mono, monospace' }}>
+                          Notes
+                        </th>
+                      </>
                     ) : (
                       <>
                         <th style={{ padding: '10px 14px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '11px', fontFamily: 'JetBrains Mono, monospace' }}>
@@ -971,6 +1215,9 @@ export default function TokenLedger({
                         </th>
                         <th style={{ padding: '10px 14px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', textAlign: 'center' }}>
                           Status
+                        </th>
+                        <th style={{ padding: '10px 14px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', textAlign: 'center' }}>
+                          Actions
                         </th>
                       </>
                     )}
@@ -984,6 +1231,7 @@ export default function TokenLedger({
                     const dateStr = displayDate.toISOString().split('T')[0];
                     const timeStr = displayDate.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
                     const isRetained = t.transaction_type === 'shop_retained';
+                    const isOpening = t.transaction_type === 'opening_stock';
 
                     return (
                       <tr
@@ -1006,7 +1254,41 @@ export default function TokenLedger({
 
                         {/* Origin Badge */}
                         <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
-                          {isRetained ? (
+                          {isOpening ? (
+                            <span
+                              style={{
+                                fontSize: '10.5px',
+                                fontWeight: 700,
+                                color: '#6B21A8',
+                                background: '#F3E8FF',
+                                border: '1px solid #E9D5FF',
+                                padding: '2px 7px',
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                              }}
+                            >
+                              Opening Safe Stock
+                            </span>
+                          ) : t.is_external ? (
+                            <span
+                              style={{
+                                fontSize: '10.5px',
+                                fontWeight: 700,
+                                color: '#0369A1',
+                                background: '#E0F2FE',
+                                border: '1px solid #BAE6FD',
+                                padding: '2px 7px',
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                              }}
+                            >
+                              Loose / External
+                            </span>
+                          ) : isRetained ? (
                             <span
                               style={{
                                 fontSize: '10.5px',
@@ -1060,14 +1342,26 @@ export default function TokenLedger({
                           {t.item_name || 'Standard Paint Can'}
                         </td>
 
-                        {/* Token Value */}
+                        {/* Qty & Unit Value */}
+                        <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '11.5px', fontWeight: 700, color: '#334155' }}>
+                            {t.remaining_count !== undefined ? `${t.remaining_count} / ${t.token_count || 1}` : `${t.token_count || 1}`} pcs
+                          </span>
+                          {t.unit_token_value ? (
+                            <div style={{ fontSize: '10px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
+                              @ Rs. {Number(t.unit_token_value).toLocaleString()}
+                            </div>
+                          ) : null}
+                        </td>
+
+                        {/* Token Total Value */}
                         <td style={{ padding: '10px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                           <span
                             style={{
                               fontFamily: 'JetBrains Mono, monospace',
                               fontWeight: 800,
-                              color: retainedTab === 'available' ? '#D97706' : '#16A34A',
-                              background: retainedTab === 'available' ? '#FEF3C7' : '#DCFCE7',
+                              color: retainedTab === 'available' ? '#D97706' : retainedTab === 'used' ? '#16A34A' : '#DC2626',
+                              background: retainedTab === 'available' ? '#FEF3C7' : retainedTab === 'used' ? '#DCFCE7' : '#FEE2E2',
                               padding: '2px 8px',
                               borderRadius: '6px',
                               fontSize: '12.5px',
@@ -1086,6 +1380,7 @@ export default function TokenLedger({
                                 <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A' }}>
                                   {t.purchases?.purchase_no ||
                                     t.vouchers?.voucher_no ||
+                                    (t.claim_reference ? `Rep Ref: ${t.claim_reference}` : null) ||
                                     (t.used_against_voucher_id ? `Voucher: ${t.used_against_voucher_id.slice(0, 8)}` : null) ||
                                     (t.used_against_purchase_id ? `Purchase: ${t.used_against_purchase_id.slice(0, 8)}` : 'Applied')}
                                 </span>
@@ -1095,15 +1390,27 @@ export default function TokenLedger({
                             {/* Supplier Name */}
                             <td style={{ padding: '10px 14px' }}>
                               <span style={{ fontWeight: 600, color: '#475569' }}>
-                                {t.purchases?.supplier_name || t.vouchers?.party_name || 'Supplier / Vendor'}
+                                {t.purchases?.supplier_name || t.vouchers?.party_name || (t.settlement_type === 'vendor_rep_cash' ? 'Cash Received (Spot)' : 'Supplier / Company Rep')}
                               </span>
+                            </td>
+                          </>
+                        ) : retainedTab === 'written_off' ? (
+                          <>
+                            {/* Reason */}
+                            <td style={{ padding: '10px 14px', color: '#DC2626', fontWeight: 700 }}>
+                              {t.write_off_reason || 'Discarded / Damaged'}
+                            </td>
+
+                            {/* Notes */}
+                            <td style={{ padding: '10px 14px', color: '#64748B' }}>
+                              {t.notes || '—'}
                             </td>
                           </>
                         ) : (
                           <>
                             {/* Source Client */}
                             <td style={{ padding: '10px 14px', color: '#64748B' }}>
-                              {t.client_name || (isRetained ? 'Point of Sale' : 'Walk-in Customer')}
+                              {t.client_name || (isOpening ? 'Initial Safe Entry' : isRetained ? 'Point of Sale' : 'Walk-in Customer')}
                             </td>
 
                             {/* Status */}
@@ -1125,6 +1432,51 @@ export default function TokenLedger({
                                 <Clock style={{ width: 11, height: 11 }} />
                                 Available in Stockpile
                               </span>
+                            </td>
+
+                            {/* Actions */}
+                            <td style={{ padding: '10px 14px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSettleToken(t);
+                                    setSettleCount(t.remaining_count || t.token_count || 1);
+                                    setShowSettleModal(true);
+                                  }}
+                                  style={{
+                                    padding: '4px 8px',
+                                    background: '#EFF6FF',
+                                    color: '#2563EB',
+                                    border: '1px solid #BFDBFE',
+                                    borderRadius: '5px',
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  Settle
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setWriteOffToken(t);
+                                    setShowWriteOffModal(true);
+                                  }}
+                                  style={{
+                                    padding: '4px 8px',
+                                    background: '#FEF2F2',
+                                    color: '#DC2626',
+                                    border: '1px solid #FECACA',
+                                    borderRadius: '5px',
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  Write-Off
+                                </button>
+                              </div>
                             </td>
                           </>
                         )}
@@ -1418,6 +1770,327 @@ export default function TokenLedger({
           )}
         </div>
       </div>
+
+      {/* ── MODAL 1: ADD OPENING STOCKPILE ── */}
+      {showOpeningModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(3px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div style={{ background: '#FFFFFF', borderRadius: '12px', width: '100%', maxWidth: '480px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)', border: '1px solid #CBD5E1', overflow: 'hidden' }}>
+            <div style={{ padding: '1.25rem 1.5rem', background: '#FFFBEB', borderBottom: '1px solid #FDE68A', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Coins style={{ width: 20, height: 20, color: '#D97706' }} />
+                <h3 style={{ fontSize: '15px', fontWeight: 800, color: '#92400E', margin: 0 }}>
+                  Add Opening Stockpile (Initial Count)
+                </h3>
+              </div>
+              <button onClick={() => setShowOpeningModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#92400E' }}>
+                <X style={{ width: 18, height: 18 }} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveOpeningStock} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  Paint Brand *
+                </label>
+                <select
+                  value={openingBrand}
+                  onChange={(e) => setOpeningBrand(e.target.value)}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12.5px', fontWeight: 600, color: '#0F172A' }}
+                >
+                  {['Master Paints', 'Berger Paints', 'Dulux / AkzoNobel', 'Nippon Paint', 'Brighto Paints', 'Diamond Paints', 'Happilac Paints', 'Jotun Paints', 'Gobies Paints', 'General / Other'].map((b) => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  Token Item / Description
+                </label>
+                <input
+                  type="text"
+                  value={openingItemName}
+                  onChange={(e) => setOpeningItemName(e.target.value)}
+                  placeholder="e.g. Weathercoat 16L Safe Token"
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12.5px' }}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                    Token Count (Pcs) *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={openingTokenCount}
+                    onChange={(e) => setOpeningTokenCount(Math.max(1, parseInt(e.target.value) || 1))}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12.5px', fontFamily: 'JetBrains Mono, monospace' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                    Value Per Token (Rs.) *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={openingUnitValue}
+                    onChange={(e) => setOpeningUnitValue(e.target.value)}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12.5px', fontFamily: 'JetBrains Mono, monospace' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ padding: '10px', background: '#FEF3C7', borderRadius: '8px', border: '1px solid #FDE68A', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#92400E' }}>Total Stockpile Asset Value:</span>
+                <span style={{ fontSize: '16px', fontWeight: 900, color: '#B45309', fontFamily: 'JetBrains Mono, monospace' }}>
+                  Rs. {(openingTokenCount * (parseFloat(openingUnitValue) || 0)).toLocaleString()}
+                </span>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  Storage / Safe Notes
+                </label>
+                <input
+                  type="text"
+                  value={openingNotes}
+                  onChange={(e) => setOpeningNotes(e.target.value)}
+                  placeholder="e.g. Front Cash Safe / Drawer #2"
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12.5px' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowOpeningModal(false)}
+                  style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #CBD5E1', background: '#F8FAFC', fontSize: '12px', fontWeight: 700, color: '#475569', cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingOpening}
+                  style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', background: '#D97706', fontSize: '12px', fontWeight: 700, color: '#FFFFFF', cursor: submittingOpening ? 'not-allowed' : 'pointer' }}
+                >
+                  {submittingOpening ? 'Saving...' : 'Add to Stockpile'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL 2: SETTLE WITH VENDOR REP ── */}
+      {showSettleModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(3px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div style={{ background: '#FFFFFF', borderRadius: '12px', width: '100%', maxWidth: '520px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)', border: '1px solid #CBD5E1', overflow: 'hidden' }}>
+            <div style={{ padding: '1.25rem 1.5rem', background: '#EFF6FF', borderBottom: '1px solid #BFDBFE', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <CheckCircle2 style={{ width: 20, height: 20, color: '#2563EB' }} />
+                <h3 style={{ fontSize: '15px', fontWeight: 800, color: '#1E40AF', margin: 0 }}>
+                  Settle Tokens with Company Rep
+                </h3>
+              </div>
+              <button onClick={() => setShowSettleModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#1E40AF' }}>
+                <X style={{ width: 18, height: 18 }} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSettleVendorRep} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {settleToken ? (
+                <div style={{ padding: '10px 12px', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                  <div style={{ fontWeight: 800, color: '#0F172A', fontSize: '13px' }}>
+                    {settleToken.item_name || 'Paint Token'} ({settleToken.brand || 'General'})
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
+                    Available: <strong style={{ color: '#0F172A' }}>{settleToken.remaining_count ?? settleToken.token_count ?? 1} pcs</strong> @ Rs. {Number(settleToken.unit_token_value || (Number(settleToken.token_value) / (settleToken.remaining_count || 1))).toLocaleString()} each
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: '12px', color: '#64748B' }}>
+                  Please select a token from the table to settle.
+                </div>
+              )}
+
+              {settleToken && (
+                <div>
+                  <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                    Tokens to Surrender (Qty) *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max={settleToken.remaining_count || settleToken.token_count || 1}
+                    value={settleCount}
+                    onChange={(e) => setSettleCount(Math.min(settleToken.remaining_count || settleToken.token_count || 1, Math.max(1, parseInt(e.target.value) || 1)))}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12.5px', fontFamily: 'JetBrains Mono, monospace' }}
+                  />
+                  <div style={{ fontSize: '10.5px', color: '#64748B', marginTop: '3px' }}>
+                    Max available in this batch: {settleToken.remaining_count || settleToken.token_count || 1} tokens
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
+                  Settlement Type *
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', borderRadius: '6px', border: `1px solid ${settleMode === 'vendor_rep_cash' ? '#2563EB' : '#CBD5E1'}`, background: settleMode === 'vendor_rep_cash' ? '#EFF6FF' : '#FFFFFF', cursor: 'pointer', fontSize: '12px', fontWeight: 700, color: '#0F172A' }}>
+                    <input
+                      type="radio"
+                      name="settleMode"
+                      value="vendor_rep_cash"
+                      checked={settleMode === 'vendor_rep_cash'}
+                      onChange={() => setSettleMode('vendor_rep_cash')}
+                    />
+                    Cash on Spot
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', borderRadius: '6px', border: `1px solid ${settleMode === 'vendor_rep_credit' ? '#2563EB' : '#CBD5E1'}`, background: settleMode === 'vendor_rep_credit' ? '#EFF6FF' : '#FFFFFF', cursor: 'pointer', fontSize: '12px', fontWeight: 700, color: '#0F172A' }}>
+                    <input
+                      type="radio"
+                      name="settleMode"
+                      value="vendor_rep_credit"
+                      checked={settleMode === 'vendor_rep_credit'}
+                      onChange={() => setSettleMode('vendor_rep_credit')}
+                    />
+                    Supplier Credit Slip
+                  </label>
+                </div>
+              </div>
+
+              {settleMode === 'vendor_rep_credit' && (
+                <div>
+                  <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                    Select Supplier / Paint Company *
+                  </label>
+                  <select
+                    value={settleSupplierId}
+                    onChange={(e) => setSettleSupplierId(e.target.value)}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12.5px', color: '#0F172A' }}
+                  >
+                    {suppliers.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  Rep Slip / Claim Ref No. *
+                </label>
+                <input
+                  type="text"
+                  value={settleRefCode}
+                  onChange={(e) => setSettleRefCode(e.target.value)}
+                  placeholder="e.g. SLIP-8921 / REP-ASLAM"
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12.5px' }}
+                />
+              </div>
+
+              {settleToken && (
+                <div style={{ padding: '10px', background: '#DCFCE7', borderRadius: '8px', border: '1px solid #BBF7D0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#166534' }}>Settled Value to Claim:</span>
+                  <span style={{ fontSize: '16px', fontWeight: 900, color: '#15803D', fontFamily: 'JetBrains Mono, monospace' }}>
+                    Rs. {(settleCount * Number(settleToken.unit_token_value || (Number(settleToken.token_value) / (settleToken.remaining_count || 1)))).toLocaleString()}
+                  </span>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowSettleModal(false)}
+                  style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #CBD5E1', background: '#F8FAFC', fontSize: '12px', fontWeight: 700, color: '#475569', cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingSettle || !settleToken}
+                  style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', background: '#2563EB', fontSize: '12px', fontWeight: 700, color: '#FFFFFF', cursor: submittingSettle || !settleToken ? 'not-allowed' : 'pointer' }}
+                >
+                  {submittingSettle ? 'Processing...' : 'Confirm Surrender'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL 3: WRITE-OFF DAMAGED TOKEN ── */}
+      {showWriteOffModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(3px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div style={{ background: '#FFFFFF', borderRadius: '12px', width: '100%', maxWidth: '440px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)', border: '1px solid #CBD5E1', overflow: 'hidden' }}>
+            <div style={{ padding: '1.25rem 1.5rem', background: '#FEF2F2', borderBottom: '1px solid #FECACA', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertCircle style={{ width: 20, height: 20, color: '#DC2626' }} />
+                <h3 style={{ fontSize: '15px', fontWeight: 800, color: '#991B1B', margin: 0 }}>
+                  Write-Off Damaged / Expired Token
+                </h3>
+              </div>
+              <button onClick={() => setShowWriteOffModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#991B1B' }}>
+                <X style={{ width: 18, height: 18 }} />
+              </button>
+            </div>
+
+            <form onSubmit={handleWriteOffToken} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {writeOffToken && (
+                <div style={{ padding: '10px 12px', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                  <div style={{ fontWeight: 800, color: '#0F172A', fontSize: '13px' }}>
+                    {writeOffToken.item_name || 'Paint Token'} ({writeOffToken.brand || 'General'})
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#DC2626', fontWeight: 700, marginTop: '2px', fontFamily: 'JetBrains Mono, monospace' }}>
+                    Value to Discard: Rs. {Number(writeOffToken.token_value || 0).toLocaleString()}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  Write-Off Reason *
+                </label>
+                <select
+                  value={writeOffReason}
+                  onChange={(e) => setWriteOffReason(e.target.value)}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12.5px', color: '#0F172A' }}
+                >
+                  <option value="Company Rep Rejected">Company Rep Rejected</option>
+                  <option value="Torn / Scratched Barcode">Torn / Scratched Barcode</option>
+                  <option value="Promotion Campaign Expired">Promotion Campaign Expired</option>
+                  <option value="Counterfeit / Void Token">Counterfeit / Void Token</option>
+                  <option value="Physical Token Lost">Physical Token Lost</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowWriteOffModal(false)}
+                  style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #CBD5E1', background: '#F8FAFC', fontSize: '12px', fontWeight: 700, color: '#475569', cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingWriteOff}
+                  style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', background: '#DC2626', fontSize: '12px', fontWeight: 700, color: '#FFFFFF', cursor: submittingWriteOff ? 'not-allowed' : 'pointer' }}
+                >
+                  {submittingWriteOff ? 'Writing off...' : 'Confirm Write-Off'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

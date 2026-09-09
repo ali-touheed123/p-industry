@@ -693,6 +693,18 @@ export default function FinancialLedgers({
                 <strong className="font-mono" style={{ color: '#065f46', marginLeft: '4px' }}>Rs. {totalCredit.toLocaleString()}</strong>
               </div>
             </div>
+
+            {/* Token Credit Print Footer — visible only when client has token balance */}
+            {activeTab === 'clients' && (selectedParty?.token_balance || 0) > 0 && (
+              <div style={{ padding: '8px 1.25rem', background: '#ECFDF5', borderTop: '1px solid #A7F3D0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+                <span style={{ fontWeight: 700, color: '#059669' }}>
+                  🏷️ Loyalty Token Credit Balance: Rs. {(selectedParty.token_balance || 0).toLocaleString()}
+                </span>
+                <span style={{ fontWeight: 700, color: currentPartyBalance > (selectedParty.token_balance || 0) ? 'var(--error)' : '#065f46' }}>
+                  Net Effective Payable: Rs. {Math.max(0, currentPartyBalance - (selectedParty.token_balance || 0)).toLocaleString()}
+                </span>
+              </div>
+            )}
           </div>
         ) : (
           <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--on-surface-variant)' }}>
@@ -749,6 +761,28 @@ export default function FinancialLedgers({
                 </div>
               )}
             </div>
+
+            {/* Token Balance & Net Effective Payable (Clients Only) */}
+            {activeTab === 'clients' && (selectedParty?.token_balance || 0) > 0 && (
+              <div style={{ marginBottom: '1.25rem', padding: '10px 12px', background: '#ECFDF5', border: '1px solid #A7F3D0', borderRadius: 'var(--radius-sm)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#059669' }}>
+                    🏷️ Token Credit Balance
+                  </span>
+                  <strong className="font-mono" style={{ fontSize: '14px', color: '#059669' }}>
+                    Rs. {(selectedParty.token_balance || 0).toLocaleString()}
+                  </strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '6px', borderTop: '1px solid #A7F3D0' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#065F46' }}>
+                    Net Effective Payable
+                  </span>
+                  <strong className="font-mono" style={{ fontSize: '13px', color: Math.max(0, currentPartyBalance - (selectedParty.token_balance || 0)) > 0 ? 'var(--error)' : '#065f46' }}>
+                    Rs. {Math.max(0, currentPartyBalance - (selectedParty.token_balance || 0)).toLocaleString()}
+                  </strong>
+                </div>
+              </div>
+            )}
 
             {/* Credit Utilization (Clients Only) */}
             {activeTab === 'clients' && (

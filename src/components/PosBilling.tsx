@@ -57,6 +57,7 @@ export interface InvoiceLineItem {
   hasToken?: boolean;
   tokenValue?: number;
   tokenAction?: 'keep' | 'remove';
+  tokenReturnedWithBucket?: boolean;
 }
 
 interface HeldOrder {
@@ -140,6 +141,7 @@ export default function PosBilling({
   const [cardPayment, setCardPayment] = useState<number>(0);
   const [bankPayment, setBankPayment] = useState<number>(0);
   const [othersPayment, setOthersPayment] = useState<number>(0);
+  const [appliedTokenAmount, setAppliedTokenAmount] = useState<number>(0);
 
   // Persistent Held Orders State
   const [heldOrders, setHeldOrders] = useState<HeldOrder[]>([]);
@@ -356,30 +358,38 @@ export default function PosBilling({
 
   // Calculations
   const itemSubtotal = lineItems.reduce((sum, item) => {
-    const lineGross = item.rate * item.qty;
+    let effectiveRate = item.rate;
+    if (invoiceType === 'return' && item.hasToken && item.tokenReturnedWithBucket === false) {
+      effectiveRate = Math.max(0, effectiveRate - (item.tokenValue || 0));
+    }
+    const lineGross = effectiveRate * item.qty;
     const lineDiscount = (lineGross * item.discountPercent) / 100;
     return sum + (lineGross - lineDiscount);
   }, 0);
 
   const totalItemDiscount = lineItems.reduce((sum, item) => {
-    const lineGross = item.rate * item.qty;
+    let effectiveRate = item.rate;
+    if (invoiceType === 'return' && item.hasToken && item.tokenReturnedWithBucket === false) {
+      effectiveRate = Math.max(0, effectiveRate - (item.tokenValue || 0));
+    }
+    const lineGross = effectiveRate * item.qty;
     return sum + (lineGross * item.discountPercent) / 100;
   }, 0);
 
   const netTotal = Math.max(0, itemSubtotal - invoiceDiscount + deliveryCharge);
-  const totalPaid = cashPayment + cardPayment + bankPayment + othersPayment;
+  const totalPaid = cashPayment + cardPayment + bankPayment + othersPayment + appliedTokenAmount;
   const balanceDue = netTotal - totalPaid;
 
-  // Auto-sync cash payment continuously whenever netTotal changes if not manually edited & no card/bank/others
+  // Auto-sync cash payment continuously whenever netTotal changes if not manually edited & no other tenders
   useEffect(() => {
-    if (cardPayment === 0 && bankPayment === 0 && othersPayment === 0 && !isCashManuallyEdited) {
+    if (cardPayment === 0 && bankPayment === 0 && othersPayment === 0 && appliedTokenAmount === 0 && !isCashManuallyEdited) {
       if (lineItems.length > 0) {
         setCashPayment(netTotal);
       } else {
         setCashPayment(0);
       }
     }
-  }, [netTotal, lineItems.length, isCashManuallyEdited, cardPayment, bankPayment, othersPayment]);
+  }, [netTotal, lineItems.length, isCashManuallyEdited, cardPayment, bankPayment, othersPayment, appliedTokenAmount]);
 
   // Helper for shade info — always use the product's own shade_code from DB.
   const getShadeInfo = (item: Item) => {
@@ -596,7 +606,7 @@ export default function PosBilling({
     setSubmitting(true);
 
     const roundedNetTotal = Math.round(netTotal * 100) / 100;
-    const computedTotalPaid = Math.round((cashPayment + cardPayment + bankPayment + othersPayment) * 100) / 100;
+    const computedTotalPaid = Math.round((cashPayment + cardPayment + bankPayment + othersPayment + appliedTokenAmount) * 100) / 100;
     const rawDue = roundedNetTotal - computedTotalPaid;
     const finalDue = rawDue > 0.01 ? Math.round(rawDue * 100) / 100 : 0;
     const finalPaid = finalDue === 0 ? roundedNetTotal : computedTotalPaid;
@@ -630,10 +640,11 @@ export default function PosBilling({
     if (isCreditSale) {
       determinedPaymentType = finalPaid === 0 ? 'credit' : 'credit';
     } else {
-      if (cardPayment > 0 && cardPayment >= finalPaid) determinedPaymentType = 'card';
+      if (appliedTokenAmount > 0 && appliedTokenAmount >= finalPaid) determinedPaymentType = 'tokens';
+      else if (cardPayment > 0 && cardPayment >= finalPaid) determinedPaymentType = 'card';
       else if (bankPayment > 0 && bankPayment >= finalPaid) determinedPaymentType = 'bank';
       else if (othersPayment > 0 && othersPayment >= finalPaid) determinedPaymentType = 'others';
-      else if (cardPayment > 0 || bankPayment > 0 || othersPayment > 0) determinedPaymentType = 'split';
+      else if (cardPayment > 0 || bankPayment > 0 || othersPayment > 0 || appliedTokenAmount > 0) determinedPaymentType = 'split';
       else determinedPaymentType = 'cash';
     }
 
@@ -655,7 +666,7 @@ export default function PosBilling({
       cash_paid: cashPayment,
       card_paid: cardPayment,
       bank_paid: bankPayment,
-      others_paid: othersPayment,
+      others_paid: othersPayment + appliedTokenAmount,
       status: 'completed',
       created_by: staffName || 'Counter Staff',
       items: lineItems.map((ci) => ({
@@ -692,7 +703,7 @@ export default function PosBilling({
         const finalServerInvoiceNo = data.invoice?.invoice_no || invoiceNo;
         const savedInvoiceId = data.invoice?.id;
 
-        // Process Token Transactions for items with tokens
+        // 1. Process Token Transactions for items with tokens
         for (const item of lineItems) {
           if (item.hasToken && (item.tokenValue || 0) > 0) {
             const isRemoved = item.tokenAction === 'remove';
@@ -712,6 +723,9 @@ export default function PosBilling({
                   brand: item.brand || item.item?.brand || null,
                   category: item.category || item.item?.category || null,
                   token_value: (item.tokenValue || 0) * item.qty,
+                  token_count: item.qty,
+                  unit_token_value: item.tokenValue || 0,
+                  remaining_count: item.qty,
                   shift_id: shiftId || null,
                   notes: isRemoved
                     ? `Token removed at sale (${item.qty}x Rs. ${item.tokenValue})`
@@ -721,6 +735,33 @@ export default function PosBilling({
             } catch (tokErr) {
               console.error('Error logging token transaction:', tokErr);
             }
+          }
+        }
+
+        // 2. Process Direct Token Payment Tender against Invoice
+        if (appliedTokenAmount > 0 && selectedClient) {
+          try {
+            await fetch('/api/tokens', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                type: 'redeemed',
+                tenant_id: tenantId,
+                invoice_id: savedInvoiceId || null,
+                client_id: selectedClient.id,
+                client_name: selectedClient.name,
+                redeemed_amount: appliedTokenAmount,
+                shift_id: shiftId || null,
+                notes: `Token balance applied at POS checkout against Invoice #${finalServerInvoiceNo}`,
+              }),
+            });
+            // Update client token balance optimistically
+            setSelectedClient((prev: any) =>
+              prev ? { ...prev, token_balance: Math.max(0, Number(prev.token_balance || 0) - appliedTokenAmount) } : null
+            );
+            setAppliedTokenAmount(0);
+          } catch (tokPayErr) {
+            console.error('Error logging token payment tender:', tokPayErr);
           }
         }
 
@@ -1043,6 +1084,30 @@ export default function PosBilling({
                   style={{ width: 16, height: 16, color: '#94A3B8', position: 'absolute', right: '10px', cursor: 'pointer' }}
                 />
               </div>
+              {selectedClient && (selectedClient.token_balance || 0) > 0 && (
+                <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#ECFDF5', border: '1px solid #A7F3D0', padding: '3px 8px', borderRadius: '6px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#065F46' }}>
+                    🏷️ Available Token Balance: Rs. {(selectedClient.token_balance || 0).toLocaleString()}
+                  </span>
+                  {appliedTokenAmount > 0 ? (
+                    <span style={{ fontSize: '10px', fontWeight: 700, color: '#047857' }}>
+                      ✓ Rs. {appliedTokenAmount.toLocaleString()} Applied
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const maxApplicable = Math.min(netTotal, selectedClient.token_balance || 0);
+                        setAppliedTokenAmount(maxApplicable);
+                        setIsCashManuallyEdited(false);
+                      }}
+                      style={{ fontSize: '10px', fontWeight: 700, background: '#059669', color: '#ffffff', border: 'none', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer' }}
+                    >
+                      Apply to Bill
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* 2. Customer History Box */}
@@ -1267,41 +1332,73 @@ export default function PosBilling({
                                   Token Rs. {(item.tokenValue || 0).toLocaleString()}
                                 </span>
 
-                                <div style={{ display: 'inline-flex', borderRadius: '4px', overflow: 'hidden', border: '1px solid #CBD5E1' }}>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleToggleTokenAction(item.id, 'keep')}
+                                {invoiceType === 'return' ? (
+                                  <label
                                     style={{
-                                      padding: '2px 6px',
-                                      fontSize: '10px',
-                                      fontWeight: 700,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '5px',
+                                      fontSize: '11px',
                                       cursor: 'pointer',
-                                      border: 'none',
-                                      background: item.tokenAction !== 'remove' ? '#059669' : '#F1F5F9',
-                                      color: item.tokenAction !== 'remove' ? '#FFFFFF' : '#64748B',
+                                      background: item.tokenReturnedWithBucket !== false ? '#ECFDF5' : '#FEF2F2',
+                                      border: `1px solid ${item.tokenReturnedWithBucket !== false ? '#A7F3D0' : '#FECACA'}`,
+                                      padding: '2px 8px',
+                                      borderRadius: '4px',
                                     }}
-                                    title="Keep Token inside paint — Customer gets full price"
+                                    title="Check if customer returned bucket with original token intact inside"
                                   >
-                                    Keep (Rs. {(item.originalRate || item.rate).toLocaleString()})
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleToggleTokenAction(item.id, 'remove')}
-                                    style={{
-                                      padding: '2px 6px',
-                                      fontSize: '10px',
-                                      fontWeight: 700,
-                                      cursor: 'pointer',
-                                      border: 'none',
-                                      borderLeft: '1px solid #CBD5E1',
-                                      background: item.tokenAction === 'remove' ? '#D97706' : '#F1F5F9',
-                                      color: item.tokenAction === 'remove' ? '#FFFFFF' : '#64748B',
-                                    }}
-                                    title="Remove Token at shop — Deduct token value from sale price"
-                                  >
-                                    Remove (-Rs. {(item.tokenValue || 0).toLocaleString()})
-                                  </button>
-                                </div>
+                                    <input
+                                      type="checkbox"
+                                      checked={item.tokenReturnedWithBucket !== false}
+                                      onChange={(e) => {
+                                        const checked = e.target.checked;
+                                        setLineItems(prev => prev.map(li => li.id === item.id ? { ...li, tokenReturnedWithBucket: checked } : li));
+                                      }}
+                                      style={{ accentColor: '#059669', cursor: 'pointer' }}
+                                    />
+                                    <span style={{ fontWeight: 700, color: item.tokenReturnedWithBucket !== false ? '#065F46' : '#DC2626' }}>
+                                      {item.tokenReturnedWithBucket !== false
+                                        ? 'Token Intact (Full Refund)'
+                                        : `Token Missing (-Rs. ${((item.tokenValue || 0) * item.qty).toLocaleString()})`}
+                                    </span>
+                                  </label>
+                                ) : (
+                                  <div style={{ display: 'inline-flex', borderRadius: '4px', overflow: 'hidden', border: '1px solid #CBD5E1' }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleTokenAction(item.id, 'keep')}
+                                      style={{
+                                        padding: '2px 6px',
+                                        fontSize: '10px',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                        border: 'none',
+                                        background: item.tokenAction !== 'remove' ? '#059669' : '#F1F5F9',
+                                        color: item.tokenAction !== 'remove' ? '#FFFFFF' : '#64748B',
+                                      }}
+                                      title="Keep Token inside paint — Customer gets full price"
+                                    >
+                                      Keep (Rs. {(item.originalRate || item.rate).toLocaleString()})
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleTokenAction(item.id, 'remove')}
+                                      style={{
+                                        padding: '2px 6px',
+                                        fontSize: '10px',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                        border: 'none',
+                                        borderLeft: '1px solid #CBD5E1',
+                                        background: item.tokenAction === 'remove' ? '#D97706' : '#F1F5F9',
+                                        color: item.tokenAction === 'remove' ? '#FFFFFF' : '#64748B',
+                                      }}
+                                      title="Remove Token at shop — Deduct token value from sale price"
+                                    >
+                                      Remove (-Rs. {(item.tokenValue || 0).toLocaleString()})
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             )}
                           </td>
@@ -1514,6 +1611,26 @@ export default function PosBilling({
                 />
               </div>
             </div>
+
+            {/* Token Balance Applied Row */}
+            {appliedTokenAmount > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px', background: '#ECFDF5', border: '1px solid #A7F3D0', borderRadius: '6px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, color: '#065F46', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  🏷️ Token Balance Applied
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 800, color: '#059669', fontSize: '12px' }}>
+                    − Rs. {appliedTokenAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => { setAppliedTokenAmount(0); setIsCashManuallyEdited(false); }}
+                    style={{ fontSize: '10px', color: '#DC2626', background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 700, padding: '0 2px' }}
+                    title="Remove token balance from this bill"
+                  >✕</button>
+                </div>
+              </div>
+            )}
 
             <div style={{ paddingTop: '6px', borderTop: '1px solid #F1F5F9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
               <span style={{ color: '#475569' }}>Paid Amount</span>

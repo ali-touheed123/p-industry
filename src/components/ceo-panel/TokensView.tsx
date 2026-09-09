@@ -37,8 +37,9 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
   // Search & Navigation
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [mainTab, setMainTab] = useState<'stockpile' | 'customer'>('stockpile');
-  const [stockpileSubTab, setStockpileSubTab] = useState<'available' | 'used'>('available');
+  const [stockpileSubTab, setStockpileSubTab] = useState<'available' | 'used' | 'written_off'>('available');
   const [customerFilter, setCustomerFilter] = useState<'all' | 'issued' | 'redeemed'>('all');
+  const [showExternalOnly, setShowExternalOnly] = useState<boolean>(false);
 
   // Selected Token for Modal Detail Inspection
   const [selectedToken, setSelectedToken] = useState<TokenTransaction | null>(null);
@@ -140,18 +141,54 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
     let customerIssuedValue = 0;
     let customerIssuedCount = 0;
 
+    // Discrete physical asset tracking
+    let physicalAssetValue = 0;    // remaining_count × unit_token_value for all unredeemed stockpile rows
+    let externalIntakeValue = 0;   // is_external loose tokens accepted
+    let externalIntakeCount = 0;
+    let writeOffValue = 0;         // tokens written off (damaged/expired)
+    let writeOffCount = 0;
+    let openingStockValue = 0;
+    let openingStockCount = 0;
+
     filteredTransactions.forEach((t) => {
       const val = Number(t.token_value || 0);
       const isUsed = t.usage_status === 'used' || Boolean(t.used_against_purchase_id) || Boolean(t.used_against_voucher_id);
+      const isWrittenOff = t.usage_status === 'written_off';
 
-      if (t.transaction_type === 'shop_retained' || t.transaction_type === 'redeemed') {
+      // Discrete physical asset: use remaining_count * unit_token_value when available
+      if (
+        (t.transaction_type === 'shop_retained' || t.transaction_type === 'opening_stock') &&
+        !isUsed && !isWrittenOff
+      ) {
+        const discreteVal = t.remaining_count != null && t.unit_token_value != null
+          ? (t.remaining_count as number) * (t.unit_token_value as number)
+          : val;
+        physicalAssetValue += discreteVal;
+      }
+
+      if (t.transaction_type === 'shop_retained' || t.transaction_type === 'redeemed' || t.transaction_type === 'opening_stock') {
         if (isUsed) {
           usedStockpileValue += val;
           usedStockpileCount += 1;
-        } else {
+        } else if (!isWrittenOff) {
           usableStockpileValue += val;
           usableStockpileCount += 1;
         }
+      }
+
+      if (t.transaction_type === 'opening_stock' && !isUsed && !isWrittenOff) {
+        openingStockValue += val;
+        openingStockCount += 1;
+      }
+
+      if (t.is_external && !isUsed && !isWrittenOff) {
+        externalIntakeValue += val;
+        externalIntakeCount += 1;
+      }
+
+      if (isWrittenOff || t.transaction_type === 'write_off') {
+        writeOffValue += val;
+        writeOffCount += 1;
       }
 
       if (t.transaction_type === 'redeemed') {
@@ -172,6 +209,13 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
       customerRedeemedCount,
       customerIssuedValue,
       customerIssuedCount,
+      physicalAssetValue,
+      externalIntakeValue,
+      externalIntakeCount,
+      writeOffValue,
+      writeOffCount,
+      openingStockValue,
+      openingStockCount,
       totalRecords: filteredTransactions.length,
     };
   }, [filteredTransactions]);
@@ -200,14 +244,17 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
     return Object.values(map).sort((a, b) => b.totalValue - a.totalValue);
   }, [filteredTransactions]);
 
-  // Tab 1: Stockpile Transactions (Available vs Used)
+  // Tab 1: Stockpile Transactions (Available / Used / Written Off)
   const stockpileData = useMemo(() => {
     return filteredTransactions.filter((t) => {
-      if (t.transaction_type !== 'shop_retained' && t.transaction_type !== 'redeemed') return false;
+      const isStockpileType = t.transaction_type === 'shop_retained' || t.transaction_type === 'opening_stock';
+      if (!isStockpileType) return false;
+      if (showExternalOnly && !t.is_external) return false;
+      if (stockpileSubTab === 'written_off') return t.usage_status === 'written_off';
       const isUsed = t.usage_status === 'used' || Boolean(t.used_against_purchase_id) || Boolean(t.used_against_voucher_id);
-      return stockpileSubTab === 'used' ? isUsed : !isUsed;
+      return stockpileSubTab === 'used' ? isUsed : (!isUsed && t.usage_status !== 'written_off');
     });
-  }, [filteredTransactions, stockpileSubTab]);
+  }, [filteredTransactions, stockpileSubTab, showExternalOnly]);
 
   // Tab 2: Customer Token Activity (Issued / Redeemed)
   const customerData = useMemo(() => {
@@ -323,7 +370,7 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
         </button>
       </div>
 
-      {/* 4 Executive KPI Stat Cards */}
+      {/* KPI Stat Cards Row 1 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
         <div className="ceo-card" style={{ borderLeft: '4px solid #D97706' }}>
           <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>
@@ -334,7 +381,7 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
           </div>
           <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
             <Coins style={{ width: '13px', height: '13px', color: '#D97706' }} />
-            <span>{metrics.usableStockpileCount} tokens in physical custody</span>
+            <span>{metrics.usableStockpileCount} rows in physical custody</span>
           </div>
         </div>
 
@@ -374,6 +421,45 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
           <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
             <Tag style={{ width: '13px', height: '13px', color: '#0EA5E9' }} />
             <span>Value: {formatCurrency(metrics.customerIssuedValue)}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* KPI Stat Cards Row 2 — Physical Asset & Audit Metrics */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+        <div className="ceo-card" style={{ borderLeft: '4px solid #059669', background: '#F0FDF4' }}>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#059669' }}>
+            🏦 Physical Safe / Drawer Value
+          </div>
+          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#059669', marginTop: '6px' }}>
+            {formatCurrency(metrics.physicalAssetValue)}
+          </div>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
+            Discrete count × unit value of unredeemed stockpile rows
+          </div>
+        </div>
+
+        <div className="ceo-card" style={{ borderLeft: '4px solid #F59E0B', background: '#FFFBEB' }}>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#B45309' }}>
+            🔓 Loose / External Intake
+          </div>
+          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#B45309', marginTop: '6px' }}>
+            {formatCurrency(metrics.externalIntakeValue)}
+          </div>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
+            {metrics.externalIntakeCount} tokens accepted without POS invoice history
+          </div>
+        </div>
+
+        <div className="ceo-card" style={{ borderLeft: '4px solid #DC2626', background: '#FEF2F2' }}>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#DC2626' }}>
+            ✕ Write-Offs / Losses
+          </div>
+          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#DC2626', marginTop: '6px' }}>
+            {formatCurrency(metrics.writeOffValue)}
+          </div>
+          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
+            {metrics.writeOffCount} tokens written off — damaged / expired / rejected
           </div>
         </div>
       </div>
@@ -557,6 +643,39 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
                   }}
                 >
                   Used / Applied to POs ({metrics.usedStockpileCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStockpileSubTab('written_off')}
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    border: stockpileSubTab === 'written_off' ? '1px solid #DC2626' : '1px solid #E2E8F0',
+                    backgroundColor: stockpileSubTab === 'written_off' ? '#FEE2E2' : '#FFFFFF',
+                    color: stockpileSubTab === 'written_off' ? '#DC2626' : '#64748B',
+                  }}
+                >
+                  ✕ Written Off ({metrics.writeOffCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowExternalOnly(prev => !prev)}
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    border: showExternalOnly ? '1px solid #F59E0B' : '1px solid #E2E8F0',
+                    backgroundColor: showExternalOnly ? '#FFFBEB' : '#FFFFFF',
+                    color: showExternalOnly ? '#B45309' : '#64748B',
+                  }}
+                  title="Show only loose / external brand tokens accepted without POS invoice"
+                >
+                  🔓 Ext. Only{showExternalOnly ? ' ✓' : ''}
                 </button>
               </>
             ) : (
