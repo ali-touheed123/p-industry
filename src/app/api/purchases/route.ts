@@ -80,6 +80,7 @@ export async function POST(req: NextRequest) {
       payment_type = 'credit',
       created_by,
       items = [],
+      applied_token_ids = [],
     } = body;
 
     if (!tenant_id || !purchase_no || !items.length) {
@@ -94,6 +95,37 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
+    // 0. Validate Applied Tokens (if any)
+    let totalTokensAmount = 0;
+    if (Array.isArray(applied_token_ids) && applied_token_ids.length > 0) {
+      const { data: validTokens, error: tokensFetchErr } = await supabaseAdmin
+        .from('token_transactions')
+        .select('id, token_value, usage_status, used_against_purchase_id')
+        .eq('tenant_id', tenant_id)
+        .in('id', applied_token_ids);
+
+      if (tokensFetchErr) throw tokensFetchErr;
+
+      if (!validTokens || validTokens.length !== applied_token_ids.length) {
+        return NextResponse.json(
+          { success: false, error: 'One or more selected tokens were not found.' },
+          { status: 400 }
+        );
+      }
+
+      const alreadyUsed = validTokens.filter(
+        (t) => t.usage_status === 'used' || t.used_against_purchase_id !== null
+      );
+      if (alreadyUsed.length > 0) {
+        return NextResponse.json(
+          { success: false, error: 'One or more selected tokens have already been applied to another purchase.' },
+          { status: 400 }
+        );
+      }
+
+      totalTokensAmount = validTokens.reduce((sum, t) => sum + (Number(t.token_value) || 0), 0);
+    }
+
     // 1. Insert Purchase Header
     const { data: purchase, error: purchaseErr } = await supabaseAdmin
       .from('purchases')
@@ -106,6 +138,7 @@ export async function POST(req: NextRequest) {
         date,
         subtotal: Number(subtotal) || 0,
         discount: Number(discount) || 0,
+        tokens_applied_amount: totalTokensAmount,
         net_total: Number(net_total) || 0,
         paid_amount: Number(paid_amount) || 0,
         due_amount: Number(due_amount) || 0,
@@ -116,6 +149,22 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (purchaseErr) throw purchaseErr;
+
+    // 1b. Mark tokens as used against this purchase
+    if (Array.isArray(applied_token_ids) && applied_token_ids.length > 0) {
+      const { error: markTokensErr } = await supabaseAdmin
+        .from('token_transactions')
+        .update({
+          usage_status: 'used',
+          used_against_purchase_id: purchase.id,
+          used_date: new Date().toISOString(),
+        })
+        .in('id', applied_token_ids);
+
+      if (markTokensErr) {
+        console.error('Failed to mark tokens as used:', markTokensErr);
+      }
+    }
 
     // 2. Insert Line Items
     const purchaseItemsToInsert = items.map((it: any) => ({

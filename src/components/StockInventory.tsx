@@ -97,6 +97,9 @@ export default function StockInventory({
   const [formUnit, setFormUnit] = useState<string>('4L Gallon');
 
   const [formShadeCode, setFormShadeCode] = useState<string>('Off-White 101');
+  const [formBrand, setFormBrand] = useState<string>('');
+  const [formHasToken, setFormHasToken] = useState<boolean>(false);
+  const [formTokenValue, setFormTokenValue] = useState<string>('');
   const [formCostPrice, setFormCostPrice] = useState<string>('');
   const [formRetailPrice, setFormRetailPrice] = useState<string>('');
   const [formStockQty, setFormStockQty] = useState<string>('20');
@@ -192,10 +195,13 @@ export default function StockInventory({
     setEditingItemId(null);
     setFormCode(`PNT-${Math.floor(100 + Math.random() * 900)}`);
     setFormName('');
+    setFormBrand('');
     setFormCategory(allCategories[0] || 'Interior Emulsion');
     setFormUnit(allUnits[0] || '4L Gallon');
 
     setFormShadeCode('Off-White 101');
+    setFormHasToken(false);
+    setFormTokenValue('');
     setFormCostPrice('');
     setFormRetailPrice('');
     setFormStockQty('20');
@@ -210,10 +216,13 @@ export default function StockInventory({
     setEditingItemId(item.id);
     setFormCode(item.code);
     setFormName(item.name);
+    setFormBrand(item.brand || '');
     setFormCategory(item.category || allCategories[0]);
     setFormUnit(item.pack_size || item.unit || allUnits[0]);
 
     setFormShadeCode(item.shade_code || 'Standard');
+    setFormHasToken(Boolean(item.has_token));
+    setFormTokenValue(item.token_value ? item.token_value.toString() : '');
     setFormCostPrice(item.cost_price?.toString() || '');
     setFormRetailPrice(item.retail_price?.toString() || '');
     setFormStockQty(item.stock_qty?.toString() || '0');
@@ -256,6 +265,10 @@ export default function StockInventory({
       alert('Product name and code are required');
       return;
     }
+    if (!formBrand.trim()) {
+      alert('Brand / Manufacturer is required');
+      return;
+    }
     if (!tenantId) {
       alert('Tenant ID missing');
       return;
@@ -281,6 +294,7 @@ export default function StockInventory({
       code: normalizedCode,
       name: formName.trim(),
       category: formCategory,
+      brand: formBrand.trim(),
       unit: formUnit,
       pack_size: formUnit,
 
@@ -289,6 +303,8 @@ export default function StockInventory({
       retail_price: retail,
       stock_qty: Number(formStockQty) || 0,
       min_stock_alert: Number(formMinAlert) || 5,
+      has_token: formHasToken,
+      token_value: formHasToken ? (Number(formTokenValue) || 0) : 0,
     };
 
     try {
@@ -655,12 +671,42 @@ export default function StockInventory({
                         </td>
                         {/* Product & Shade */}
                         <td style={{ overflow: 'hidden' }}>
-                          <div style={{ fontWeight: 700, color: '#0F172A', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{prod.name}</div>
-                          {prod.shade_code && prod.shade_code !== '—' && (
-                            <div style={{ fontSize: '11px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {prod.shade_code}
-                            </div>
-                          )}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontWeight: 700, color: '#0F172A', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{prod.name}</span>
+                            {prod.has_token && (
+                              <span
+                                style={{
+                                  fontSize: '10px',
+                                  fontFamily: 'JetBrains Mono, monospace',
+                                  fontWeight: 700,
+                                  background: '#FEF3C7',
+                                  color: '#D97706',
+                                  border: '1px solid #FDE68A',
+                                  padding: '1px 5px',
+                                  borderRadius: '4px',
+                                  whiteSpace: 'nowrap',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '2px'
+                                }}
+                                title={`Paint Token worth Rs. ${Number(prod.token_value || 0).toLocaleString()}`}
+                              >
+                                🎫 Rs. {Number(prod.token_value || 0).toLocaleString()}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
+                            {prod.brand && (
+                              <span style={{ fontSize: '10px', color: '#0284C7', fontWeight: 600, background: '#E0F2FE', padding: '0 4px', borderRadius: '3px' }}>
+                                {prod.brand}
+                              </span>
+                            )}
+                            {prod.shade_code && prod.shade_code !== '—' && (
+                              <span style={{ fontSize: '11px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {prod.shade_code}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         {/* Category */}
                         <td style={{ color: '#334155', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -958,6 +1004,93 @@ export default function StockInventory({
                     style={{ fontWeight: 700 }}
                   />
                 </div>
+              </div>
+
+              {/* Brand & Paint Token Configuration */}
+              <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', padding: '10px', background: '#F8FAFC' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '8px' }}>
+                  <div>
+                    <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                      Brand / Manufacturer *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={formBrand}
+                      onChange={(e) => setFormBrand(e.target.value)}
+                      placeholder="e.g. Berger, Nippon, Master, Diamond"
+                      className="pos-text-input"
+                      style={{ fontWeight: 500 }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                      Has Paint Token? 🎫
+                    </label>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setFormHasToken(false)}
+                        style={{
+                          flex: 1,
+                          padding: '7px',
+                          borderRadius: '6px',
+                          fontWeight: 700,
+                          fontSize: '11px',
+                          border: formHasToken ? '1px solid #CBD5E1' : '2px solid #F97316',
+                          background: formHasToken ? '#FFFFFF' : '#FFF7ED',
+                          color: formHasToken ? '#64748B' : '#EA580C',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        No Token
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormHasToken(true)}
+                        style={{
+                          flex: 1,
+                          padding: '7px',
+                          borderRadius: '6px',
+                          fontWeight: 700,
+                          fontSize: '11px',
+                          border: formHasToken ? '2px solid #F97316' : '1px solid #CBD5E1',
+                          background: formHasToken ? '#FFF7ED' : '#FFFFFF',
+                          color: formHasToken ? '#EA580C' : '#64748B',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        🎫 Yes (Has Token)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {formHasToken && (
+                  <div style={{ background: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '6px', padding: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontWeight: 700, color: '#92400E', display: 'block', marginBottom: '2px', fontSize: '11px' }}>
+                        Token Face Value (Rs. / PKR) *
+                      </label>
+                      <span style={{ fontSize: '10px', color: '#B45309' }}>
+                        Physical coupon value inside paint can
+                      </span>
+                    </div>
+                    <div style={{ width: '150px' }}>
+                      <input
+                        type="number"
+                        min="1"
+                        required={formHasToken}
+                        value={formTokenValue}
+                        onChange={(e) => setFormTokenValue(e.target.value)}
+                        placeholder="e.g. 500"
+                        className="pos-text-input"
+                        style={{ fontWeight: 700, borderColor: '#F59E0B', background: '#FFFFFF' }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Modal Actions */}

@@ -25,6 +25,9 @@ import {
   CreditCard,
   Wifi,
   Bell,
+  Coins,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 
 interface PurchasesViewProps {
@@ -128,6 +131,11 @@ export default function PurchasesView({
   const [cartageFreight, setCartageFreight] = useState<number>(0);
   const [salesTaxAmount, setSalesTaxAmount] = useState<number>(0);
 
+  // Stockpile Tokens state
+  const [availableStockpileTokens, setAvailableStockpileTokens] = useState<any[]>([]);
+  const [selectedTokenIds, setSelectedTokenIds] = useState<string[]>([]);
+  const [filterTokensBySupplier, setFilterTokensBySupplier] = useState<boolean>(true);
+
   // Payment Breakdown
   const [paidAmount, setPaidAmount] = useState<number>(0);
   const [paymentMode, setPaymentMode] = useState<'credit' | 'cash' | 'bank'>('credit');
@@ -143,6 +151,49 @@ export default function PurchasesView({
     setNotification(msg);
     setTimeout(() => setNotification(null), 3000);
   };
+
+  // Fetch available stockpile tokens (shop-retained and customer-redeemed)
+  const fetchAvailableTokens = async () => {
+    if (!tenantId) return;
+    try {
+      const res = await fetch(`/api/tokens?tenant_id=${tenantId}&usage_status=available`);
+      const data = await res.json();
+      if (data.success) {
+        setAvailableStockpileTokens(data.transactions || []);
+      }
+    } catch (err) {
+      console.error('Failed to load available stockpile tokens', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchAvailableTokens();
+  }, [tenantId]);
+
+  // Fuzzy match available tokens against selected supplier / brand
+  const matchingStockpileTokens = React.useMemo(() => {
+    if (!filterTokensBySupplier) return availableStockpileTokens;
+    const supName = (selectedSupplier?.name || supplierQuery || '').toLowerCase().trim();
+    if (!supName) return availableStockpileTokens;
+    return availableStockpileTokens.filter((t) => {
+      const brand = (t.brand || '').toLowerCase().trim();
+      if (!brand) return false;
+      const brandWords = brand.split(/\s+/).filter((w: string) => w.length > 2);
+      const supWords = supName.split(/\s+/).filter((w: string) => w.length > 2);
+      return (
+        supName.includes(brand) ||
+        brand.includes(supName) ||
+        brandWords.some((w: string) => supName.includes(w)) ||
+        supWords.some((w: string) => brand.includes(w))
+      );
+    });
+  }, [availableStockpileTokens, filterTokensBySupplier, selectedSupplier, supplierQuery]);
+
+  const tokensAppliedAmount = React.useMemo(() => {
+    return availableStockpileTokens
+      .filter((t) => selectedTokenIds.includes(t.id))
+      .reduce((sum, t) => sum + (Number(t.token_value) || 0), 0);
+  }, [availableStockpileTokens, selectedTokenIds]);
 
   // Fetch real suppliers from DB if available
   useEffect(() => {
@@ -186,9 +237,14 @@ export default function PurchasesView({
 
   const effectiveSalesTax = salesTaxAmount > 0 ? salesTaxAmount : computedItemTaxes;
 
-  const netBillValue = Math.max(
+  const netBillValueBeforeTokens = Math.max(
     0,
     taxableValue + effectiveSalesTax - additionalDiscount + cartageFreight
+  );
+
+  const netBillValue = Math.max(
+    0,
+    netBillValueBeforeTokens - tokensAppliedAmount
   );
 
   const currentSupplierBalance = selectedSupplier ? Number(selectedSupplier.current_balance || selectedSupplier.currentBalance || 0) : 0;
@@ -257,6 +313,7 @@ export default function PurchasesView({
     setCartageFreight(0);
     setSalesTaxAmount(0);
     setPaidAmount(0);
+    setSelectedTokenIds([]);
     showFeedback(`Initiated new Purchase Record #${nextRecord}`);
   };
 
@@ -285,6 +342,7 @@ export default function PurchasesView({
           payment_type: paymentMode,
           created_by: staffName,
           items: items,
+          applied_token_ids: selectedTokenIds,
         }),
       });
 
@@ -294,6 +352,8 @@ export default function PurchasesView({
           `✅ ${purchaseType === 'purchase' ? 'Purchase Invoice' : 'Purchase Return'} #${purchaseInvNo} saved to database & stock updated!`
         );
         if (onStockUpdated) onStockUpdated();
+        setSelectedTokenIds([]);
+        fetchAvailableTokens();
         handleNewPurchase();
       } else {
         showFeedback(`❌ Error: ${data.error || 'Failed to save'}`);
@@ -318,6 +378,7 @@ export default function PurchasesView({
     setCartageFreight(0);
     setSalesTaxAmount(0);
     setPaidAmount(0);
+    setSelectedTokenIds([]);
     showFeedback('Purchase draft cleared.');
   };
 
@@ -1132,6 +1193,19 @@ export default function PurchasesView({
                   </div>
                 </div>
 
+                {/* (-) Tokens Applied Deduction */}
+                {tokensAppliedAmount > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#16A34A', fontWeight: 700 }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Coins style={{ width: 14, height: 14 }} />
+                      (-) Tokens Applied ({selectedTokenIds.length})
+                    </span>
+                    <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                      - Rs. {tokensAppliedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                )}
+
                 {/* NET BILL VALUE */}
                 <div
                   style={{
@@ -1144,7 +1218,7 @@ export default function PurchasesView({
                   }}
                 >
                   <span style={{ fontSize: '12px', fontWeight: 800, textTransform: 'uppercase', color: '#0F172A', letterSpacing: '0.04em' }}>
-                    NET BILL VALUE
+                    {tokensAppliedAmount > 0 ? 'PAYABLE AFTER TOKENS' : 'NET BILL VALUE'}
                   </span>
                   <span
                     style={{
@@ -1158,6 +1232,175 @@ export default function PurchasesView({
                     Rs. {netBillValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
+              </div>
+
+              {/* Card 2B: APPLY STOCKPILED TOKENS (SUPPLIER / BRAND CREDITS) */}
+              <div
+                style={{
+                  background: '#FFFFFF',
+                  border: '1px solid #FDE68A',
+                  borderLeft: '4px solid #D97706',
+                  borderRadius: '12px',
+                  padding: '14px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Coins style={{ width: 15, height: 15, color: '#D97706' }} />
+                    <span style={{ fontSize: '10.5px', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', color: '#92400E', fontWeight: 800, letterSpacing: '0.04em' }}>
+                      APPLY STOCKPILED TOKENS
+                    </span>
+                    <span
+                      style={{
+                        background: '#FEF3C7',
+                        color: '#92400E',
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        padding: '1px 6px',
+                        borderRadius: '4px',
+                        fontFamily: 'JetBrains Mono, monospace',
+                      }}
+                    >
+                      {matchingStockpileTokens.length} Available
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setFilterTokensBySupplier(!filterTokensBySupplier)}
+                      style={{
+                        fontSize: '10.5px',
+                        color: '#64748B',
+                        background: 'transparent',
+                        border: 'none',
+                        textDecoration: 'underline',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {filterTokensBySupplier ? 'Show All Brands' : 'Filter by Supplier'}
+                    </button>
+
+                    {matchingStockpileTokens.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const matchingIds = matchingStockpileTokens.map((t) => t.id);
+                          const allSelected = matchingIds.every((id) => selectedTokenIds.includes(id));
+                          if (allSelected) {
+                            setSelectedTokenIds((prev) => prev.filter((id) => !matchingIds.includes(id)));
+                          } else {
+                            setSelectedTokenIds((prev) => Array.from(new Set([...prev, ...matchingIds])));
+                          }
+                        }}
+                        style={{
+                          fontSize: '11px',
+                          color: '#D97706',
+                          background: '#FFFBEB',
+                          border: '1px solid #FDE68A',
+                          borderRadius: '4px',
+                          padding: '2px 8px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {matchingStockpileTokens.every((t) => selectedTokenIds.includes(t.id)) ? 'Deselect All' : 'Select All'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {matchingStockpileTokens.length === 0 ? (
+                  <div style={{ padding: '8px 10px', background: '#F8FAFC', borderRadius: '8px', fontSize: '11.5px', color: '#64748B', border: '1px dashed #CBD5E1' }}>
+                    {filterTokensBySupplier && (selectedSupplier || supplierQuery)
+                      ? `No matching stockpiled tokens for "${selectedSupplier?.name || supplierQuery}". Click "Show All Brands" to select any available token.`
+                      : 'No available shop-retained stockpiled tokens found in stock.'}
+                  </div>
+                ) : (
+                  <div style={{ maxHeight: '160px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {matchingStockpileTokens.map((t) => {
+                      const isChecked = selectedTokenIds.includes(t.id);
+                      return (
+                        <div
+                          key={t.id}
+                          onClick={() => {
+                            setSelectedTokenIds((prev) =>
+                              isChecked ? prev.filter((id) => id !== t.id) : [...prev, t.id]
+                            );
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '6px 10px',
+                            background: isChecked ? '#FEF3C7' : '#F8FAFC',
+                            border: isChecked ? '1px solid #F59E0B' : '1px solid #E2E8F0',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {}}
+                              style={{ cursor: 'pointer' }}
+                            />
+                            <div>
+                              <div style={{ fontSize: '12px', fontWeight: 700, color: '#0F172A' }}>
+                                {t.brand || 'General'} · <span style={{ fontWeight: 500, color: '#475569' }}>{t.item_name || 'Paint Item'}</span>
+                              </div>
+                              <div style={{ fontSize: '10px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
+                                {t.created_at ? new Date(t.created_at).toLocaleDateString('en-PK') : ''} {t.category ? `· ${t.category}` : ''}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ textAlign: 'right' }}>
+                            <span
+                              style={{
+                                fontFamily: 'JetBrains Mono, monospace',
+                                fontWeight: 800,
+                                color: '#D97706',
+                                fontSize: '12px',
+                              }}
+                            >
+                              Rs. {Number(t.token_value || 0).toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {tokensAppliedAmount > 0 && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '6px 10px',
+                      background: '#DCFCE7',
+                      border: '1px solid #86EFAC',
+                      borderRadius: '6px',
+                      fontSize: '11.5px',
+                    }}
+                  >
+                    <span style={{ fontWeight: 700, color: '#166534' }}>
+                      {selectedTokenIds.length} Token(s) Selected for Deduction
+                    </span>
+                    <span style={{ fontWeight: 800, color: '#166534', fontFamily: 'JetBrains Mono, monospace' }}>
+                      - Rs. {tokensAppliedAmount.toLocaleString()}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Card 3: SUPPLIER SETTLEMENT & TERMS */}

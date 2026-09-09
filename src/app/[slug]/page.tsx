@@ -12,6 +12,7 @@ import SalesHistory from '@/components/SalesHistory';
 import HoldInvoices from '@/components/HoldInvoices';
 import PurchasesView from '@/components/PurchasesView';
 import BranchOrders from '@/components/BranchOrders';
+import TokenLedger from '@/components/TokenLedger';
 
 import {
   ShoppingCart,
@@ -38,6 +39,7 @@ import {
   Lock,
   PackagePlus,
   RefreshCw,
+  Coins,
 } from 'lucide-react';
 
 interface PageProps {
@@ -58,7 +60,7 @@ export default function TenantAppPage({ params }: PageProps) {
   const [loginRoleTab, setLoginRoleTab] = useState<'staff' | 'ceo'>('staff');
   const [loginError, setLoginError] = useState('');
   const [activeTab, setActiveTab] = useState<
-    'pos' | 'inventory' | 'purchases' | 'sales' | 'customers' | 'returns' | 'orders' | 'hold_invoices' | 'credit_recovery' | 'reports' | 'day_close' | 'stock' | 'ledgers' | 'credit' | 'shift' | 'ceo_reports'
+    'pos' | 'inventory' | 'purchases' | 'sales' | 'customers' | 'returns' | 'orders' | 'hold_invoices' | 'credit_recovery' | 'reports' | 'day_close' | 'stock' | 'ledgers' | 'credit' | 'shift' | 'ceo_reports' | 'tokens'
   >('pos');
   const [pendingOrdersCount, setPendingOrdersCount] = useState<number>(0);
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
@@ -69,7 +71,6 @@ export default function TenantAppPage({ params }: PageProps) {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<PettyExpense[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<any | null>(null);
   const [restoringHeldOrder, setRestoringHeldOrder] = useState<any | null>(null);
   const [editingInvoice, setEditingInvoice] = useState<any | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -284,7 +285,6 @@ export default function TenantAppPage({ params }: PageProps) {
       }
       return [inv, ...p];
     });
-    setSelectedInvoiceForPrint(inv);
     await refreshItems();
   };
 
@@ -437,6 +437,7 @@ export default function TenantAppPage({ params }: PageProps) {
     { id: 'purchases',       label: 'Purchases',         icon: ShoppingBag },
     { id: 'sales',           label: 'Sales',             icon: TrendingUp },
     { id: 'customers',       label: 'Customers',         icon: Users },
+    { id: 'tokens',          label: 'Tokens',            icon: Coins },
     { id: 'orders',          label: 'Branch Orders',     icon: PackagePlus, badgeCount: pendingOrdersCount },
     { id: 'hold_invoices',   label: 'Hold Invoices',     icon: PauseCircle },
     { id: 'credit_recovery', label: 'Credit & Recovery', icon: Scale },
@@ -747,6 +748,14 @@ export default function TenantAppPage({ params }: PageProps) {
               staffUsername={currentUser?.username}
             />
           )}
+          {activeTab === 'tokens' && (
+            <TokenLedger
+              tenantId={tenant.id}
+              tenantName={tenant.name}
+              staffName={currentUser?.full_name || currentUser?.username || 'Staff'}
+              onNavigateToPos={() => setActiveTab('pos')}
+            />
+          )}
           {(activeTab === 'credit_recovery' || activeTab === 'credit') && (
             <ClientCreditRecovery
               tenantId={tenant.id}
@@ -880,40 +889,6 @@ export default function TenantAppPage({ params }: PageProps) {
           </div>
         );
       })()}
-
-      {/* ── Print Receipt Modal ── */}
-      {selectedInvoiceForPrint && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem', zIndex: 3000 }}>
-          <div style={{ width: '100%', maxWidth: '340px', padding: '1.5rem', background: '#fff', color: '#000', borderRadius: 'var(--radius-md)' }}>
-            <div style={{ textAlign: 'center', borderBottom: '1px dashed #000', paddingBottom: '0.75rem', marginBottom: '0.75rem' }}>
-              <h3 style={{ fontSize: '16px', fontWeight: '900' }}>{tenant.name}</h3>
-              <p style={{ fontSize: '11px', color: '#555', marginTop: '2px' }}>{tenant.address || 'Commercial Market'}</p>
-              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px', fontWeight: '700', marginTop: '4px' }}>{selectedInvoiceForPrint.invoice_no}</div>
-              <div style={{ fontSize: '11px', color: '#666' }}>{selectedInvoiceForPrint.date}</div>
-            </div>
-            <div style={{ borderBottom: '1px dashed #000', paddingBottom: '0.75rem', marginBottom: '0.75rem' }}>
-              {selectedInvoiceForPrint.items?.map((ci: any, idx: number) => (
-                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '3px' }}>
-                  <span>{ci.item?.name} x{ci.qty}</span>
-                  <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {(ci.qty * ci.price).toLocaleString()}</span>
-                </div>
-              ))}
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '900', fontSize: '14px', marginBottom: '1rem', fontFamily: 'JetBrains Mono, monospace' }}>
-              <span>NET TOTAL:</span>
-              <span>Rs. {selectedInvoiceForPrint.grandTotal?.toLocaleString()}</span>
-            </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={() => window.print()} style={{ flex: 1, padding: '9px', background: '#f97316', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: '700', cursor: 'pointer', fontSize: '13px' }}>
-                Print
-              </button>
-              <button onClick={() => setSelectedInvoiceForPrint(null)} style={{ flex: 1, padding: '9px', background: '#e2e8f0', color: '#000', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: '700', cursor: 'pointer', fontSize: '13px' }}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

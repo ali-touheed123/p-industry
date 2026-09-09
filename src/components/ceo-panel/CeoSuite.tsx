@@ -12,6 +12,7 @@ import { ReturnsView } from './ReturnsView';
 import { DayCloseView } from './DayCloseView';
 import { CustomersView } from './CustomersView';
 import { PurchaseView } from './PurchaseView';
+import { TokensView } from './TokensView';
 import { BranchOrdersView } from './BranchOrdersView';
 import { AuditLogsView } from './AuditLogsView';
 import { SettingsView } from './SettingsView';
@@ -269,6 +270,7 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
           {currentSection === 'day-close'     && <DayCloseView key={selectedBranch.id} branch={selectedBranch} />}
           {currentSection === 'customers'     && <CustomersView key={selectedBranch.id} branch={selectedBranch} />}
           {currentSection === 'purchase'      && <PurchaseView key={selectedBranch.id} branch={selectedBranch} />}
+          {currentSection === 'tokens'        && <TokensView key={selectedBranch.id} branch={selectedBranch} />}
           {currentSection === 'branch-orders' && <BranchOrdersView key={selectedBranch.id} branch={selectedBranch} />}
           {currentSection === 'audit-logs'    && <AuditLogsView key={selectedBranch.id} branch={selectedBranch} />}
           {currentSection === 'settings'      && <SettingsView tenant={tenant} />}

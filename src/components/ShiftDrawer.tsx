@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Shift, PettyExpense, Tenant } from '@/types';
+import { Shift, PettyExpense, Tenant, TokenTransaction } from '@/types';
 
 interface Props {
   shift: Shift | null;
@@ -49,6 +49,7 @@ export default function ShiftDrawer({
   const [purchases, setPurchases] = useState<any[]>([]);
   const [dbInvoices, setDbInvoices] = useState<any[]>([]);
   const [dbExpenses, setDbExpenses] = useState<PettyExpense[]>([]);
+  const [tokenTransactions, setTokenTransactions] = useState<TokenTransaction[]>([]);
 
   // Previous same-day shift (for reference & delta)
   const [previousSameDayShift, setPreviousSameDayShift] = useState<any | null>(null);
@@ -56,22 +57,24 @@ export default function ShiftDrawer({
   // Detect if shift is already closed
   const isShiftClosed = shift?.status === 'closed';
 
-  // Fetch today's purchases, invoices and expenses for current shift/tenant
+  // Fetch today's purchases, invoices, expenses and tokens for current shift/tenant
   React.useEffect(() => {
     if (!tenantId) return;
     const fetchShiftData = async () => {
       try {
         const todayIso = new Date().toISOString().split('T')[0];
-        const [purchasesRes, invoicesRes, expensesRes] = await Promise.all([
+        const [purchasesRes, invoicesRes, expensesRes, tokensRes] = await Promise.all([
           fetch(`/api/purchases?tenant_id=${tenantId}${shift?.id ? `&shift_id=${shift.id}` : `&start_date=${todayIso}`}`),
           fetch(`/api/invoices?tenant_id=${tenantId}${shift?.id ? `&shift_id=${shift.id}` : `&start_date=${todayIso}`}`),
           fetch(`/api/expenses?tenant_id=${tenantId}${shift?.id ? `&shift_id=${shift.id}` : ''}`),
+          fetch(`/api/tokens?tenant_id=${tenantId}${shift?.id ? `&shift_id=${shift.id}` : ''}`),
         ]);
 
-        const [purchasesData, invoicesData, expensesData] = await Promise.all([
+        const [purchasesData, invoicesData, expensesData, tokensData] = await Promise.all([
           purchasesRes.json(),
           invoicesRes.json(),
           expensesRes.json(),
+          tokensRes.json(),
         ]);
 
         if (purchasesData.success) {
@@ -82,6 +85,9 @@ export default function ShiftDrawer({
         }
         if (expensesData.success && expensesData.expenses && expensesData.expenses.length > 0) {
           setDbExpenses(expensesData.expenses);
+        }
+        if (tokensData.success && Array.isArray(tokensData.transactions)) {
+          setTokenTransactions(tokensData.transactions);
         }
       } catch (err) {
         console.error('Error fetching shift drawer data', err);
@@ -166,9 +172,54 @@ export default function ShiftDrawer({
   const currentExpenses = activeExpenses;
   const totalExpenses = currentExpenses.reduce((sum, exp) => sum + exp.amount, 0);
 
+  // Token Metrics Calculations
+  const tokensIssued = tokenTransactions
+    .filter((t) => t.transaction_type === 'issued')
+    .reduce((sum, t) => sum + Number(t.token_value || 0), 0);
+
+  const tokensRedeemed = tokenTransactions
+    .filter((t) => t.transaction_type === 'redeemed')
+    .reduce((sum, t) => sum + Number(t.redeemed_amount || t.token_value || 0), 0);
+
+  const tokenLiability = Math.max(0, tokensIssued - tokensRedeemed);
+
+  const retainedTransactions = tokenTransactions.filter(
+    (t) => t.transaction_type === 'shop_retained'
+  );
+  const retainedTotal = retainedTransactions.reduce(
+    (sum, t) => sum + Number(t.token_value || 0),
+    0
+  );
+
+  const retainedGrouped = React.useMemo(() => {
+    const groups: Record<
+      string,
+      { brand: string; category: string; count: number; totalValue: number }
+    > = {};
+    retainedTransactions.forEach((t) => {
+      const b = t.brand || 'Standard Brand';
+      const c = t.category || 'First Quality';
+      const key = `${b}__${c}`;
+      if (!groups[key]) {
+        groups[key] = {
+          brand: b,
+          category: c,
+          count: 0,
+          totalValue: 0,
+        };
+      }
+      groups[key].count += 1;
+      groups[key].totalValue += Number(t.token_value || 0);
+    });
+    return Object.values(groups);
+  }, [retainedTransactions]);
+
   // Exact Daraz Reconciliation Formula:
-  // Expected Cash = Opening Cash + Cash Inflow (Sales) - Cash Outflow (Sales Returns + Supplier Cash + Expenses)
-  const expectedCash = Math.max(0, openingCash + cashSales - cashReturns - supplierCashPaid - totalExpenses);
+  // Expected Cash = Opening Cash + Cash Inflow (Sales) - Cash Outflow (Sales Returns + Supplier Cash + Expenses + Tokens Redeemed Cash)
+  const expectedCash = Math.max(
+    0,
+    openingCash + cashSales - cashReturns - supplierCashPaid - totalExpenses - tokensRedeemed
+  );
 
   // BUG FIX #6: Actual Physical Cash does NOT default to expectedCash — requires explicit input
   const hasCashInput = actualCashInput !== '';
@@ -744,6 +795,73 @@ export default function ShiftDrawer({
 
       </div>
 
+      {/* ── Token Summary Section ── */}
+      <div className="card" style={{ padding: '1rem', marginTop: '0.875rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', borderBottom: '1px solid #F1F5F9', paddingBottom: '6px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 800, color: '#0F172A', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            🎫 Paint Token Summary
+          </span>
+          <span style={{ fontSize: '10px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
+            SHIFT TOKEN RECONCILIATION
+          </span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+          {/* Left: Customer Token Movement */}
+          <div style={{ background: '#F8FAFC', padding: '10px 12px', borderRadius: '8px', border: '1px solid #E2E8F0', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px' }}>
+            <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#334155', textTransform: 'uppercase', marginBottom: '2px' }}>
+              Customer Tokens &amp; Liabilities
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: '#64748B' }}>Tokens Issued to Customers:</span>
+              <span className="font-mono font-bold" style={{ color: '#0F172A' }}>Rs. {tokensIssued.toLocaleString()}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: '#DC2626' }}>Tokens Redeemed (Cash Paid Out):</span>
+              <span className="font-mono font-bold" style={{ color: '#DC2626' }}>- Rs. {tokensRedeemed.toLocaleString()}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #E2E8F0', paddingTop: '4px', marginTop: '2px' }}>
+              <span style={{ fontWeight: 700, color: '#0F172A' }}>Outstanding Token Liability:</span>
+              <span className="font-mono font-bold" style={{ color: '#D97706' }}>Rs. {tokenLiability.toLocaleString()}</span>
+            </div>
+          </div>
+
+          {/* Right: Shop Tokens Retained (For Company Reimbursement) */}
+          <div style={{ background: '#FEF3C7', padding: '10px 12px', borderRadius: '8px', border: '1px solid #FDE68A', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
+              <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#92400E', textTransform: 'uppercase' }}>
+                Shop Retained (Company Reimbursement)
+              </span>
+              <span style={{ fontSize: '10px', color: '#B45309', fontWeight: 700, fontFamily: 'JetBrains Mono, monospace' }}>
+                {retainedTransactions.length} tokens
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '90px', overflowY: 'auto' }}>
+              {retainedGrouped.length === 0 ? (
+                <div style={{ color: '#B45309', fontSize: '11px', fontStyle: 'italic', padding: '4px 0' }}>
+                  No shop-retained tokens during this shift.
+                </div>
+              ) : (
+                retainedGrouped.map((g, idx) => (
+                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
+                    <span style={{ color: '#78350F' }}>
+                      {g.brand} — {g.category} ({g.count} tokens):
+                    </span>
+                    <span className="font-mono font-bold" style={{ color: '#92400E' }}>Rs. {g.totalValue.toLocaleString()}</span>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #FDE68A', paddingTop: '4px', marginTop: '2px' }}>
+              <span style={{ fontWeight: 800, color: '#92400E' }}>TOTAL RETAINED CLAIM:</span>
+              <span className="font-mono font-bold" style={{ fontSize: '13px', color: '#B45309' }}>Rs. {retainedTotal.toLocaleString()}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* ── Add Expense Modal ── */}
       {showExpenseModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem', zIndex: 2500 }}>
@@ -924,6 +1042,12 @@ export default function ShiftDrawer({
                 <span>Petty Expenses:</span>
                 <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>- Rs. {totalExpenses.toLocaleString()}</span>
               </div>
+              {tokensRedeemed > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Token Cash Payouts:</span>
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>- Rs. {tokensRedeemed.toLocaleString()}</span>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '700', borderTop: '1px solid #ddd', paddingTop: '4px', marginTop: '2px' }}>
                 <span>Expected Cash:</span>
                 <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {expectedCash.toLocaleString()}</span>
@@ -935,6 +1059,23 @@ export default function ShiftDrawer({
               <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '900', color: isBalanced ? '#065f46' : '#ba1a1a', marginTop: '4px' }}>
                 <span>Variance:</span>
                 <span>{variance < 0 ? `- Rs. ${Math.abs(variance).toLocaleString()} (SHORT)` : variance > 0 ? `+ Rs. ${variance.toLocaleString()} (OVER)` : 'Rs. 0 (BALANCED)'}</span>
+              </div>
+            </div>
+
+            {/* Token summary on receipt */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '11px', borderBottom: '1px dashed #000', paddingBottom: '0.5rem', marginBottom: '0.5rem' }}>
+              <div style={{ fontWeight: '700', fontSize: '11.5px', marginBottom: '2px' }}>TOKEN SUMMARY:</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Tokens Issued:</span>
+                <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {tokensIssued.toLocaleString()}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Tokens Redeemed:</span>
+                <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {tokensRedeemed.toLocaleString()}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Shop Retained:</span>
+                <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {retainedTotal.toLocaleString()}</span>
               </div>
             </div>
 

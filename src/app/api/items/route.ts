@@ -40,6 +40,7 @@ export async function POST(req: NextRequest) {
       code,
       name,
       category,
+      brand,
       unit = 'Can',
       cost_price = 0,
       retail_price = 0,
@@ -47,10 +48,16 @@ export async function POST(req: NextRequest) {
       min_stock_alert = 5,
       shade_code,
       pack_size,
+      has_token = false,
+      token_value = 0,
     } = body;
 
     if (!tenant_id || !name || !code) {
       return NextResponse.json({ success: false, error: 'Tenant ID, Name and Item Code are required' }, { status: 400 });
+    }
+
+    if (!brand || !brand.trim()) {
+      return NextResponse.json({ success: false, error: 'Brand / Manufacturer is required' }, { status: 400 });
     }
 
     const auth = await requireTenantAuth(req, tenant_id);
@@ -83,6 +90,7 @@ export async function POST(req: NextRequest) {
         code: normalizedCode,
         name: name.trim(),
         category: category || 'General',
+        brand: brand.trim(),
         unit,
         pack_size: pack_size || unit,
         shade_code: shade_code || null,
@@ -90,6 +98,8 @@ export async function POST(req: NextRequest) {
         retail_price: Number(retail_price) || 0,
         stock_qty: Number(stock_qty) || 0,
         min_stock_alert: Number(min_stock_alert) || 5,
+        has_token: Boolean(has_token),
+        token_value: Number(token_value) || 0,
       })
       .select()
       .single();
@@ -139,6 +149,7 @@ export async function POST(req: NextRequest) {
               code: normalizedCode,
               name: name.trim(),
               category: category || 'General',
+              brand: brand.trim(),
               unit,
               pack_size: pack_size || unit,
               shade_code: shade_code || null,
@@ -146,6 +157,8 @@ export async function POST(req: NextRequest) {
               retail_price: Number(retail_price) || 0,
               stock_qty: 0,           // ← ALWAYS 0 — sister branches must use Branch Orders to get stock
               min_stock_alert: Number(min_stock_alert) || 5,
+              has_token: Boolean(has_token),
+              token_value: Number(token_value) || 0,
             });
             console.log(`[items/POST] Synced product ${normalizedCode} to sister branch "${sister.name}" with stock_qty=0`);
           }

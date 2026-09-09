@@ -52,6 +52,12 @@ export default function FinancialLedgers({
   const [submittingReceipt, setSubmittingReceipt] = useState(false);
   const [receiptError, setReceiptError] = useState('');
 
+  // Supplier Token Stockpile State (for Pay Supplier modal)
+  const [availableSupplierTokens, setAvailableSupplierTokens] = useState<any[]>([]);
+  const [selectedSupplierTokenIds, setSelectedSupplierTokenIds] = useState<string[]>([]);
+  const [filterTokensBySupplier, setFilterTokensBySupplier] = useState<boolean>(true);
+  const [loadingSupplierTokens, setLoadingSupplierTokens] = useState<boolean>(false);
+
   // Quick Add Party Modal State
   const [showAddPartyModal, setShowAddPartyModal] = useState(false);
   const [newPartyName, setNewPartyName] = useState('');
@@ -165,16 +171,80 @@ export default function FinancialLedgers({
     }
   }, [selectedParty?.id, activeTab]);
 
-  // Record Payment Receipt / Payment with structured payment_mode
+  // Fetch available tokens for supplier payment modal
+  const fetchAvailableSupplierTokens = async () => {
+    if (!tenantId) return;
+    setLoadingSupplierTokens(true);
+    try {
+      const res = await fetch(`/api/tokens?tenant_id=${tenantId}&usage_status=available`);
+      const data = await res.json();
+      if (data.success) {
+        setAvailableSupplierTokens(data.transactions || []);
+      } else {
+        setAvailableSupplierTokens([]);
+      }
+    } catch (err) {
+      console.error('Failed to load available tokens for supplier payment', err);
+      setAvailableSupplierTokens([]);
+    } finally {
+      setLoadingSupplierTokens(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showReceiptModal && activeTab === 'suppliers') {
+      setSelectedSupplierTokenIds([]);
+      fetchAvailableSupplierTokens();
+    }
+  }, [showReceiptModal, activeTab, selectedParty?.id]);
+
+  // Fuzzy match available tokens against selected supplier / brand
+  const matchingSupplierTokens = React.useMemo(() => {
+    if (activeTab !== 'suppliers') return [];
+    if (!filterTokensBySupplier) return availableSupplierTokens;
+    const supName = (selectedParty?.name || '').toLowerCase().trim();
+    if (!supName) return availableSupplierTokens;
+    return availableSupplierTokens.filter((t: any) => {
+      const brand = (t.brand || '').toLowerCase().trim();
+      if (!brand) return false;
+      const brandWords = brand.split(/\s+/).filter((w: string) => w.length > 2);
+      const supWords = supName.split(/\s+/).filter((w: string) => w.length > 2);
+      return (
+        supName.includes(brand) ||
+        brand.includes(supName) ||
+        brandWords.some((w: string) => supName.includes(w)) ||
+        supWords.some((w: string) => brand.includes(w))
+      );
+    });
+  }, [availableSupplierTokens, filterTokensBySupplier, selectedParty, activeTab]);
+
+  const supplierTokensAppliedAmount = React.useMemo(() => {
+    if (activeTab !== 'suppliers') return 0;
+    return availableSupplierTokens
+      .filter((t: any) => selectedSupplierTokenIds.includes(t.id))
+      .reduce((sum: number, t: any) => sum + (Number(t.token_value) || 0), 0);
+  }, [availableSupplierTokens, selectedSupplierTokenIds, activeTab]);
+
+  // Record Payment Receipt / Payment with structured payment_mode & tokens
   const handleRecordReceipt = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!receiptAmount || !selectedParty || !tenantId) return;
+    if (!selectedParty || !tenantId) return;
+
+    const cash = parseFloat(receiptAmount) || 0;
+    const tokensValue = activeTab === 'suppliers' ? supplierTokensAppliedAmount : 0;
+    const totalSettlement = cash + tokensValue;
+
+    if (totalSettlement <= 0) {
+      setReceiptError('Please enter a payment amount or select at least one stockpiled token.');
+      return;
+    }
+
     setSubmittingReceipt(true);
     setReceiptError('');
 
     try {
       const partyTypeParam = activeTab === 'clients' ? 'client' : activeTab === 'suppliers' ? 'supplier' : 'branch';
-      const voucherTypeParam = activeTab === 'clients' ? 'receipt' : activeTab === 'suppliers' ? 'payment' : 'payment';
+      const voucherTypeParam = activeTab === 'clients' ? 'receipt' : 'payment';
       const res = await fetch('/api/vouchers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -184,11 +254,12 @@ export default function FinancialLedgers({
           party_type: partyTypeParam,
           party_id: selectedParty.id,
           party_name: selectedParty.name,
-          amount: parseFloat(receiptAmount) || 0,
+          amount: cash,
           payment_mode: paymentMode,
           reference_no: paymentMode !== 'Cash' ? refNotes : null,
-          remarks: `${paymentMode}${refNotes ? ` (${refNotes})` : ''}`,
+          remarks: refNotes ? `${refNotes}` : undefined,
           created_by: staffName,
+          applied_token_ids: activeTab === 'suppliers' ? selectedSupplierTokenIds : [],
         }),
       });
 
@@ -197,6 +268,7 @@ export default function FinancialLedgers({
         setShowReceiptModal(false);
         setReceiptAmount('');
         setRefNotes('');
+        setSelectedSupplierTokenIds([]);
         // Refresh parties and statement
         await fetchParties();
         await fetchLedgerStatement(selectedParty.id);
@@ -771,97 +843,320 @@ export default function FinancialLedgers({
         )}
       </div>
 
-      {/* ── Record Receipt Modal ── */}
-      {showReceiptModal && selectedParty && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem', zIndex: 2500 }}>
-          <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '1.5rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <h3 className="headline-sm">
-                {activeTab === 'clients' ? 'Record Payment Receipt' : activeTab === 'suppliers' ? 'Record Supplier Payment' : 'Record Inter-Branch Settlement'}
-              </h3>
-              <button onClick={() => setShowReceiptModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--on-surface-variant)' }}>
-                <span className="material-symbols-outlined">close</span>
-              </button>
-            </div>
+      {/* ── Record Receipt / Supplier Payment Modal ── */}
+      {showReceiptModal && selectedParty && (() => {
+        const cashAmountNum = Math.max(0, parseFloat(receiptAmount) || 0);
+        const tokensAmountNum = activeTab === 'suppliers' ? supplierTokensAppliedAmount : 0;
+        const totalPaymentNum = cashAmountNum + tokensAmountNum;
+        const remainingAfterTokens = Math.max(0, currentPartyBalance - tokensAmountNum);
+        const projectedBalanceAfter = Math.max(0, currentPartyBalance - totalPaymentNum);
 
-            <div style={{ padding: '0.75rem', background: 'var(--surface-container-low)', borderRadius: 'var(--radius-sm)', marginBottom: '1rem', fontSize: '13px' }}>
-              <div>Party: <strong>{selectedParty.name}</strong></div>
-              <div style={{ color: 'var(--error)', fontWeight: 600, marginTop: '2px' }}>
-                Current Balance: Rs. {currentPartyBalance.toLocaleString()}
-              </div>
-            </div>
-
-            {receiptError && (
-              <div style={{ background: 'var(--error-container)', border: '1px solid rgba(186,26,26,0.3)', borderRadius: 'var(--radius-sm)', padding: '0.625rem 0.875rem', fontSize: '13px', color: 'var(--on-error-container)', marginBottom: '1rem' }}>
-                {receiptError}
-              </div>
-            )}
-
-            <form onSubmit={handleRecordReceipt} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div>
-                <label className="form-label">{activeTab === 'branches' ? 'Settlement Amount (Rs.) *' : 'Payment Amount (Rs.) *'}</label>
-                <input
-                  type="number"
-                  min="1"
-                  required
-                  className="form-input"
-                  placeholder="0"
-                  value={receiptAmount}
-                  onChange={e => setReceiptAmount(e.target.value)}
-                  autoFocus
-                />
-              </div>
-
-              <div>
-                <label className="form-label">Payment Mode</label>
-                <select
-                  className="form-select"
-                  value={paymentMode}
-                  onChange={e => setPaymentMode(e.target.value)}
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem', zIndex: 2500 }}>
+            <div className="card" style={{ width: '100%', maxWidth: activeTab === 'suppliers' ? '480px' : '420px', padding: '1.5rem', maxHeight: '90vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h3 className="headline-sm">
+                  {activeTab === 'clients' ? 'Record Payment Receipt' : activeTab === 'suppliers' ? 'Record Supplier Payment' : 'Record Inter-Branch Settlement'}
+                </h3>
+                <button
+                  onClick={() => {
+                    setShowReceiptModal(false);
+                    setSelectedSupplierTokenIds([]);
+                  }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--on-surface-variant)' }}
                 >
-                  <option value="Cash">Cash in Hand</option>
-                  <option value="Online Bank Transfer">Online Bank Transfer (Meezan / HBL)</option>
-                  <option value="Cheque">Bank Cheque</option>
-                  <option value="EasyPaisa / JazzCash">EasyPaisa / JazzCash</option>
-                </select>
+                  <span className="material-symbols-outlined">close</span>
+                </button>
               </div>
 
-              {paymentMode !== 'Cash' && (
-                <div>
-                  <label className="form-label">
-                    {paymentMode === 'Cheque' ? 'Cheque Number / Bank Details *' : 'Reference No / Transaction ID *'}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    className="form-input"
-                    placeholder={paymentMode === 'Cheque' ? 'e.g. Cheque #881920 (Meezan Bank)' : 'e.g. HBL-992810 / TRX-8921'}
-                    value={refNotes}
-                    onChange={e => setRefNotes(e.target.value)}
-                  />
+              {/* Balance Summary Header */}
+              <div style={{ padding: '0.75rem 1rem', background: 'var(--surface-container-low)', borderRadius: 'var(--radius-sm)', marginBottom: '1rem', fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Party:</span>
+                  <strong>{selectedParty.name}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--error)', fontWeight: 600 }}>
+                  <span>Current Outstanding Balance:</span>
+                  <span className="font-mono">Rs. {currentPartyBalance.toLocaleString()}</span>
+                </div>
+
+                {activeTab === 'suppliers' && tokensAmountNum > 0 && (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#b45309', fontWeight: 600, fontSize: '12px' }}>
+                      <span>Token Value Applied:</span>
+                      <span className="font-mono">- Rs. {tokensAmountNum.toLocaleString()}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#0F172A', fontWeight: 700, fontSize: '12px', borderTop: '1px dashed #CBD5E1', paddingTop: '4px' }}>
+                      <span>Balance After Tokens:</span>
+                      <span className="font-mono">Rs. {remainingAfterTokens.toLocaleString()}</span>
+                    </div>
+                  </>
+                )}
+
+                {activeTab === 'suppliers' && (tokensAmountNum > 0 || cashAmountNum > 0) && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#166534', fontWeight: 700, fontSize: '12px', borderTop: '1px solid #E2E8F0', paddingTop: '4px' }}>
+                    <span>Projected Balance After Payment:</span>
+                    <span className="font-mono">Rs. {projectedBalanceAfter.toLocaleString()}</span>
+                  </div>
+                )}
+              </div>
+
+              {receiptError && (
+                <div style={{ background: 'var(--error-container)', border: '1px solid rgba(186,26,26,0.3)', borderRadius: 'var(--radius-sm)', padding: '0.625rem 0.875rem', fontSize: '13px', color: 'var(--on-error-container)', marginBottom: '1rem' }}>
+                  {receiptError}
                 </div>
               )}
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowReceiptModal(false)}
-                  className="btn btn-secondary-outline"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submittingReceipt}
-                  className="btn btn-primary"
-                >
-                  {submittingReceipt ? 'Posting to Ledger...' : activeTab === 'branches' ? 'Post Settlement' : 'Post Payment'}
-                </button>
-              </div>
-            </form>
+              <form onSubmit={handleRecordReceipt} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {/* ── SUPPLIERS ONLY: STOCKPILED TOKENS CHECKLIST ── */}
+                {activeTab === 'suppliers' && (
+                  <div
+                    style={{
+                      background: '#FFFDF5',
+                      border: '1px solid #FDE68A',
+                      borderRadius: '10px',
+                      padding: '12px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: 16, color: '#D97706' }}>toll</span>
+                        <span style={{ fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', color: '#92400E', fontWeight: 800, letterSpacing: '0.04em' }}>
+                          PAY VIA STOCKPILED TOKENS
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <button
+                          type="button"
+                          onClick={() => setFilterTokensBySupplier(!filterTokensBySupplier)}
+                          style={{
+                            fontSize: '10.5px',
+                            color: '#475569',
+                            background: '#FFFFFF',
+                            border: '1px solid #CBD5E1',
+                            borderRadius: '4px',
+                            padding: '2px 6px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {filterTokensBySupplier ? 'Showing Brand-Matched' : 'All Brands'}
+                        </button>
+
+                        {matchingSupplierTokens.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const allIds = matchingSupplierTokens.map((t: any) => t.id);
+                              const allSelected = allIds.every((id: string) => selectedSupplierTokenIds.includes(id));
+                              if (allSelected) {
+                                setSelectedSupplierTokenIds((prev) => prev.filter((id) => !allIds.includes(id)));
+                              } else {
+                                setSelectedSupplierTokenIds((prev) => Array.from(new Set([...prev, ...allIds])));
+                              }
+                            }}
+                            style={{
+                              fontSize: '10.5px',
+                              color: '#D97706',
+                              background: '#FEF3C7',
+                              border: '1px solid #FDE68A',
+                              borderRadius: '4px',
+                              padding: '2px 6px',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {matchingSupplierTokens.every((t: any) => selectedSupplierTokenIds.includes(t.id)) ? 'Deselect All' : 'Select All'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {loadingSupplierTokens ? (
+                      <div style={{ padding: '8px', fontSize: '11.5px', color: '#64748B', textAlign: 'center' }}>
+                        Loading available tokens...
+                      </div>
+                    ) : matchingSupplierTokens.length === 0 ? (
+                      <div style={{ padding: '8px 10px', background: '#FFFFFF', borderRadius: '6px', fontSize: '11px', color: '#64748B', border: '1px dashed #CBD5E1' }}>
+                        {filterTokensBySupplier
+                          ? `No available stockpiled tokens matching "${selectedParty.name}". Click "All Brands" to view tokens from other brands.`
+                          : 'No available stockpiled tokens in stock.'}
+                      </div>
+                    ) : (
+                      <div style={{ maxHeight: '140px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                        {matchingSupplierTokens.map((t: any) => {
+                          const isChecked = selectedSupplierTokenIds.includes(t.id);
+                          const dateStr = t.created_at ? new Date(t.created_at).toLocaleDateString('en-PK') : '';
+                          const originLabel = t.transaction_type === 'shop_retained' ? 'Retained' : 'Redeemed';
+
+                          return (
+                            <div
+                              key={t.id}
+                              onClick={() => {
+                                setSelectedSupplierTokenIds((prev) =>
+                                  isChecked ? prev.filter((id) => id !== t.id) : [...prev, t.id]
+                                );
+                              }}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '6px 8px',
+                                background: isChecked ? '#FEF3C7' : '#FFFFFF',
+                                border: isChecked ? '1px solid #F59E0B' : '1px solid #E2E8F0',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease',
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {}}
+                                  style={{ cursor: 'pointer' }}
+                                />
+                                <div>
+                                  <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#0F172A' }}>
+                                    {t.brand || 'General'} · <span style={{ fontWeight: 500, color: '#475569' }}>{t.item_name || 'Paint Token'}</span>
+                                  </div>
+                                  <div style={{ fontSize: '9.5px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
+                                    {dateStr} · {originLabel}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div style={{ textAlign: 'right' }}>
+                                <span
+                                  style={{
+                                    fontFamily: 'JetBrains Mono, monospace',
+                                    fontWeight: 800,
+                                    color: '#D97706',
+                                    fontSize: '11.5px',
+                                  }}
+                                >
+                                  Rs. {Number(t.token_value || 0).toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {tokensAmountNum > 0 && (
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '6px 8px',
+                          background: '#DCFCE7',
+                          border: '1px solid #86EFAC',
+                          borderRadius: '6px',
+                          fontSize: '11px',
+                        }}
+                      >
+                        <span style={{ fontWeight: 700, color: '#166534' }}>
+                          {selectedSupplierTokenIds.length} Token(s) Selected for Settlement
+                        </span>
+                        <span style={{ fontWeight: 800, color: '#166534', fontFamily: 'JetBrains Mono, monospace' }}>
+                          - Rs. {tokensAmountNum.toLocaleString()}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── CASH / BANK PAYMENT FIELDS ── */}
+                <div>
+                  <label className="form-label">
+                    {activeTab === 'branches'
+                      ? 'Settlement Amount (Rs.) *'
+                      : activeTab === 'suppliers'
+                      ? tokensAmountNum > 0
+                        ? 'Remaining Cash / Bank Payment (Rs.)'
+                        : 'Payment Amount (Rs.) *'
+                      : 'Payment Amount (Rs.) *'}
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    required={tokensAmountNum === 0}
+                    className="form-input"
+                    placeholder={activeTab === 'suppliers' && tokensAmountNum > 0 ? '0 (or enter cash balance)' : '0'}
+                    value={receiptAmount}
+                    onChange={e => setReceiptAmount(e.target.value)}
+                    autoFocus={tokensAmountNum === 0}
+                  />
+                </div>
+
+                <div>
+                  <label className="form-label">Payment Mode {tokensAmountNum > 0 && cashAmountNum === 0 ? '(for cash/bank balance if any)' : ''}</label>
+                  <select
+                    className="form-select"
+                    value={paymentMode}
+                    onChange={e => setPaymentMode(e.target.value)}
+                  >
+                    <option value="Cash">Cash in Hand</option>
+                    <option value="Online Bank Transfer">Online Bank Transfer (Meezan / HBL)</option>
+                    <option value="Cheque">Bank Cheque</option>
+                    <option value="EasyPaisa / JazzCash">EasyPaisa / JazzCash</option>
+                  </select>
+                </div>
+
+                {paymentMode !== 'Cash' && cashAmountNum > 0 && (
+                  <div>
+                    <label className="form-label">
+                      {paymentMode === 'Cheque' ? 'Cheque Number / Bank Details *' : 'Reference No / Transaction ID *'}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      className="form-input"
+                      placeholder={paymentMode === 'Cheque' ? 'e.g. Cheque #881920 (Meezan Bank)' : 'e.g. HBL-992810 / TRX-8921'}
+                      value={refNotes}
+                      onChange={e => setRefNotes(e.target.value)}
+                    />
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowReceiptModal(false);
+                      setSelectedSupplierTokenIds([]);
+                    }}
+                    className="btn btn-secondary-outline"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingReceipt}
+                    className="btn btn-primary"
+                  >
+                    {submittingReceipt
+                      ? 'Posting to Ledger...'
+                      : activeTab === 'branches'
+                      ? 'Post Settlement'
+                      : activeTab === 'suppliers'
+                      ? tokensAmountNum > 0
+                        ? `Post Payment (Rs. ${totalPaymentNum.toLocaleString()})`
+                        : 'Post Payment'
+                      : 'Post Receipt'}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── Quick Add Client / Supplier Modal ── */}
       {showAddPartyModal && (

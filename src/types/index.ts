@@ -74,6 +74,7 @@ export interface Item {
   code: string;
   name: string;
   category?: string;
+  brand?: string;
   unit: string;
   pack_size?: string;
   shade_code?: string;
@@ -81,6 +82,8 @@ export interface Item {
   retail_price: number;
   stock_qty: number;
   min_stock_alert?: number;
+  has_token?: boolean;
+  token_value?: number;
   created_at?: string;
 }
 
@@ -95,6 +98,7 @@ export interface Client {
   address?: string;
   credit_limit: number;
   current_balance: number;
+  token_balance?: number;
   created_at: string;
 }
 
@@ -144,6 +148,8 @@ export interface InvoiceItem {
   item_id?: string;
   item_code?: string;
   item_name: string;
+  brand?: string;
+  category?: string;
   shade_code?: string;
   pack_size?: string;
   unit?: string;
@@ -152,6 +158,47 @@ export interface InvoiceItem {
   discount: number;
   discount_percent?: number;
   total_price: number;
+  has_token?: boolean;
+  token_value?: number;
+  token_action?: 'keep' | 'remove';
+}
+
+export interface TokenTransaction {
+  id: string;
+  tenant_id: string;
+  transaction_type: 'issued' | 'redeemed' | 'shop_retained';
+  invoice_id?: string;
+  client_id?: string;
+  client_name?: string;
+  item_id?: string;
+  item_name?: string;
+  brand?: string;
+  category?: string;
+  token_value: number;
+  redeemed_amount?: number;
+  remaining_balance?: number;
+  shift_id?: string;
+  notes?: string;
+  claim_status?: 'pending' | 'claimed' | null;
+  claimed_date?: string | null;
+  claim_reference?: string | null;
+  usage_status?: 'available' | 'used' | null;
+  used_against_purchase_id?: string | null;
+  used_against_voucher_id?: string | null;
+  used_date?: string | null;
+  purchases?: {
+    id?: string;
+    purchase_no?: string;
+    supplier_name?: string;
+    date?: string;
+  } | null;
+  vouchers?: {
+    id?: string;
+    voucher_no?: string;
+    party_name?: string;
+    date?: string;
+  } | null;
+  created_at: string;
 }
 
 export interface HeldInvoice {

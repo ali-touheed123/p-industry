@@ -12,13 +12,14 @@ import {
   Settings,
   LogOut,
   Truck,
+  Coins,
   ShieldCheck,
   ArrowLeft,
   ChevronRight,
   ChevronLeft,
 } from 'lucide-react';
 
-export type CEOSection = 'overview' | 'sales' | 'returns' | 'day-close' | 'customers' | 'purchase' | 'branch-orders' | 'audit-logs' | 'settings';
+export type CEOSection = 'overview' | 'sales' | 'returns' | 'day-close' | 'customers' | 'purchase' | 'tokens' | 'branch-orders' | 'audit-logs' | 'settings';
 
 interface ExecutiveSidebarProps {
   currentSection: CEOSection;
@@ -38,6 +39,7 @@ const NAV_ITEMS: { id: CEOSection; label: string; icon: React.ComponentType<{ st
   { id: 'day-close',     label: 'Day Close & Variance',    icon: CalendarCheck },
   { id: 'customers',     label: 'Customers & Udhaar',      icon: Users },
   { id: 'purchase',      label: 'Procurement & POs',       icon: ShoppingBag },
+  { id: 'tokens',        label: 'Token Stockpile',         icon: Coins },
   { id: 'branch-orders', label: 'Branch Transfers',        icon: Truck },
   { id: 'audit-logs',    label: 'Audit & Activity Log',    icon: ShieldCheck },
   { id: 'settings',      label: 'Branch & Commission',     icon: Settings },

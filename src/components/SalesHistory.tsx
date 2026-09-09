@@ -24,7 +24,26 @@ import {
   X,
   User,
   ShoppingBag,
+  Ticket,
+  Coins,
 } from 'lucide-react';
+
+interface TokenRedemptionRow {
+  id: string;
+  tenant_id?: string;
+  transaction_type: 'redeemed';
+  client_id?: string | null;
+  client_name: string | null;
+  item_id?: string | null;
+  item_name: string | null;
+  brand: string | null;
+  category?: string | null;
+  redeemed_amount: number;
+  remaining_balance?: number;
+  notes?: string | null;
+  shift_id?: string | null;
+  created_at: string;
+}
 
 interface Props {
   tenantId: string;
@@ -79,11 +98,13 @@ export default function SalesHistory({
   
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [paymentFilter, setPaymentFilter] = useState<string>('all');
-  const [typeFilter, setTypeFilter] = useState<'all' | 'sales' | 'return'>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'sales' | 'return' | 'token_redemption'>('all');
 
   // Invoices & Data
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [tokenRedemptions, setTokenRedemptions] = useState<TokenRedemptionRow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [loadingTokens, setLoadingTokens] = useState<boolean>(false);
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
 
   // Selected Invoice Modal / Print
@@ -102,7 +123,7 @@ export default function SalesHistory({
       if (endDate && activeDatePreset !== 'all') {
         url += `&end_date=${endDate}`;
       }
-      if (typeFilter !== 'all') {
+      if (typeFilter === 'sales' || typeFilter === 'return') {
         url += `&type=${typeFilter}`;
       }
       if (paymentFilter !== 'all') {
@@ -124,8 +145,37 @@ export default function SalesHistory({
     }
   };
 
+  // Fetch Token Redemptions from Backend
+  const fetchTokenRedemptions = async () => {
+    if (!tenantId) return;
+    setLoadingTokens(true);
+    try {
+      let url = `/api/tokens?tenant_id=${tenantId}&transaction_type=redeemed`;
+      if (startDate && activeDatePreset !== 'all') {
+        url += `&start_date=${startDate}`;
+      }
+      if (endDate && activeDatePreset !== 'all') {
+        url += `&end_date=${endDate}T23:59:59.999Z`;
+      }
+
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.success) {
+        setTokenRedemptions(data.transactions || []);
+      } else {
+        setTokenRedemptions([]);
+      }
+    } catch (err) {
+      console.error('Failed to fetch token redemptions', err);
+      setTokenRedemptions([]);
+    } finally {
+      setLoadingTokens(false);
+    }
+  };
+
   useEffect(() => {
     fetchInvoices();
+    fetchTokenRedemptions();
   }, [tenantId, startDate, endDate, typeFilter, paymentFilter, activeDatePreset]);
 
   // Handle Preset Clicks
@@ -151,7 +201,7 @@ export default function SalesHistory({
     }
   };
 
-  // Client-side search & filtering
+  // Client-side search & filtering for Invoices
   const filteredInvoices = useMemo(() => {
     return invoices.filter((inv) => {
       // Search matches
@@ -173,6 +223,56 @@ export default function SalesHistory({
       return true;
     });
   }, [invoices, searchQuery]);
+
+  // Client-side search & filtering for Token Redemptions
+  const filteredTokenRedemptions = useMemo(() => {
+    return tokenRedemptions.filter((t) => {
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchClient = t.client_name?.toLowerCase().includes(q);
+        const matchItem = t.item_name?.toLowerCase().includes(q);
+        const matchBrand = t.brand?.toLowerCase().includes(q);
+        const matchNotes = t.notes?.toLowerCase().includes(q);
+        if (!matchClient && !matchItem && !matchBrand && !matchNotes) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [tokenRedemptions, searchQuery]);
+
+  // Combined and sorted row list for display
+  type CombinedRow =
+    | { type: 'invoice'; data: Invoice; date: string }
+    | { type: 'token_redemption'; data: TokenRedemptionRow; date: string };
+
+  const combinedRows: CombinedRow[] = useMemo(() => {
+    const list: CombinedRow[] = [];
+
+    if (typeFilter !== 'token_redemption') {
+      filteredInvoices.forEach((inv) => {
+        list.push({
+          type: 'invoice',
+          data: inv,
+          date: inv.created_at || `${inv.date}T00:00:00Z`,
+        });
+      });
+    }
+
+    if (typeFilter === 'all' || typeFilter === 'token_redemption') {
+      if (paymentFilter === 'all' || paymentFilter === 'cash') {
+        filteredTokenRedemptions.forEach((t) => {
+          list.push({
+            type: 'token_redemption',
+            data: t,
+            date: t.created_at || new Date().toISOString(),
+          });
+        });
+      }
+    }
+
+    return list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [filteredInvoices, filteredTokenRedemptions, typeFilter, paymentFilter]);
 
   // Summary Metrics Calculation
   const summaryMetrics = useMemo(() => {
@@ -357,6 +457,22 @@ export default function SalesHistory({
               >
                 {filteredInvoices.length} Invoices
               </span>
+              {filteredTokenRedemptions.length > 0 && (
+                <span
+                  style={{
+                    background: '#FEF3C7',
+                    color: '#B45309',
+                    fontSize: '11px',
+                    fontFamily: 'JetBrains Mono, monospace',
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: '6px',
+                    border: '1px solid #FDE68A',
+                  }}
+                >
+                  +{filteredTokenRedemptions.length} Payouts
+                </span>
+              )}
             </div>
             <p style={{ fontSize: '12px', color: '#64748B', marginTop: '2px' }}>
               {tenantName} · Live sales reporting, invoice history &amp; item breakdowns
@@ -777,6 +893,26 @@ export default function SalesHistory({
               >
                 Returns Only
               </button>
+              <button
+                onClick={() => setTypeFilter('token_redemption')}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  background: typeFilter === 'token_redemption' ? '#FFFFFF' : 'transparent',
+                  color: typeFilter === 'token_redemption' ? '#D97706' : '#64748B',
+                  boxShadow: typeFilter === 'token_redemption' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+              >
+                <Ticket style={{ width: 13, height: 13, color: '#D97706' }} />
+                Token Payouts
+              </button>
             </div>
 
             {/* Payment Mode Selector */}
@@ -830,7 +966,7 @@ export default function SalesHistory({
                 Loading sales records from Supabase...
               </p>
             </div>
-          ) : filteredInvoices.length === 0 ? (
+          ) : combinedRows.length === 0 ? (
             <div style={{ padding: '3.5rem 1.5rem', textAlign: 'center' }}>
               <div
                 style={{
@@ -848,10 +984,10 @@ export default function SalesHistory({
                 <Receipt style={{ width: 28, height: 28 }} />
               </div>
               <h3 style={{ fontSize: '16px', fontWeight: 800, color: '#0F172A', marginBottom: '4px' }}>
-                No Sales Invoices Found
+                No Records Found
               </h3>
               <p style={{ fontSize: '13px', color: '#64748B', maxWidth: '400px', margin: '0 auto 1.25rem' }}>
-                No completed sales or returns recorded for the selected date range ({startDate || 'All'} to {endDate || 'All'}).
+                No completed sales, returns, or token payouts recorded for the selected date range ({startDate || 'All'} to {endDate || 'All'}).
               </p>
               {onNavigateToPos && (
                 <button
@@ -916,7 +1052,186 @@ export default function SalesHistory({
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredInvoices.map((inv, idx) => {
+                  {combinedRows.map((row, idx) => {
+                    if (row.type === 'token_redemption') {
+                      const t = row.data;
+                      const createdDate = t.created_at ? new Date(t.created_at) : new Date();
+                      const timeStr = createdDate.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
+                      const dateStr = createdDate.toISOString().split('T')[0];
+
+                      return (
+                        <tr
+                          key={`token-${t.id || idx}`}
+                          style={{
+                            borderBottom: '1px solid #FDE68A',
+                            background: idx % 2 === 0 ? '#FFFDF5' : '#FEFCE8',
+                            transition: 'background 0.15s ease',
+                          }}
+                        >
+                          {/* Icon Indicator */}
+                          <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                            <Ticket style={{ width: 14, height: 14, color: '#D97706', margin: '0 auto' }} />
+                          </td>
+
+                          {/* Invoice # replacement */}
+                          <td style={{ padding: '10px 14px' }}>
+                            <span
+                              style={{
+                                fontSize: '10.5px',
+                                fontWeight: 800,
+                                background: '#FEF3C7',
+                                color: '#B45309',
+                                padding: '2px 7px',
+                                borderRadius: '5px',
+                                border: '1px solid #FDE68A',
+                                fontFamily: 'JetBrains Mono, monospace',
+                                letterSpacing: '0.02em',
+                              }}
+                            >
+                              TOKEN PAYOUT
+                            </span>
+                          </td>
+
+                          {/* Date & Time */}
+                          <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
+                            <div style={{ fontWeight: 600, color: '#1E293B', fontFamily: 'JetBrains Mono, monospace', fontSize: '12px' }}>
+                              {dateStr}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
+                              {timeStr}
+                            </div>
+                          </td>
+
+                          {/* Customer */}
+                          <td style={{ padding: '10px 14px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <div
+                                style={{
+                                  width: '24px',
+                                  height: '24px',
+                                  borderRadius: '50%',
+                                  background: '#FEF3C7',
+                                  color: '#B45309',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '10px',
+                                  fontWeight: 700,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {t.client_name ? t.client_name.charAt(0).toUpperCase() : 'W'}
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                                <span style={{ fontWeight: 600, color: '#0F172A', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {t.client_name || 'Walk-in Customer'}
+                                </span>
+                                {t.notes && (
+                                  <span style={{ fontSize: '10px', color: '#64748B', fontStyle: 'italic', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {t.notes}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Payment Mode */}
+                          <td style={{ padding: '10px 14px' }}>
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                textTransform: 'uppercase',
+                                fontFamily: 'JetBrains Mono, monospace',
+                                background: '#FEF3C7',
+                                color: '#92400E',
+                                border: '1px solid #FDE68A',
+                              }}
+                            >
+                              <Coins style={{ width: 11, height: 11 }} />
+                              Cash Payout
+                            </span>
+                          </td>
+
+                          {/* Items */}
+                          <td style={{ padding: '10px 14px', textAlign: 'center', fontSize: '11.5px', color: '#334155' }}>
+                            {t.item_name ? (
+                              <span style={{ fontWeight: 600 }}>
+                                {t.item_name}
+                                {t.brand && <span style={{ color: '#64748B', fontSize: '10px', display: 'block' }}>({t.brand})</span>}
+                              </span>
+                            ) : (
+                              <span style={{ color: '#94A3B8' }}>—</span>
+                            )}
+                          </td>
+
+                          {/* Subtotal */}
+                          <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', color: '#94A3B8' }}>
+                            —
+                          </td>
+
+                          {/* Discount */}
+                          <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', color: '#94A3B8' }}>
+                            —
+                          </td>
+
+                          {/* Net Total */}
+                          <td
+                            style={{
+                              padding: '10px 14px',
+                              textAlign: 'right',
+                              fontFamily: 'JetBrains Mono, monospace',
+                              fontWeight: 800,
+                              fontSize: '13.5px',
+                              color: '#D97706',
+                            }}
+                          >
+                            -Rs. {Number(t.redeemed_amount || 0).toLocaleString()}
+                          </td>
+
+                          {/* Paid */}
+                          <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', color: '#94A3B8' }}>
+                            —
+                          </td>
+
+                          {/* Due / Balance */}
+                          <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', color: '#94A3B8' }}>
+                            —
+                          </td>
+
+                          {/* Status */}
+                          <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                            <span
+                              style={{
+                                display: 'inline-block',
+                                padding: '2px 7px',
+                                borderRadius: '4px',
+                                fontSize: '10.5px',
+                                fontWeight: 800,
+                                textTransform: 'uppercase',
+                                background: '#FEF3C7',
+                                color: '#B45309',
+                                border: '1px solid #FDE68A',
+                              }}
+                            >
+                              PAYOUT
+                            </span>
+                          </td>
+
+                          {/* Actions */}
+                          <td style={{ padding: '10px 14px', textAlign: 'center', color: '#94A3B8' }}>
+                            —
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    const inv = row.data;
                     const isExpanded = expandedInvoiceId === inv.id;
                     const isReturn = inv.invoice_type === 'return';
                     const createdDate = inv.created_at ? new Date(inv.created_at) : new Date();
@@ -1250,27 +1565,45 @@ export default function SalesHistory({
                                   </thead>
                                   <tbody>
                                     {(inv.invoice_items || inv.items) && (inv.invoice_items || inv.items)!.length > 0 ? (
-                                      (inv.invoice_items || inv.items)!.map((item: InvoiceItem, itemIdx: number) => (
-                                        <tr key={item.id || itemIdx} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                                      (inv.invoice_items || inv.items)!.map((item: any, iIdx: number) => (
+                                        <tr key={item.id || iIdx} style={{ borderBottom: '1px solid #F1F5F9' }}>
                                           <td style={{ padding: '6px 10px', fontWeight: 600, color: '#0F172A' }}>
-                                            <span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#64748B', marginRight: '6px', fontSize: '11px' }}>
-                                              {item.item_code || `ITM-${itemIdx + 1}`}
-                                            </span>
                                             {item.item_name}
+                                            {item.item_code && (
+                                              <span style={{ fontSize: '10px', color: '#64748B', marginLeft: '6px', fontFamily: 'JetBrains Mono, monospace' }}>
+                                                [{item.item_code}]
+                                              </span>
+                                            )}
                                           </td>
-                                          <td style={{ padding: '6px 10px' }}>
-                                            <span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#334155' }}>
-                                              {item.shade_code || 'Standard'}
-                                            </span>
+                                          <td style={{ padding: '6px 10px', color: '#475569' }}>
+                                            {item.shade_code ? (
+                                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                                {item.shade_color_hex && (
+                                                  <span
+                                                    style={{
+                                                      width: '10px',
+                                                      height: '10px',
+                                                      borderRadius: '50%',
+                                                      background: item.shade_color_hex,
+                                                      display: 'inline-block',
+                                                      border: '1px solid #CBD5E1',
+                                                    }}
+                                                  />
+                                                )}
+                                                {item.shade_code}
+                                              </span>
+                                            ) : (
+                                              '—'
+                                            )}
                                           </td>
                                           <td style={{ padding: '6px 10px', color: '#64748B' }}>
-                                            {item.pack_size || item.unit || 'Can'}
+                                            {item.pack_size || item.unit || 'Standard'}
                                           </td>
                                           <td style={{ padding: '6px 10px', textAlign: 'center', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700 }}>
                                             {item.qty}
                                           </td>
                                           <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', color: '#475569' }}>
-                                            Rs. {Number(item.unit_price || 0).toLocaleString()}
+                                            Rs. {Number(item.unit_price).toLocaleString()}
                                           </td>
                                           <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', color: Number(item.discount) > 0 ? '#DC2626' : '#94A3B8' }}>
                                             {Number(item.discount) > 0 ? `Rs. ${Number(item.discount).toLocaleString()}` : '0'}

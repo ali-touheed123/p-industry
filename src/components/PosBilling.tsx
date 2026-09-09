@@ -19,7 +19,10 @@ import {
   History,
   Tag,
   Bell,
+  Ticket,
+  Coins,
 } from 'lucide-react';
+import TokenRedemption from './TokenRedemption';
 
 interface Props {
   items: Item[];
@@ -41,13 +44,19 @@ export interface InvoiceLineItem {
   item?: Item;
   code: string;
   productName: string;
+  brand?: string;
+  category?: string;
   shadeCode: string;
   shadeColorHex: string;
   packSize: string;
   qty: number;
   unit: string;
   rate: number;
+  originalRate?: number;
   discountPercent: number;
+  hasToken?: boolean;
+  tokenValue?: number;
+  tokenAction?: 'keep' | 'remove';
 }
 
 interface HeldOrder {
@@ -140,9 +149,28 @@ export default function PosBilling({
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [notification, setNotification] = useState<string | null>(null);
   const [printReceiptData, setPrintReceiptData] = useState<any | null>(null);
+  const [showTokenRedemptionModal, setShowTokenRedemptionModal] = useState<boolean>(false);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const prevLineItemsCountRef = useRef<number>(0);
+
+  // Toggle Keep vs Remove Token for a line item
+  const handleToggleTokenAction = (lineItemId: string, action: 'keep' | 'remove') => {
+    setLineItems((prev) =>
+      prev.map((li) => {
+        if (li.id !== lineItemId) return li;
+        const baseRate = li.originalRate ?? li.rate;
+        const tokenVal = li.tokenValue || 0;
+        const adjustedRate = action === 'remove' ? Math.max(0, baseRate - tokenVal) : baseRate;
+        return {
+          ...li,
+          tokenAction: action,
+          rate: adjustedRate,
+        };
+      })
+    );
+    setIsCashManuallyEdited(false);
+  };
 
   const showFeedback = (msg: string) => {
     setNotification(msg);
@@ -240,6 +268,17 @@ export default function PosBilling({
     };
     fetchHeld();
   }, [tenantId, clients]);
+
+  // Listen for native print completion or dismissal to cleanly clear print data
+  useEffect(() => {
+    const handleAfterPrint = () => {
+      setPrintReceiptData(null);
+    };
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => {
+      window.removeEventListener('afterprint', handleAfterPrint);
+    };
+  }, []);
 
   // Restore Parked Invoice into Cart when dispatched from Hold Invoices screen
   useEffect(() => {
@@ -375,6 +414,8 @@ export default function PosBilling({
     }
 
     const { shadeCode, shadeColorHex } = getShadeInfo(prod);
+    const hasToken = Boolean(prod.has_token && (Number(prod.token_value) || 0) > 0);
+    const tokenVal = hasToken ? Number(prod.token_value) || 0 : 0;
 
     if (existingIndex >= 0) {
       setLineItems((prev) =>
@@ -388,13 +429,19 @@ export default function PosBilling({
         item: prod,
         code: prod.code,
         productName: prod.name,
+        brand: prod.brand,
+        category: prod.category,
         shadeCode,
         shadeColorHex,
         packSize: prod.pack_size || prod.unit || 'Can',
         qty: requestedQty,
         unit: prod.unit || 'PCS',
         rate: prod.retail_price || 0,
+        originalRate: prod.retail_price || 0,
         discountPercent: 0,
+        hasToken,
+        tokenValue: tokenVal,
+        tokenAction: 'keep',
       };
       setLineItems((prev) => [...prev, newLineItem]);
     }
@@ -643,6 +690,40 @@ export default function PosBilling({
       const data = await res.json();
       if (data.success) {
         const finalServerInvoiceNo = data.invoice?.invoice_no || invoiceNo;
+        const savedInvoiceId = data.invoice?.id;
+
+        // Process Token Transactions for items with tokens
+        for (const item of lineItems) {
+          if (item.hasToken && (item.tokenValue || 0) > 0) {
+            const isRemoved = item.tokenAction === 'remove';
+            const tokenType = isRemoved ? 'shop_retained' : 'issued';
+            try {
+              await fetch('/api/tokens', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  type: tokenType,
+                  tenant_id: tenantId,
+                  invoice_id: savedInvoiceId || null,
+                  client_id: isRemoved ? null : selectedClient?.id || null,
+                  client_name: isRemoved ? null : (selectedClient ? selectedClient.name : customerDisplayName),
+                  item_id: item.item?.id || null,
+                  item_name: item.productName,
+                  brand: item.brand || item.item?.brand || null,
+                  category: item.category || item.item?.category || null,
+                  token_value: (item.tokenValue || 0) * item.qty,
+                  shift_id: shiftId || null,
+                  notes: isRemoved
+                    ? `Token removed at sale (${item.qty}x Rs. ${item.tokenValue})`
+                    : `Token issued with purchase (${item.qty}x Rs. ${item.tokenValue})`,
+                }),
+              });
+            } catch (tokErr) {
+              console.error('Error logging token transaction:', tokErr);
+            }
+          }
+        }
+
         const completedInvoice = {
           ...data.invoice,
           invoice_no: finalServerInvoiceNo,
@@ -663,8 +744,13 @@ export default function PosBilling({
         onCompleteSale(completedInvoice);
         if (openPrint) {
           setPrintReceiptData(completedInvoice);
-          showFeedback(isEditingExisting ? `Invoice #${finalServerInvoiceNo} updated & receipt ready!` : `Invoice ${finalServerInvoiceNo} finalized & sent to thermal printer.`);
+          showFeedback(isEditingExisting ? `Invoice #${finalServerInvoiceNo} updated & printing...` : `Invoice ${finalServerInvoiceNo} finalized & printing...`);
+          // Automatically invoke direct/thermal printing
+          setTimeout(() => {
+            window.print();
+          }, 80);
         } else {
+          setPrintReceiptData(null);
           showFeedback(isEditingExisting ? `Invoice #${finalServerInvoiceNo} updated successfully.` : `Invoice ${finalServerInvoiceNo} saved to database.`);
         }
 
@@ -912,6 +998,16 @@ export default function PosBilling({
 
               <button
                 type="button"
+                onClick={() => setShowTokenRedemptionModal(true)}
+                style={{ padding: '6px 12px', fontSize: '12px', fontWeight: 700, background: '#FFFBEB', color: '#B45309', borderRadius: '8px', border: '1px solid #FDE68A', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+                title="Redeem returned paint tokens for cash payout"
+              >
+                <Ticket style={{ width: 14, height: 14, color: '#D97706' }} />
+                Redeem Token
+              </button>
+
+              <button
+                type="button"
                 onClick={handleHoldInvoice}
                 style={{ padding: '6px 12px', fontSize: '12px', fontWeight: 700, background: '#F1F5F9', color: '#334155', borderRadius: '8px', border: '1px solid #CBD5E1', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
               >
@@ -1149,7 +1245,65 @@ export default function PosBilling({
                             {item.code}
                           </td>
                           <td style={{ fontWeight: 600, color: '#0F172A' }}>
-                            {item.productName}
+                            <div>{item.productName}</div>
+                            {item.hasToken && (item.tokenValue || 0) > 0 && (
+                              <div style={{ marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                <span
+                                  style={{
+                                    fontSize: '10px',
+                                    fontFamily: 'JetBrains Mono, monospace',
+                                    fontWeight: 700,
+                                    background: '#FEF3C7',
+                                    color: '#D97706',
+                                    border: '1px solid #FDE68A',
+                                    padding: '1px 5px',
+                                    borderRadius: '4px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '2px',
+                                  }}
+                                >
+                                  <Ticket style={{ width: 10, height: 10 }} />
+                                  Token Rs. {(item.tokenValue || 0).toLocaleString()}
+                                </span>
+
+                                <div style={{ display: 'inline-flex', borderRadius: '4px', overflow: 'hidden', border: '1px solid #CBD5E1' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleTokenAction(item.id, 'keep')}
+                                    style={{
+                                      padding: '2px 6px',
+                                      fontSize: '10px',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                      border: 'none',
+                                      background: item.tokenAction !== 'remove' ? '#059669' : '#F1F5F9',
+                                      color: item.tokenAction !== 'remove' ? '#FFFFFF' : '#64748B',
+                                    }}
+                                    title="Keep Token inside paint — Customer gets full price"
+                                  >
+                                    Keep (Rs. {(item.originalRate || item.rate).toLocaleString()})
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleTokenAction(item.id, 'remove')}
+                                    style={{
+                                      padding: '2px 6px',
+                                      fontSize: '10px',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                      border: 'none',
+                                      borderLeft: '1px solid #CBD5E1',
+                                      background: item.tokenAction === 'remove' ? '#D97706' : '#F1F5F9',
+                                      color: item.tokenAction === 'remove' ? '#FFFFFF' : '#64748B',
+                                    }}
+                                    title="Remove Token at shop — Deduct token value from sale price"
+                                  >
+                                    Remove (-Rs. {(item.tokenValue || 0).toLocaleString()})
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </td>
                           <td style={{ whiteSpace: 'nowrap' }}>
                             <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '11px', color: '#334155' }}>
@@ -1642,100 +1796,164 @@ export default function PosBilling({
         </div>
       )}
 
-      {/* ── Thermal Receipt Print Modal ── */}
+      {/* ── Print-Only Direct Thermal Receipt (No In-App Modal / No Screen Overlay) ── */}
       {printReceiptData && (
-        <div className="pos-modal-overlay">
-          <div style={{ background: '#ffffff', borderRadius: '16px', boxShadow: '0 20px 40px rgba(0,0,0,0.3)', width: '100%', maxWidth: '340px', overflow: 'hidden', padding: '1.25rem', color: '#0F172A', fontFamily: 'JetBrains Mono, monospace' }}>
-            <div style={{ textAlign: 'center', borderBottom: '1px dashed #94A3B8', paddingBottom: '10px', marginBottom: '10px' }}>
-              <h2 style={{ fontSize: '15px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{tenantName}</h2>
-              <p style={{ fontSize: '11px', color: '#64748B' }}>Retail &amp; Industrial Paint Hub</p>
-              <div style={{ fontSize: '12px', fontWeight: 700, marginTop: '6px', color: '#1E293B' }}>{printReceiptData.invoice_no || invoiceNo}</div>
-              <div style={{ fontSize: '10px', color: '#94A3B8' }}>{printReceiptData.date} · {printReceiptData.time}</div>
+        <div id="pos-thermal-print-wrapper" aria-hidden="true">
+          <style>{`
+            @media screen {
+              #pos-thermal-print-wrapper,
+              #printable-pos-thermal-slip {
+                display: none !important;
+                visibility: hidden !important;
+              }
+            }
+            @media print {
+              body * {
+                visibility: hidden !important;
+              }
+              #pos-thermal-print-wrapper,
+              #pos-thermal-print-wrapper *,
+              #printable-pos-thermal-slip,
+              #printable-pos-thermal-slip * {
+                visibility: visible !important;
+              }
+              #pos-thermal-print-wrapper {
+                display: block !important;
+                position: fixed !important;
+                left: 0 !important;
+                top: 0 !important;
+                width: 80mm !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #ffffff !important;
+              }
+              #printable-pos-thermal-slip {
+                display: block !important;
+                position: relative !important;
+                left: 0 !important;
+                top: 0 !important;
+                width: 80mm !important;
+                max-width: 80mm !important;
+                margin: 0 !important;
+                padding: 4mm !important;
+                box-shadow: none !important;
+                border: none !important;
+                background: #ffffff !important;
+                color: #000000 !important;
+              }
+            }
+          `}</style>
+          <div id="printable-pos-thermal-slip" style={{ width: '80mm', maxWidth: '80mm', padding: '4mm', color: '#000000', fontFamily: 'JetBrains Mono, monospace' }}>
+            <div style={{ textAlign: 'center', borderBottom: '1px dashed #000000', paddingBottom: '8px', marginBottom: '8px' }}>
+              <h2 style={{ fontSize: '15px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 2px 0' }}>{tenantName}</h2>
+              <p style={{ fontSize: '10px', color: '#333333', margin: 0 }}>Retail &amp; Industrial Paint Hub</p>
+              <div style={{ fontSize: '12px', fontWeight: 700, marginTop: '4px', color: '#000000' }}>{printReceiptData.invoice_no || invoiceNo}</div>
+              <div style={{ fontSize: '9px', color: '#555555' }}>{printReceiptData.date} · {printReceiptData.time}</div>
             </div>
 
-            <div style={{ fontSize: '11.5px', borderBottom: '1px dashed #94A3B8', paddingBottom: '8px', marginBottom: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px', fontSize: '11px' }}>
-                <span style={{ color: '#64748B' }}>Customer:</span>
-                <span style={{ fontWeight: 700, color: '#0F172A' }}>{printReceiptData.client_name}</span>
+            <div style={{ fontSize: '11px', borderBottom: '1px dashed #000000', paddingBottom: '6px', marginBottom: '6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+                <span style={{ color: '#555555' }}>Customer:</span>
+                <span style={{ fontWeight: 700, color: '#000000' }}>{printReceiptData.client_name}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
-                <span style={{ color: '#64748B' }}>Staff:</span>
-                <span style={{ fontWeight: 700, color: '#0F172A' }}>{staffName}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#555555' }}>Staff:</span>
+                <span style={{ fontWeight: 700, color: '#000000' }}>{staffName}</span>
               </div>
             </div>
 
             {/* Line items on thermal print */}
-            <div style={{ borderBottom: '1px dashed #94A3B8', paddingBottom: '8px', marginBottom: '8px', maxHeight: '160px', overflowY: 'auto', fontSize: '11px' }}>
-              {printReceiptData.items?.map((item: any, idx: number) => (
-                <div key={idx} style={{ padding: '3px 0', display: 'flex', justifyContent: 'space-between' }}>
-                  <div>
-                    <div style={{ fontWeight: 700 }}>{item.productName || item.item_name}</div>
-                    <div style={{ color: '#64748B', fontSize: '10px' }}>
-                      {item.qty} x Rs. {(item.rate || item.unit_price || 0).toLocaleString()}
+            <div style={{ borderBottom: '1px dashed #000000', paddingBottom: '6px', marginBottom: '6px', fontSize: '10.5px' }}>
+              {printReceiptData.items?.map((item: any, idx: number) => {
+                const isTokenItem = Boolean(item.hasToken && (item.tokenValue || 0) > 0);
+                const isRemoved = item.tokenAction === 'remove';
+
+                return (
+                  <div key={idx} style={{ padding: '3px 0', borderBottom: idx < printReceiptData.items.length - 1 ? '1px dotted #CCCCCC' : 'none' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#000000' }}>{item.productName || item.item_name}</div>
+                        <div style={{ color: '#555555', fontSize: '9.5px' }}>
+                          {item.qty} x Rs. {(item.rate || item.unit_price || 0).toLocaleString()}
+                        </div>
+                      </div>
+                      <div style={{ fontWeight: 700, color: '#000000' }}>
+                        Rs. {(item.qty * (item.rate || item.unit_price || 0)).toLocaleString()}
+                      </div>
                     </div>
+                    {isTokenItem && (
+                      <div style={{ fontSize: '9px', color: '#333333', marginTop: '1px', fontStyle: 'italic' }}>
+                        {isRemoved
+                          ? `🎫 Token removed — Rs. ${(item.tokenValue * item.qty).toLocaleString()} deducted`
+                          : `🎫 Token included — Rs. ${(item.tokenValue * item.qty).toLocaleString()} token value`}
+                      </div>
+                    )}
                   </div>
-                  <div style={{ fontWeight: 700 }}>
-                    Rs. {(item.qty * (item.rate || item.unit_price || 0)).toLocaleString()}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11.5px', borderBottom: '1px dashed #94A3B8', paddingBottom: '10px', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '11px', borderBottom: '1px dashed #000000', paddingBottom: '8px', marginBottom: '8px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748B' }}>Subtotal:</span>
-                <span>Rs. {(printReceiptData.subTotal || 0).toLocaleString()}</span>
+                <span style={{ color: '#555555' }}>Subtotal:</span>
+                <span style={{ color: '#000000' }}>Rs. {(printReceiptData.subTotal || 0).toLocaleString()}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748B' }}>Discount:</span>
-                <span>- Rs. {(printReceiptData.discount || 0).toLocaleString()}</span>
+                <span style={{ color: '#555555' }}>Discount:</span>
+                <span style={{ color: '#000000' }}>- Rs. {(printReceiptData.discount || 0).toLocaleString()}</span>
               </div>
               {Number(printReceiptData.delivery_charge || 0) > 0 && (
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748B' }}>Delivery:</span>
-                  <span>+ Rs. {Number(printReceiptData.delivery_charge).toLocaleString()}</span>
+                  <span style={{ color: '#555555' }}>Delivery:</span>
+                  <span style={{ color: '#000000' }}>+ Rs. {Number(printReceiptData.delivery_charge).toLocaleString()}</span>
                 </div>
               )}
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13.5px', fontWeight: 900, paddingTop: '4px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 900, paddingTop: '3px' }}>
                 <span>NET TOTAL:</span>
-                <span style={{ color: '#0F172A' }}>Rs. {(printReceiptData.grandTotal || 0).toLocaleString()}</span>
+                <span style={{ color: '#000000' }}>Rs. {(printReceiptData.grandTotal || 0).toLocaleString()}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', paddingTop: '4px', color: '#475569' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', paddingTop: '2px', color: '#333333' }}>
                 <span>Paid ({printReceiptData.payment_type || 'Cash'}):</span>
                 <span>Rs. {(printReceiptData.paid_amount || 0).toLocaleString()}</span>
               </div>
               {printReceiptData.due_amount > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 700, color: '#DC2626' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', fontWeight: 700, color: '#000000' }}>
                   <span>Balance Due:</span>
                   <span>Rs. {printReceiptData.due_amount.toLocaleString()}</span>
                 </div>
               )}
             </div>
 
-            <div style={{ textAlign: 'center', fontSize: '10px', color: '#94A3B8', marginBottom: '12px' }}>
+            <div style={{ textAlign: 'center', fontSize: '9.5px', color: '#555555' }}>
               Thank you for shopping at {tenantName}!
-            </div>
-
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                type="button"
-                onClick={() => window.print()}
-                style={{ flex: 1, padding: '9px', background: '#F97316', color: '#ffffff', fontWeight: 700, fontSize: '12px', borderRadius: '8px', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', cursor: 'pointer' }}
-              >
-                <Printer style={{ width: 14, height: 14 }} />
-                Print (Thermal)
-              </button>
-              <button
-                type="button"
-                onClick={() => setPrintReceiptData(null)}
-                style={{ flex: 1, padding: '9px', background: '#F1F5F9', color: '#0F172A', fontWeight: 700, fontSize: '12px', borderRadius: '8px', border: '1px solid #E2E8F0', cursor: 'pointer' }}
-              >
-                Close
-              </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* ── Token Redemption Quick Panel ── */}
+      <TokenRedemption
+        isOpen={showTokenRedemptionModal}
+        onClose={() => setShowTokenRedemptionModal(false)}
+        tenantId={tenantId}
+        tenantName={tenantName}
+        shiftId={shiftId}
+        staffName={staffName}
+        clients={clients}
+        items={liveItems}
+        onRedeemed={async () => {
+          if (!tenantId) return;
+          try {
+            const res = await fetch(`/api/clients?tenant_id=${tenantId}`);
+            const data = await res.json();
+            if (data.success) {
+              setClients(data.clients || []);
+            }
+          } catch (err) {
+            console.error('Failed to reload clients after redemption', err);
+          }
+        }}
+      />
     </section>
   );
 }
