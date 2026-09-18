@@ -240,6 +240,10 @@ If any value is unreadable or missing, set that specific field to null. Do NOT w
       const totalPrice = aiItem.total_price !== null && aiItem.total_price !== undefined
         ? Number(aiItem.total_price)
         : (unitPrice !== null ? unitPrice * qty : null);
+      // Derive after-tax unit price: total already includes tax, so total/qty = true per-unit cost
+      const afterTaxUnitPrice = (totalPrice !== null && qty > 0)
+        ? totalPrice / qty
+        : unitPrice;
 
       let matchStatus: 'matched' | 'partial' | 'new' = 'new';
       let matchedDbItem: any = null;
@@ -291,8 +295,9 @@ If any value is unreadable or missing, set that specific field to null. Do NOT w
         brand: aiItem.brand || (matchedDbItem?.brand ?? null),
         unit: aiItem.unit || matchedDbItem?.unit || 'Can',
         qty: qty,
-        unit_price: unitPrice ?? (matchedDbItem ? Number(matchedDbItem.cost_price) || 0 : 0),
-        total_price: totalPrice ?? ((unitPrice ?? Number(matchedDbItem?.cost_price || 0)) * qty),
+        unit_price: afterTaxUnitPrice ?? (matchedDbItem ? Number(matchedDbItem.cost_price) || 0 : 0),
+        total_price: totalPrice ?? ((afterTaxUnitPrice ?? Number(matchedDbItem?.cost_price || 0)) * qty),
+        retail_price: matchedDbItem ? Number(matchedDbItem.retail_price) || 0 : 0,
         match_status: matchStatus,
         matched_item: matchedDbItem
           ? {

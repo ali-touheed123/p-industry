@@ -40,6 +40,7 @@ interface ScannedLineItem {
   unit: string;
   qty: number;
   unit_price: number;
+  retail_price: number;
   total_price: number;
   match_status: 'matched' | 'partial' | 'new';
   matched_item_id: string | null;
@@ -148,6 +149,7 @@ export default function AiInvoiceScan({
         unit: it.unit || 'Can',
         qty: Number(it.qty) || 1,
         unit_price: Number(it.unit_price) || 0,
+        retail_price: Number(it.retail_price) || 0,
         total_price: Number(it.total_price) || 0,
         match_status: it.match_status || 'new',
         matched_item_id: it.matched_item?.id || null,
@@ -192,6 +194,7 @@ export default function AiInvoiceScan({
       unit: 'Can',
       qty: 1,
       unit_price: 0,
+      retail_price: 0,
       total_price: 0,
       match_status: 'new',
       matched_item_id: null,
@@ -221,6 +224,7 @@ export default function AiInvoiceScan({
         matched_item_code: found.code,
         current_stock: found.stock_qty,
         unit_price: Number(found.cost_price) || 0,
+        retail_price: Number(found.retail_price) || 0,
         unit: found.unit || 'Can',
         match_status: 'matched',
       });
@@ -265,7 +269,7 @@ export default function AiInvoiceScan({
                 brand: brandName,
                 unit: item.unit || 'Can',
                 cost_price: Number(item.unit_price) || 0,
-                retail_price: Math.round((Number(item.unit_price) || 0) * 1.25), // 25% default markup
+                retail_price: Number(item.retail_price) || 0, // use user-entered retail price
                 stock_qty: 0, // will be incremented by purchase
                 min_stock_alert: 5,
                 shade_code: 'Standard',
@@ -279,6 +283,27 @@ export default function AiInvoiceScan({
             }
           } catch (createErr) {
             console.warn('Could not auto-create item in catalog:', createErr);
+          }
+        }
+      }
+
+      // Step 1b: For matched items where retail_price was changed — update the catalog
+      for (let i = 0; i < finalItems.length; i++) {
+        const item = finalItems[i];
+        if (item.matched_item_id && item.retail_price > 0) {
+          try {
+            await fetch('/api/items', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                id: item.matched_item_id,
+                retail_price: Number(item.retail_price) || 0,
+                cost_price: Number(item.unit_price) || 0,
+                tenant_id: tenantId,
+              }),
+            });
+          } catch (patchErr) {
+            console.warn('Could not update catalog price for item:', item.matched_item_id, patchErr);
           }
         }
       }
@@ -798,6 +823,7 @@ export default function AiInvoiceScan({
                       <th style={{ padding: '8px 10px', width: '70px', textAlign: 'center' }}>Qty</th>
                       <th style={{ padding: '8px 10px', width: '90px' }}>Unit</th>
                       <th style={{ padding: '8px 10px', width: '110px', textAlign: 'right' }}>Rate (Rs.)</th>
+                      <th style={{ padding: '8px 10px', width: '120px', textAlign: 'right' }}>Retail (Rs.)</th>
                       <th style={{ padding: '8px 10px', width: '110px', textAlign: 'right' }}>Total (Rs.)</th>
                       <th style={{ padding: '8px 10px', width: '45px', textAlign: 'center' }}></th>
                     </tr>
@@ -1006,6 +1032,35 @@ export default function AiInvoiceScan({
                                 fontWeight: 600,
                                 background: '#FFFFFF',
                               }}
+                            />
+                          </td>
+
+                          {/* Retail Price */}
+                          <td style={{ padding: '8px 10px', verticalAlign: 'middle' }}>
+                            <input
+                              type="number"
+                              min="0"
+                              value={it.retail_price}
+                              onChange={(e) =>
+                                handleUpdateItem(it.id, { retail_price: Math.max(0, Number(e.target.value) || 0) })
+                              }
+                              placeholder={it.match_status === 'new' ? 'Enter retail' : ''}
+                              style={{
+                                width: '100%',
+                                padding: '4px 6px',
+                                borderRadius: '4px',
+                                border: it.match_status === 'new' && it.retail_price === 0
+                                  ? '1px solid #F59E0B'
+                                  : '1px solid #CBD5E1',
+                                fontSize: '12px',
+                                textAlign: 'right',
+                                fontFamily: 'JetBrains Mono, monospace',
+                                fontWeight: 600,
+                                background: it.match_status === 'new' && it.retail_price === 0
+                                  ? '#FFFBEB'
+                                  : '#FFFFFF',
+                              }}
+                              title={it.match_status === 'matched' ? 'Pre-filled from inventory — edits update catalog on save' : 'Enter retail selling price'}
                             />
                           </td>
 
