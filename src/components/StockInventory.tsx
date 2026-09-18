@@ -13,7 +13,9 @@ import {
   Edit2,
   X,
   RefreshCw,
+  Sparkles,
 } from 'lucide-react';
+import AiInvoiceScan from './AiInvoiceScan';
 
 interface Props {
   items: Item[];
@@ -62,6 +64,7 @@ export default function StockInventory({
   // Modals state
   const [showAddProductModal, setShowAddProductModal] = useState<boolean>(false);
   const [showReceiveModal, setShowReceiveModal] = useState<boolean>(false);
+  const [showAiScanModal, setShowAiScanModal] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [notification, setNotification] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -607,6 +610,23 @@ export default function StockInventory({
               >
                 <PackagePlus style={{ width: 14, height: 14, color: '#F97316' }} />
                 Stock Adjustment
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowAiScanModal(true)}
+                className="inv-btn-primary"
+                style={{
+                  background: 'linear-gradient(135deg, #F97316 0%, #EA580C 100%)',
+                  boxShadow: '0 2px 8px rgba(249, 115, 22, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+                title="Scan physical invoice photo with Gemini AI to inward stock"
+              >
+                <Sparkles style={{ width: 15, height: 15 }} />
+                Scan AI Invoice
               </button>
 
               <button
@@ -1225,6 +1245,20 @@ export default function StockInventory({
             </div>
           </div>
         </div>
+      )}
+
+      {/* AI Invoice Scanner Modal */}
+      {tenantId && (
+        <AiInvoiceScan
+          tenantId={tenantId}
+          isOpen={showAiScanModal}
+          onClose={() => setShowAiScanModal(false)}
+          onPurchaseCompleted={() => {
+            onStockUpdated?.();
+            showToast('Stock updated from AI invoice purchase!');
+          }}
+          catalogItems={items}
+        />
       )}
     </section>
   );

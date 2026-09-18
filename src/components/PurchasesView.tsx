@@ -28,7 +28,9 @@ import {
   Coins,
   CheckSquare,
   Square,
+  Sparkles,
 } from 'lucide-react';
+import AiInvoiceScan from './AiInvoiceScan';
 
 interface PurchasesViewProps {
   tenantId?: string;
@@ -94,6 +96,7 @@ export default function PurchasesView({
 }: PurchasesViewProps) {
   // Mode toggle: Purchase Invoice vs Purchase Return
   const [purchaseType, setPurchaseType] = useState<'purchase' | 'return'>('purchase');
+  const [showAiScanModal, setShowAiScanModal] = useState<boolean>(false);
 
   // Record & Meta
   const [recordNo, setRecordNo] = useState<string>('01');
@@ -545,6 +548,29 @@ export default function PurchasesView({
                 style={{ fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', color: '#334155', background: 'transparent', border: 'none', outline: 'none', cursor: 'pointer' }}
               />
             </div>
+
+            <button
+              type="button"
+              onClick={() => setShowAiScanModal(true)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: 'linear-gradient(135deg, #F97316 0%, #EA580C 100%)',
+                color: '#FFFFFF',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '6px 12px',
+                fontSize: '12px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                boxShadow: '0 2px 6px rgba(249, 115, 22, 0.25)',
+              }}
+              title="Scan physical invoice photo with Gemini AI"
+            >
+              <Sparkles style={{ width: 14, height: 14 }} />
+              Scan AI Invoice
+            </button>
           </div>
         </div>
 
@@ -1790,6 +1816,19 @@ export default function PurchasesView({
             </div>
           </div>
         </div>
+      )}
+
+      {/* AI Invoice Scanner Modal */}
+      {tenantId && (
+        <AiInvoiceScan
+          tenantId={tenantId}
+          isOpen={showAiScanModal}
+          onClose={() => setShowAiScanModal(false)}
+          onPurchaseCompleted={() => {
+            onStockUpdated?.();
+          }}
+          catalogItems={liveCatalogItems}
+        />
       )}
     </section>
   );
