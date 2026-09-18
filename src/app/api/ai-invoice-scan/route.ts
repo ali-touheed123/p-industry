@@ -99,6 +99,8 @@ Carefully examine this invoice image and extract all header and line items.
 Invoices may be printed, dot-matrix, handwritten, in Urdu, or English.
 Resolve common paint trade abbreviations (e.g. "Berg" = Berger, "1G" = 1 Gallon, "Qtr" = Quarter, "Drm" = Drum, "Emul" = Emulsion, "Enam" = Enamel, "W/S" = Weather Sheet / Weather Shield).
 
+CRITICAL INSTRUCTION FOR LINE ITEMS: If a single line in the invoice lists multiple distinct products, shades, or colors with individual quantities (e.g., "638 Health Violet /2, 647 Apricot White /2"), you MUST split them into separate, distinct items in the JSON "items" array. Do NOT group them into a single product name. Each separated item should have its own specific "product_name" (e.g., "638 Health Violet") and "qty" (e.g., 2), while inheriting the "unit_price", "total_price", "unit", and "brand" from the parent line if they share it.
+
 Return ONLY valid JSON matching this schema:
 {
   "supplier_name": string or null,

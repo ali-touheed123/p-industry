@@ -22,6 +22,8 @@ import {
   Package,
   RefreshCw,
   ExternalLink,
+  Search,
+  ChevronDown,
 } from 'lucide-react';
 
 interface Props {
@@ -55,6 +57,142 @@ interface ScannedSupplier {
   code?: string;
   matched: boolean;
   current_balance?: number;
+}
+
+function SearchableCatalogDropdown({
+  catalogItems,
+  selectedId,
+  onSelect,
+}: {
+  catalogItems: Item[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  const selectedItem = catalogItems.find(c => c.id === selectedId);
+  const displayValue = isOpen ? searchTerm : (selectedItem ? `${selectedItem.name} (${selectedItem.code})` : '');
+
+  React.useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filteredItems = catalogItems.filter(cat => 
+    `${cat.name} ${cat.code}`.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  return (
+    <div ref={wrapperRef} style={{ position: 'relative', width: '260px' }}>
+      <div 
+        style={{ 
+          position: 'relative',
+          display: 'flex', 
+          alignItems: 'center',
+          border: '1px solid #CBD5E1',
+          borderRadius: '4px',
+          background: '#FFFFFF',
+        }}
+      >
+        <Search size={12} color="#64748B" style={{ marginLeft: '6px' }} />
+        <input
+          type="text"
+          placeholder="-- Create as New Catalog Product --"
+          value={displayValue}
+          onChange={(e) => {
+            setSearchTerm(e.target.value);
+            if (!isOpen) setIsOpen(true);
+          }}
+          onFocus={() => {
+            setIsOpen(true);
+            setSearchTerm('');
+          }}
+          style={{
+            width: '100%',
+            padding: '2px 6px',
+            fontSize: '10.5px',
+            color: '#334155',
+            border: 'none',
+            background: 'transparent',
+            outline: 'none',
+          }}
+        />
+        <ChevronDown size={12} color="#64748B" style={{ marginRight: '6px', cursor: 'pointer' }} onClick={() => setIsOpen(!isOpen)} />
+      </div>
+
+      {isOpen && (
+        <ul style={{
+          position: 'absolute',
+          top: '100%',
+          left: 0,
+          right: 0,
+          maxHeight: '200px',
+          overflowY: 'auto',
+          background: '#FFFFFF',
+          border: '1px solid #CBD5E1',
+          borderRadius: '4px',
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+          zIndex: 50,
+          margin: 0,
+          padding: 0,
+          listStyle: 'none',
+          marginTop: '2px'
+        }}>
+          <li
+            onClick={() => {
+              onSelect('');
+              setIsOpen(false);
+            }}
+            style={{
+              padding: '6px 8px',
+              fontSize: '10.5px',
+              cursor: 'pointer',
+              color: '#334155',
+              borderBottom: '1px solid #F1F5F9',
+              background: !selectedId ? '#F1F5F9' : '#FFFFFF',
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = '#F8FAFC'}
+            onMouseLeave={(e) => e.currentTarget.style.background = !selectedId ? '#F1F5F9' : '#FFFFFF'}
+          >
+            <em>-- Create as New Catalog Product --</em>
+          </li>
+          {filteredItems.map(cat => (
+            <li
+              key={cat.id}
+              onClick={() => {
+                onSelect(cat.id);
+                setIsOpen(false);
+              }}
+              style={{
+                padding: '6px 8px',
+                fontSize: '10.5px',
+                cursor: 'pointer',
+                color: '#334155',
+                borderBottom: '1px solid #F1F5F9',
+                background: selectedId === cat.id ? '#F1F5F9' : '#FFFFFF',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = '#F8FAFC'}
+              onMouseLeave={(e) => e.currentTarget.style.background = selectedId === cat.id ? '#F1F5F9' : '#FFFFFF'}
+            >
+              {cat.name} ({cat.code}) - In Stock: {cat.stock_qty}
+            </li>
+          ))}
+          {filteredItems.length === 0 && (
+            <li style={{ padding: '6px 8px', fontSize: '10.5px', color: '#94A3B8' }}>
+              No matches found
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 export default function AiInvoiceScan({
@@ -939,26 +1077,11 @@ export default function AiInvoiceScan({
                               {catalogItems.length > 0 && (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                   <span style={{ fontSize: '10px', color: '#64748B' }}>Link to SKU:</span>
-                                  <select
-                                    value={it.matched_item_id || ''}
-                                    onChange={(e) => handleLinkCatalogItem(it.id, e.target.value)}
-                                    style={{
-                                      fontSize: '10.5px',
-                                      padding: '2px 6px',
-                                      borderRadius: '4px',
-                                      border: '1px solid #CBD5E1',
-                                      background: '#FFFFFF',
-                                      color: '#334155',
-                                      maxWidth: '260px',
-                                    }}
-                                  >
-                                    <option value="">-- Create as New Catalog Product --</option>
-                                    {catalogItems.map((cat) => (
-                                      <option key={cat.id} value={cat.id}>
-                                        {cat.name} ({cat.code}) - In Stock: {cat.stock_qty}
-                                      </option>
-                                    ))}
-                                  </select>
+                                  <SearchableCatalogDropdown
+                                    catalogItems={catalogItems}
+                                    selectedId={it.matched_item_id}
+                                    onSelect={(val) => handleLinkCatalogItem(it.id, val)}
+                                  />
                                 </div>
                               )}
                             </div>
