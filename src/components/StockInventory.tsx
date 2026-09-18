@@ -14,6 +14,7 @@ import {
   X,
   RefreshCw,
   Sparkles,
+  Trash2,
 } from 'lucide-react';
 import AiInvoiceScan from './AiInvoiceScan';
 
@@ -346,6 +347,28 @@ export default function StockInventory({
       alert(`Network error saving product: ${err.message}`);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Delete product
+  const handleDeleteProduct = async (id: string, name: string) => {
+    if (!confirm(`Are you sure you want to delete product "${name}"? This action cannot be undone.`)) {
+      return;
+    }
+    
+    try {
+      const res = await fetch(`/api/items?id=${id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`Product "${name}" deleted successfully!`);
+        onStockUpdated?.();
+      } else {
+        alert(`Failed to delete: ${data.error}`);
+      }
+    } catch (err: any) {
+      alert(`Network error deleting product: ${err.message}`);
     }
   };
 
@@ -761,14 +784,24 @@ export default function StockInventory({
                         </td>
                         {/* Action */}
                         <td style={{ textAlign: 'center' }}>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditProduct(prod)}
-                            style={{ padding: '5px', color: '#64748B', background: 'none', border: 'none', cursor: 'pointer', borderRadius: '4px' }}
-                            title="Edit Product Details"
-                          >
-                            <Edit2 style={{ width: 14, height: 14 }} />
-                          </button>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditProduct(prod)}
+                              style={{ padding: '5px', color: '#64748B', background: 'none', border: 'none', cursor: 'pointer', borderRadius: '4px' }}
+                              title="Edit Product Details"
+                            >
+                              <Edit2 style={{ width: 14, height: 14 }} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteProduct(prod.id, prod.name)}
+                              style={{ padding: '5px', color: '#EF4444', background: 'none', border: 'none', cursor: 'pointer', borderRadius: '4px' }}
+                              title="Delete Product"
+                            >
+                              <Trash2 style={{ width: 14, height: 14 }} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
