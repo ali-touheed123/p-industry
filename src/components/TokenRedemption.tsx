@@ -137,6 +137,13 @@ export default function TokenRedemption({
   const amountExceedsCap =
     effectiveCap !== undefined && parsedRedeemAmount > 0 && parsedRedeemAmount > effectiveCap;
 
+  const isSubmitDisabled =
+    submitting ||
+    parsedRedeemAmount <= 0 ||
+    amountExceedsCap ||
+    (!isLooseToken && (!selectedItemId || loadingItemBalance)) ||
+    (customerMode === 'registered' && !selectedClientId);
+
   // ── Fetch per-item redeemable balance from server ────────────────────────
   useEffect(() => {
     if (!selectedItemId || !tenantId) {
@@ -1191,25 +1198,24 @@ export default function TokenRedemption({
               </button>
               <button
                 type="submit"
-                disabled={submitting || parsedRedeemAmount <= 0 || !selectedItemId || amountExceedsCap || loadingItemBalance}
+                disabled={isSubmitDisabled}
                 style={{
                   flex: 2,
                   padding: '10px',
-                  background:
-                    submitting || parsedRedeemAmount <= 0 || !selectedItemId || amountExceedsCap || loadingItemBalance
-                      ? '#94A3B8'
-                      : 'linear-gradient(135deg, #D97706 0%, #B45309 100%)',
+                  background: isSubmitDisabled
+                    ? '#94A3B8'
+                    : 'linear-gradient(135deg, #D97706 0%, #B45309 100%)',
                   color: '#FFFFFF',
                   fontWeight: 800,
                   fontSize: '13px',
                   borderRadius: '8px',
                   border: 'none',
-                  cursor: submitting || parsedRedeemAmount <= 0 || !selectedItemId || amountExceedsCap || loadingItemBalance ? 'not-allowed' : 'pointer',
+                  cursor: isSubmitDisabled ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '6px',
-                  boxShadow: '0 4px 12px rgba(217, 119, 6, 0.3)',
+                  boxShadow: isSubmitDisabled ? 'none' : '0 4px 12px rgba(217, 119, 6, 0.3)',
                 }}
               >
                 <Coins style={{ width: 16, height: 16 }} />
