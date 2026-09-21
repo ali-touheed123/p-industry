@@ -131,12 +131,14 @@ export default function SalesHistory({
 
   // Helper: Strictly Registered Customer Check (Excludes Walk-in)
   const isRegisteredCustomer = (inv: Invoice | null | undefined): boolean => {
-    if (!inv || !inv.client_id) return false;
+    if (!inv) return false;
     const name = (inv.client_name || '').toLowerCase().trim();
-    if (name.includes('walk-in') || name.includes('walk in') || name.includes('cash customer') || name === 'walkin') {
+    if (!name || name.includes('walk-in') || name.includes('walk in') || name.includes('cash customer') || name === 'walkin') {
       return false;
     }
-    return true;
+    if (inv.client_id) return true;
+    if (clientsMap[name]) return true;
+    return false;
   };
 
   // Fetch Invoices from Backend
@@ -208,12 +210,15 @@ export default function SalesHistory({
       const res = await fetch(`/api/clients?tenant_id=${tenantId}`);
       if (res.ok) {
         const json = await res.json();
-        const list = json.data || json || [];
+        const list = json.clients || json.data || (Array.isArray(json) ? json : []);
         const map: Record<string, { name: string; phone?: string }> = {};
         if (Array.isArray(list)) {
           list.forEach((c: any) => {
             if (c.id) {
               map[c.id] = { name: c.name, phone: c.phone };
+            }
+            if (c.name) {
+              map[c.name.trim().toLowerCase()] = { name: c.name, phone: c.phone };
             }
           });
         }
@@ -451,10 +456,46 @@ export default function SalesHistory({
       const imageUrl = URL.createObjectURL(blob);
 
       // Customer phone formatting
-      const rawPhone = clientsMap[inv.client_id!]?.phone || (inv as any).client_phone || '';
-      let cleanPhone = rawPhone.replace(/[^0-9]/g, '');
+      const normClientName = (inv.client_name || '').trim().toLowerCase();
+      let rawPhone =
+        (inv.client_id ? clientsMap[inv.client_id]?.phone : undefined) ||
+        (normClientName ? clientsMap[normClientName]?.phone : undefined) ||
+        (inv as any).client_phone ||
+        (inv as any).phone ||
+        '';
+
+      // Fallback: If phone is not yet in memory, fetch client directory on-demand
+      if (!rawPhone && (inv.client_id || normClientName)) {
+        try {
+          const res = await fetch(`/api/clients?tenant_id=${tenantId}`);
+          if (res.ok) {
+            const json = await res.json();
+            const list = json.clients || json.data || (Array.isArray(json) ? json : []);
+            if (Array.isArray(list)) {
+              const matched = list.find((c: any) =>
+                (inv.client_id && c.id === inv.client_id) ||
+                (normClientName && c.name?.trim().toLowerCase() === normClientName)
+              );
+              if (matched?.phone) {
+                rawPhone = matched.phone;
+                setClientsMap(prev => ({
+                  ...prev,
+                  [matched.id]: { name: matched.name, phone: matched.phone },
+                  [matched.name.trim().toLowerCase()]: { name: matched.name, phone: matched.phone }
+                }));
+              }
+            }
+          }
+        } catch (fetchErr) {
+          console.error('Error fetching fallback client phone:', fetchErr);
+        }
+      }
+
+      let cleanPhone = (rawPhone || '').replace(/[^0-9]/g, '');
       if (cleanPhone.startsWith('0')) {
         cleanPhone = '92' + cleanPhone.slice(1);
+      } else if (cleanPhone.length === 10 && !cleanPhone.startsWith('92')) {
+        cleanPhone = '92' + cleanPhone;
       }
 
       // Automatically copy image to clipboard if supported
