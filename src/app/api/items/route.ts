@@ -31,33 +31,16 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST: Add a new item / paint product
+// POST: Add a single item OR bulk batch of items
+// Single: { tenant_id, code, name, brand, ... }
+// Bulk:   { tenant_id, brand, category, unit, ... , items: [{ name, code, shade_code, retail_price, cost_price, stock_qty }] }
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const {
-      tenant_id,
-      code,
-      name,
-      category,
-      brand,
-      unit = 'Can',
-      cost_price = 0,
-      retail_price = 0,
-      stock_qty = 0,
-      min_stock_alert = 5,
-      shade_code,
-      pack_size,
-      has_token = false,
-      token_value = 0,
-    } = body;
+    const { tenant_id } = body;
 
-    if (!tenant_id || !name || !code) {
-      return NextResponse.json({ success: false, error: 'Tenant ID, Name and Item Code are required' }, { status: 400 });
-    }
-
-    if (!brand || !brand.trim()) {
-      return NextResponse.json({ success: false, error: 'Brand / Manufacturer is required' }, { status: 400 });
+    if (!tenant_id) {
+      return NextResponse.json({ success: false, error: 'Tenant ID required' }, { status: 400 });
     }
 
     const auth = await requireTenantAuth(req, tenant_id);
@@ -65,57 +48,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    const normalizedCode = code.trim().toUpperCase();
-
-    // 0. Uniqueness check for product code within this tenant
-    const { data: existingItem } = await supabaseAdmin
-      .from('items')
-      .select('id')
-      .eq('tenant_id', tenant_id)
-      .eq('code', normalizedCode)
-      .maybeSingle();
-
-    if (existingItem) {
-      return NextResponse.json(
-        { success: false, error: 'A product with this code already exists.' },
-        { status: 400 }
-      );
-    }
-
-    // 1. Insert item for the active branch
-    const { data: item, error } = await supabaseAdmin
-      .from('items')
-      .insert({
-        tenant_id,
-        code: normalizedCode,
-        name: name.trim(),
-        category: category || 'General',
-        brand: brand.trim(),
-        unit,
-        pack_size: pack_size || unit,
-        shade_code: shade_code || null,
-        cost_price: Number(cost_price) || 0,
-        retail_price: Number(retail_price) || 0,
-        stock_qty: Number(stock_qty) || 0,
-        min_stock_alert: Number(min_stock_alert) || 5,
-        has_token: Boolean(has_token),
-        token_value: Number(token_value) || 0,
-      })
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    // 2. Sync new product catalog (with stock_qty=0) to ALL sister branches under same owner
-    // Sister branches = other tenants with the same owner email
-    try {
+    // ── Helper: resolve sister branches for cross-branch catalog sync ──────────
+    const getSisterTenants = async () => {
       const { data: currentTenant } = await supabaseAdmin
         .from('tenants')
         .select('id, owner_name, email')
         .eq('id', tenant_id)
         .single();
 
-      // Build sister-branch query — group by email (most reliable), fallback to owner_name
       let sisterQuery = supabaseAdmin
         .from('tenants')
         .select('id, name')
@@ -127,48 +67,131 @@ export async function POST(req: NextRequest) {
       } else if (currentTenant?.owner_name) {
         sisterQuery = sisterQuery.eq('owner_name', currentTenant.owner_name);
       } else {
-        // No reliable grouping key — skip cross-branch sync
-        console.warn('[items/POST] No email or owner_name on tenant, skipping sister sync');
+        return [];
+      }
+      const { data } = await sisterQuery;
+      return data || [];
+    };
+
+    // ── Helper: insert one item + sync to sisters ──────────────────────────────
+    const insertOneItem = async (payload: {
+      code: string; name: string; category: string; brand: string;
+      unit: string; pack_size: string; shade_code: string | null;
+      cost_price: number; retail_price: number; stock_qty: number;
+      min_stock_alert: number; has_token: boolean; token_value: number;
+    }, sisterTenants: { id: string; name: string }[]) => {
+      const normalizedCode = payload.code.trim().toUpperCase();
+
+      // Uniqueness check
+      const { data: existing } = await supabaseAdmin
+        .from('items').select('id')
+        .eq('tenant_id', tenant_id).eq('code', normalizedCode).maybeSingle();
+      if (existing) {
+        return { ok: false, code: normalizedCode, error: `Code "${normalizedCode}" already exists` };
       }
 
-      const { data: sisterTenants } = await sisterQuery;
+      const { data: item, error } = await supabaseAdmin
+        .from('items')
+        .insert({ tenant_id, ...payload, code: normalizedCode })
+        .select().single();
+      if (error) return { ok: false, code: normalizedCode, error: error.message };
 
-      if (sisterTenants && sisterTenants.length > 0) {
-        for (const sister of sisterTenants) {
-          // Skip if product already exists on that branch
-          const { data: existing } = await supabaseAdmin
-            .from('items')
-            .select('id')
-            .eq('tenant_id', sister.id)
-            .eq('code', normalizedCode)
-            .maybeSingle();
-
-          if (!existing) {
-            await supabaseAdmin.from('items').insert({
-              tenant_id: sister.id,
-              code: normalizedCode,
-              name: name.trim(),
-              category: category || 'General',
-              brand: brand.trim(),
-              unit,
-              pack_size: pack_size || unit,
-              shade_code: shade_code || null,
-              cost_price: Number(cost_price) || 0,
-              retail_price: Number(retail_price) || 0,
-              stock_qty: 0,           // ← ALWAYS 0 — sister branches must use Branch Orders to get stock
-              min_stock_alert: Number(min_stock_alert) || 5,
-              has_token: Boolean(has_token),
-              token_value: Number(token_value) || 0,
-            });
-            console.log(`[items/POST] Synced product ${normalizedCode} to sister branch "${sister.name}" with stock_qty=0`);
-          }
+      // Sister branch sync (stock_qty always 0 on sisters)
+      for (const sister of sisterTenants) {
+        const { data: sisterExisting } = await supabaseAdmin
+          .from('items').select('id')
+          .eq('tenant_id', sister.id).eq('code', normalizedCode).maybeSingle();
+        if (!sisterExisting) {
+          await supabaseAdmin.from('items').insert({
+            tenant_id: sister.id, ...payload, code: normalizedCode, stock_qty: 0,
+          });
         }
       }
-    } catch (syncErr) {
-      console.error('[items/POST] Error syncing product to sister branches:', syncErr);
+      return { ok: true, code: normalizedCode, item };
+    };
+
+    // ── BULK MODE: body.items is an array ──────────────────────────────────────
+    if (Array.isArray(body.items) && body.items.length > 0) {
+      const {
+        brand = '', category = 'General', unit = 'Can',
+        has_token = false, token_value = 0, min_stock_alert = 5,
+      } = body;
+
+      if (!brand.trim()) {
+        return NextResponse.json({ success: false, error: 'Brand is required for bulk entry' }, { status: 400 });
+      }
+
+      const sisterTenants = await getSisterTenants();
+      const saved: any[] = [];
+      const errors: { row: number; code: string; error: string }[] = [];
+
+      for (let i = 0; i < body.items.length; i++) {
+        const row = body.items[i];
+        if (!row.name?.trim() || !row.code?.trim()) continue; // skip empty rows silently
+
+        const retail = Number(row.retail_price) || 0;
+        const cost = Number(row.cost_price) || Math.round(retail * 0.75);
+
+        const result = await insertOneItem({
+          code: row.code.trim(),
+          name: row.name.trim(),
+          category,
+          brand: brand.trim(),
+          unit,
+          pack_size: unit,
+          shade_code: row.shade_code?.trim() || null,
+          cost_price: cost,
+          retail_price: retail,
+          stock_qty: Number(row.stock_qty) || 0,
+          min_stock_alert: Number(min_stock_alert) || 5,
+          has_token: Boolean(has_token),
+          token_value: Number(token_value) || 0,
+        }, sisterTenants);
+
+        if (result.ok) {
+          saved.push(result.item);
+        } else {
+          errors.push({ row: i + 1, code: result.code ?? '', error: result.error ?? 'Unknown error' });
+        }
+      }
+
+      return NextResponse.json({ success: true, saved, errors, count: saved.length });
     }
 
-    return NextResponse.json({ success: true, item });
+    // ── SINGLE MODE (existing behavior — unchanged) ────────────────────────────
+    const {
+      code, name, category, brand, unit = 'Can',
+      cost_price = 0, retail_price = 0, stock_qty = 0,
+      min_stock_alert = 5, shade_code, pack_size,
+      has_token = false, token_value = 0,
+    } = body;
+
+    if (!name || !code) {
+      return NextResponse.json({ success: false, error: 'Name and Item Code are required' }, { status: 400 });
+    }
+    if (!brand?.trim()) {
+      return NextResponse.json({ success: false, error: 'Brand / Manufacturer is required' }, { status: 400 });
+    }
+
+    const retail = Number(retail_price) || 0;
+    const cost = Number(cost_price) || 0;
+
+    const sisterTenants = await getSisterTenants();
+    const result = await insertOneItem({
+      code, name, category: category || 'General', brand: brand.trim(),
+      unit, pack_size: pack_size || unit,
+      shade_code: shade_code || null,
+      cost_price: cost, retail_price: retail,
+      stock_qty: Number(stock_qty) || 0,
+      min_stock_alert: Number(min_stock_alert) || 5,
+      has_token: Boolean(has_token),
+      token_value: Number(token_value) || 0,
+    }, sisterTenants);
+
+    if (!result.ok) {
+      return NextResponse.json({ success: false, error: result.error }, { status: 400 });
+    }
+    return NextResponse.json({ success: true, item: result.item });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

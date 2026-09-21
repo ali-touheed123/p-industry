@@ -413,12 +413,17 @@ export async function generateLedgerStatementBlob(
         ctx.fillStyle = '#64748B';
         ctx.fillText(tx.date || '—', COL_DATE_X + 4, midY);
 
-        // Description — truncate to fit column (approx 52 chars at 13px mono in 470px)
+        // Description — pixel-accurate truncation using measureText so text never bleeds into Debit col
         ctx.fillStyle = '#0F172A';
-        const maxDescLen = 48;
-        const descText = tx.desc && tx.desc.length > maxDescLen
-          ? tx.desc.substring(0, maxDescLen - 2) + '…'
-          : (tx.desc || '—');
+        ctx.font = '13px "JetBrains Mono", monospace';
+        const maxDescPx = COL_DR_RIGHT - COL_DESC_X - 12; // 12px right padding before Debit col
+        let descText = tx.desc || '—';
+        if (ctx.measureText(descText).width > maxDescPx) {
+          while (descText.length > 1 && ctx.measureText(descText + '…').width > maxDescPx) {
+            descText = descText.slice(0, -1);
+          }
+          descText = descText.trimEnd() + '…';
+        }
         ctx.fillText(descText, COL_DESC_X, midY);
 
         // Debit

@@ -70,6 +70,21 @@ export default function StockInventory({
   const [notification, setNotification] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
+  // ── Bulk Add Modal State ───────────────────────────────────────────────────
+  const [showBulkModal, setShowBulkModal] = useState<boolean>(false);
+  const [bulkBrand, setBulkBrand] = useState<string>('');
+  const [bulkCategory, setBulkCategory] = useState<string>('Interior Emulsion');
+  const [bulkUnit, setBulkUnit] = useState<string>('4L Gallon');
+  const [bulkHasToken, setBulkHasToken] = useState<boolean>(false);
+  const [bulkTokenValue, setBulkTokenValue] = useState<string>('');
+  const [bulkMinAlert, setBulkMinAlert] = useState<string>('5');
+  interface BulkRow { id: number; shadeName: string; code: string; retail: string; cost: string; qty: string; }
+  const [bulkRows, setBulkRows] = useState<BulkRow[]>([{ id: 1, shadeName: '', code: '', retail: '', cost: '', qty: '0' }]);
+  const [bulkSubmitting, setBulkSubmitting] = useState<boolean>(false);
+  const [bulkErrors, setBulkErrors] = useState<{ row: number; code: string; error: string }[]>([]);
+  const [bulkSavedCount, setBulkSavedCount] = useState<number | null>(null);
+  const bulkNextId = React.useRef<number>(2);
+
   // Manual live refresh
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
@@ -213,6 +228,94 @@ export default function StockInventory({
     setIsAddingNewCategory(false);
     setIsAddingNewUnit(false);
     setShowAddProductModal(true);
+  };
+
+  // ── Bulk Add Helpers ───────────────────────────────────────────────────────
+  const addBulkRow = () => {
+    const newId = bulkNextId.current++;
+    setBulkRows(prev => [...prev, { id: newId, shadeName: '', code: '', retail: '', cost: '', qty: '0' }]);
+  };
+
+  const removeBulkRow = (id: number) => {
+    setBulkRows(prev => prev.length > 1 ? prev.filter(r => r.id !== id) : prev);
+  };
+
+  const updateBulkRow = (id: number, field: keyof BulkRow, value: string) => {
+    setBulkRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
+  };
+
+  const openBulkModal = () => {
+    setBulkBrand('');
+    setBulkCategory(allCategories[0] || 'Interior Emulsion');
+    setBulkUnit(allUnits[0] || '4L Gallon');
+    setBulkHasToken(false);
+    setBulkTokenValue('');
+    setBulkMinAlert('5');
+    setBulkRows([{ id: 1, shadeName: '', code: '', retail: '', cost: '', qty: '0' }]);
+    bulkNextId.current = 2;
+    setBulkErrors([]);
+    setBulkSavedCount(null);
+    setShowBulkModal(true);
+  };
+
+  const handleBulkSave = async () => {
+    if (!tenantId) { alert('Tenant ID missing'); return; }
+    if (!bulkBrand.trim()) { alert('Brand is required'); return; }
+
+    const validRows = bulkRows.filter(r => r.shadeName.trim() && r.code.trim());
+    if (validRows.length === 0) { alert('Please fill at least one product row (Shade Name + Code required)'); return; }
+
+    setBulkSubmitting(true);
+    setBulkErrors([]);
+    setBulkSavedCount(null);
+
+    // Build auto-generated full name for each row: "BRAND CATEGORY SHADENAME"
+    const itemsPayload = validRows.map(r => ({
+      name: `${bulkBrand.trim().toUpperCase()} ${bulkCategory.toUpperCase()} ${r.shadeName.trim().toUpperCase()}`,
+      code: r.code.trim(),
+      shade_code: r.shadeName.trim(),
+      retail_price: Number(r.retail) || 0,
+      cost_price: Number(r.cost) || 0,
+      stock_qty: Number(r.qty) || 0,
+    }));
+
+    try {
+      const res = await fetch('/api/items', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          brand: bulkBrand.trim(),
+          category: bulkCategory,
+          unit: bulkUnit,
+          has_token: bulkHasToken,
+          token_value: bulkHasToken ? Number(bulkTokenValue) || 0 : 0,
+          min_stock_alert: Number(bulkMinAlert) || 5,
+          items: itemsPayload,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setBulkSavedCount(data.count || 0);
+        setBulkErrors(data.errors || []);
+        if ((data.errors || []).length === 0) {
+          showToast(`${data.count} products added to catalog successfully!`);
+          setShowBulkModal(false);
+          onStockUpdated?.();
+        } else {
+          // Partial success — remove saved rows, keep errored ones
+          const savedCodes = new Set((data.saved || []).map((s: any) => s.code?.toUpperCase()));
+          setBulkRows(prev => prev.filter(r => !savedCodes.has(r.code.trim().toUpperCase())));
+          onStockUpdated?.();
+        }
+      } else {
+        alert(`Bulk save failed: ${data.error}`);
+      }
+    } catch (err: any) {
+      alert(`Network error: ${err.message}`);
+    } finally {
+      setBulkSubmitting(false);
+    }
   };
 
   // Open modal for editing existing product
@@ -652,6 +755,16 @@ export default function StockInventory({
                 Scan AI Invoice
               </button>
 
+              <button
+                type="button"
+                onClick={openBulkModal}
+                className="inv-btn-secondary"
+                title="Add multiple products of same brand in one go"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#EFF6FF', borderColor: '#BFDBFE', color: '#2563EB' }}
+              >
+                <Boxes style={{ width: 14, height: 14 }} />
+                Bulk Add
+              </button>
               <button
                 type="button"
                 onClick={handleOpenAddProduct}
@@ -1292,6 +1405,168 @@ export default function StockInventory({
           }}
           catalogItems={items}
         />
+      )}
+
+      {/* ── MODAL 3: BULK ADD PRODUCTS ── */}
+      {showBulkModal && (
+        <div className="pos-modal-overlay" style={{ alignItems: 'flex-start', paddingTop: '32px' }}>
+          <div className="pos-modal-card" style={{ maxWidth: '900px', width: '96vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+            {/* Header */}
+            <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #E2E8F0', background: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Boxes style={{ width: 18, height: 18, color: '#2563EB' }} />
+                <div>
+                  <h3 style={{ fontWeight: 700, fontSize: '14px', color: '#1E3A8A' }}>Bulk Product Entry</h3>
+                  <p style={{ fontSize: '11px', color: '#3B82F6', marginTop: '1px' }}>Fill common fields once — add unlimited variant rows</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setShowBulkModal(false)}
+                style={{ background: 'none', border: 'none', color: '#94A3B8', fontSize: '18px', fontWeight: 700, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+            </div>
+
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {/* ── Section A: Common Fields ── */}
+              <div style={{ padding: '1rem 1.25rem', background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
+                <p style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '10px' }}>Common Fields — same for all rows below</p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', fontSize: '12px' }}>
+                  <div>
+                    <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>Brand *</label>
+                    <input type="text" value={bulkBrand} onChange={e => setBulkBrand(e.target.value)}
+                      placeholder="e.g. BRIGHTO" className="pos-text-input"
+                      style={{ fontWeight: 600, textTransform: 'uppercase' }} autoFocus />
+                  </div>
+                  <div>
+                    <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>Category</label>
+                    <select value={bulkCategory} onChange={e => setBulkCategory(e.target.value)} className="pos-text-input">
+                      {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>Pack Size / Unit</label>
+                    <select value={bulkUnit} onChange={e => setBulkUnit(e.target.value)} className="pos-text-input">
+                      {allUnits.map(u => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>Min Stock Alert</label>
+                    <input type="number" min="0" value={bulkMinAlert} onChange={e => setBulkMinAlert(e.target.value)}
+                      className="pos-text-input" style={{ fontWeight: 600 }} />
+                  </div>
+                </div>
+                {/* Token Row */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginTop: '10px', fontSize: '12px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontWeight: 600, color: '#334155' }}>
+                    <input type="checkbox" checked={bulkHasToken} onChange={e => setBulkHasToken(e.target.checked)}
+                      style={{ accentColor: '#F97316', width: 14, height: 14 }} />
+                    Has Paint Token 🎫
+                  </label>
+                  {bulkHasToken && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <label style={{ fontWeight: 600, color: '#92400E' }}>Token Value Rs.</label>
+                      <input type="number" min="1" value={bulkTokenValue} onChange={e => setBulkTokenValue(e.target.value)}
+                        placeholder="e.g. 500" className="pos-text-input" style={{ width: '120px', borderColor: '#F59E0B' }} />
+                    </div>
+                  )}
+                  {bulkBrand && (
+                    <span style={{ marginLeft: 'auto', fontSize: '11px', color: '#475569', fontFamily: 'JetBrains Mono, monospace', background: '#E2E8F0', padding: '3px 8px', borderRadius: '4px' }}>
+                      Preview: {bulkBrand.toUpperCase()} {bulkCategory.toUpperCase()} [SHADE NAME]
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* ── Section B: Variant Rows ── */}
+              <div style={{ padding: '0 1.25rem 1rem' }}>
+                {/* Partial save errors */}
+                {bulkErrors.length > 0 && (
+                  <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '6px', padding: '8px 12px', margin: '10px 0', fontSize: '11px', color: '#991B1B' }}>
+                    <strong>⚠ {bulkErrors.length} row(s) had errors (remaining rows saved):</strong>
+                    {bulkErrors.map(e => <div key={e.row}>Row {e.row} ({e.code}): {e.error}</div>)}
+                  </div>
+                )}
+
+                {/* Table Header */}
+                <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 130px 110px 110px 80px 36px', gap: '6px', padding: '8px 0 4px', borderBottom: '2px solid #0F172A', fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#475569', textTransform: 'uppercase' }}>
+                  <span>#</span>
+                  <span>Shade / Color Name *</span>
+                  <span>Item Code *</span>
+                  <span>Retail Rs.</span>
+                  <span>Cost Rs.</span>
+                  <span>Qty</span>
+                  <span></span>
+                </div>
+
+                {/* Rows */}
+                {bulkRows.map((row, idx) => {
+                  const rowError = bulkErrors.find(e => e.code === row.code.trim().toUpperCase());
+                  return (
+                    <div key={row.id} style={{
+                      display: 'grid', gridTemplateColumns: '28px 1fr 130px 110px 110px 80px 36px',
+                      gap: '6px', padding: '5px 0', borderBottom: '1px solid #F1F5F9',
+                      background: rowError ? '#FEF2F2' : 'transparent',
+                    }}>
+                      <span style={{ fontSize: '11px', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace', display: 'flex', alignItems: 'center' }}>{idx + 1}</span>
+                      <input
+                        type="text" value={row.shadeName}
+                        onChange={e => updateBulkRow(row.id, 'shadeName', e.target.value)}
+                        placeholder="e.g. Pale Cream 3071"
+                        className="pos-text-input"
+                        style={{ fontSize: '12px' }}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addBulkRow(); } }}
+                      />
+                      <input
+                        type="text" value={row.code}
+                        onChange={e => updateBulkRow(row.id, 'code', e.target.value.toUpperCase())}
+                        placeholder="e.g. BG3071"
+                        className="pos-text-input"
+                        style={{ fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}
+                      />
+                      <input type="number" value={row.retail}
+                        onChange={e => updateBulkRow(row.id, 'retail', e.target.value)}
+                        placeholder="0"
+                        className="pos-text-input" style={{ fontSize: '12px' }} />
+                      <input type="number" value={row.cost}
+                        onChange={e => updateBulkRow(row.id, 'cost', e.target.value)}
+                        placeholder="0"
+                        className="pos-text-input" style={{ fontSize: '12px' }} />
+                      <input type="number" min="0" value={row.qty}
+                        onChange={e => updateBulkRow(row.id, 'qty', e.target.value)}
+                        className="pos-text-input" style={{ fontSize: '12px' }} />
+                      <button type="button" onClick={() => removeBulkRow(row.id)}
+                        style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        title="Remove this row">
+                        <X style={{ width: 15, height: 15 }} />
+                      </button>
+                    </div>
+                  );
+                })}
+
+                {/* Add Row Button */}
+                <button type="button" onClick={addBulkRow}
+                  style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 700, color: '#2563EB', background: '#EFF6FF', border: '1px dashed #93C5FD', borderRadius: '6px', padding: '7px 14px', cursor: 'pointer', width: '100%', justifyContent: 'center' }}>
+                  <Plus style={{ width: 14, height: 14 }} /> Add Row (or press Enter in Shade Name field)
+                </button>
+
+                <p style={{ fontSize: '10px', color: '#94A3B8', marginTop: '6px', fontFamily: 'JetBrains Mono, monospace' }}>
+                  {bulkRows.filter(r => r.shadeName.trim() && r.code.trim()).length} valid row(s) ready to save • Rows with empty Name or Code will be skipped
+                </p>
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div style={{ padding: '1rem 1.25rem', borderTop: '1px solid #E2E8F0', display: 'flex', gap: '8px', flexShrink: 0, background: '#F8FAFC' }}>
+              <button type="button" onClick={() => setShowBulkModal(false)}
+                style={{ flex: 1, padding: '10px', background: '#F1F5F9', color: '#334155', fontWeight: 700, fontSize: '12px', borderRadius: '8px', border: '1px solid #CBD5E1', cursor: 'pointer' }}>
+                Cancel
+              </button>
+              <button type="button" onClick={handleBulkSave} disabled={bulkSubmitting}
+                style={{ flex: 2, padding: '10px', background: '#2563EB', color: '#ffffff', fontWeight: 700, fontSize: '13px', borderRadius: '8px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', opacity: bulkSubmitting ? 0.7 : 1 }}>
+                <Boxes style={{ width: 16, height: 16 }} />
+                {bulkSubmitting ? 'Saving all products...' : `Save All ${bulkRows.filter(r => r.shadeName.trim() && r.code.trim()).length > 0 ? `(${bulkRows.filter(r => r.shadeName.trim() && r.code.trim()).length} products)` : ''} to Catalog`}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );
