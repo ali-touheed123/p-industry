@@ -49,7 +49,10 @@ export default function FinancialLedgers({
   const [statement, setStatement] = useState<LedgerTransaction[]>([]);
   const [loadingLedger, setLoadingLedger] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [dateFilter, setDateFilter] = useState('All Transactions');
+  // Date Range Filter State
+  const [datePreset, setDatePreset] = useState<'all' | '30d' | '3m' | '6m' | 'custom'>('all');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
 
   // Drill-down Accordion for Itemized Invoices/Purchases
   const [expandedTxId, setExpandedTxId] = useState<string | null>(null);
@@ -396,7 +399,8 @@ export default function FinancialLedgers({
         selectedParty,
         partyTypeParam,
         filteredStatement,
-        tenantName
+        tenantName,
+        dateRangeLabel
       );
       const imageUrl = URL.createObjectURL(blob);
 
@@ -485,21 +489,40 @@ export default function FinancialLedgers({
     p.phone?.includes(searchQuery)
   );
 
-  // Date Filter Logic (All Transactions / Last 30 Days / This Quarter)
+  // ── Date Range Filter Logic ──────────────────────────────────────────────────
+  const dateRangeLabel = (() => {
+    if (datePreset === '30d') return 'Last 30 Days';
+    if (datePreset === '3m') return 'Last 3 Months';
+    if (datePreset === '6m') return 'Last 6 Months';
+    if (datePreset === 'custom' && customFrom && customTo) return `${customFrom} to ${customTo}`;
+    if (datePreset === 'custom' && customFrom) return `From ${customFrom}`;
+    if (datePreset === 'custom' && customTo) return `Up to ${customTo}`;
+    return 'All Transactions';
+  })();
+
   const filteredStatement = statement.filter((t) => {
-    if (dateFilter === 'All Transactions') return true;
+    if (datePreset === 'all') return true;
     if (!t.date) return true;
     const tDate = new Date(t.date);
     if (isNaN(tDate.getTime())) return true;
     const now = new Date();
-    if (dateFilter === 'Last 30 Days') {
-      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-      return tDate >= thirtyDaysAgo;
+    if (datePreset === '30d') {
+      return tDate >= new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     }
-    if (dateFilter === 'This Quarter') {
-      const quarterMonth = Math.floor(now.getMonth() / 3) * 3;
-      const startOfQuarter = new Date(now.getFullYear(), quarterMonth, 1);
-      return tDate >= startOfQuarter;
+    if (datePreset === '3m') {
+      return tDate >= new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
+    }
+    if (datePreset === '6m') {
+      return tDate >= new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+    }
+    if (datePreset === 'custom') {
+      if (customFrom && tDate < new Date(customFrom)) return false;
+      if (customTo) {
+        const toDate = new Date(customTo);
+        toDate.setHours(23, 59, 59, 999);
+        if (tDate > toDate) return false;
+      }
+      return true;
     }
     return true;
   });
@@ -694,36 +717,83 @@ export default function FinancialLedgers({
                 </p>
               </div>
 
-              <div className="no-print" style={{ display: 'flex', gap: '8px' }}>
-                <select
-                  value={dateFilter}
-                  onChange={e => setDateFilter(e.target.value)}
-                  className="form-input"
-                  style={{ height: '34px', fontSize: '12px', paddingRight: '2rem' }}
-                >
-                  <option>All Transactions</option>
-                  <option>Last 30 Days</option>
-                  <option>This Quarter</option>
-                </select>
-                <button
-                  onClick={handleSendWhatsAppLedger}
-                  disabled={isGeneratingStatementImage}
-                  className="btn btn-secondary"
-                  style={{ height: '34px', padding: '0 10px', color: '#16A34A', borderColor: '#BBF7D0', background: '#F0FDF4' }}
-                  title="Share Statement Image via WhatsApp"
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
-                    {isGeneratingStatementImage ? 'hourglass_top' : 'share'}
-                  </span>
-                </button>
-                <button
-                  onClick={() => window.print()}
-                  className="btn btn-secondary"
-                  style={{ height: '34px', padding: '0 10px' }}
-                  title="Print Ledger Statement"
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: 16 }}>print</span>
-                </button>
+              <div className="no-print" style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-end' }}>
+                {/* ── Quick Preset Buttons ── */}
+                <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                  {(['all', '30d', '3m', '6m', 'custom'] as const).map((p) => {
+                    const labels: Record<string, string> = { all: 'All', '30d': '30d', '3m': '3m', '6m': '6m', custom: 'Custom' };
+                    const isActive = datePreset === p;
+                    return (
+                      <button
+                        key={p}
+                        onClick={() => setDatePreset(p)}
+                        style={{
+                          height: '28px',
+                          padding: '0 10px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          borderRadius: '6px',
+                          border: isActive ? '1.5px solid var(--secondary)' : '1px solid var(--outline-variant)',
+                          background: isActive ? 'var(--secondary)' : 'var(--surface)',
+                          color: isActive ? '#fff' : 'var(--on-surface-variant)',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        {labels[p]}
+                      </button>
+                    );
+                  })}
+                  <div style={{ width: '1px', height: '20px', background: 'var(--outline-variant)', margin: '0 2px' }} />
+                  <button
+                    onClick={handleSendWhatsAppLedger}
+                    disabled={isGeneratingStatementImage}
+                    className="btn btn-secondary"
+                    style={{ height: '28px', padding: '0 8px', color: '#16A34A', borderColor: '#BBF7D0', background: '#F0FDF4' }}
+                    title="Share A4 Statement Image via WhatsApp"
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: 15 }}>
+                      {isGeneratingStatementImage ? 'hourglass_top' : 'share'}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => window.print()}
+                    className="btn btn-secondary"
+                    style={{ height: '28px', padding: '0 8px' }}
+                    title="Print Ledger Statement"
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: 15 }}>print</span>
+                  </button>
+                </div>
+
+                {/* ── Custom Date Range Inputs (shown only when preset === 'custom') ── */}
+                {datePreset === 'custom' && (
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <label style={{ fontSize: '11px', color: 'var(--on-surface-variant)', whiteSpace: 'nowrap' }}>From</label>
+                    <input
+                      type="date"
+                      value={customFrom}
+                      onChange={e => setCustomFrom(e.target.value)}
+                      className="form-input"
+                      style={{ height: '28px', fontSize: '11px', padding: '0 6px' }}
+                    />
+                    <label style={{ fontSize: '11px', color: 'var(--on-surface-variant)', whiteSpace: 'nowrap' }}>To</label>
+                    <input
+                      type="date"
+                      value={customTo}
+                      onChange={e => setCustomTo(e.target.value)}
+                      className="form-input"
+                      style={{ height: '28px', fontSize: '11px', padding: '0 6px' }}
+                    />
+                    {(customFrom || customTo) && (
+                      <button
+                        onClick={() => { setCustomFrom(''); setCustomTo(''); }}
+                        style={{ fontSize: '11px', color: 'var(--on-surface-variant)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px' }}
+                        title="Clear custom range"
+                      >✕</button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 

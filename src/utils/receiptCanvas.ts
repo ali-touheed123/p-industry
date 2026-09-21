@@ -253,13 +253,20 @@ export async function generateReceiptImageBlob(
 }
 
 /**
- * Generate a pixel-perfect Customer / Supplier Account Statement Image Blob (PNG)
+ * Generate a professional A4-size (1240×variable px @ 150 DPI) Account Statement Image Blob (PNG)
+ *
+ * @param party         Party metadata
+ * @param partyType     'client' or 'supplier'
+ * @param transactions  Filtered transaction rows (caller applies date range before passing)
+ * @param tenantName    Shop / business name
+ * @param dateRangeLabel Human-readable label e.g. "Last 30 Days" shown in the header
  */
 export async function generateLedgerStatementBlob(
   party: { name: string; code?: string; phone?: string; current_balance?: number; credit_limit?: number },
   partyType: 'client' | 'supplier' = 'client',
   transactions: Array<{ date: string; desc: string; debit: number; credit: number; bal: number }>,
-  tenantName: string = 'Pyntflow Paint ERP'
+  tenantName: string = 'Pyntflow Paint ERP',
+  dateRangeLabel: string = 'All Transactions'
 ): Promise<Blob> {
   return new Promise((resolve, reject) => {
     try {
@@ -267,152 +274,224 @@ export async function generateLedgerStatementBlob(
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Canvas 2D context not available');
 
-      const width = 640;
-      const headerHeight = 180;
-      const rowHeight = 30;
-      const rowsHeight = Math.max(1, transactions.length) * rowHeight;
-      const summaryHeight = 130;
-      const footerHeight = 60;
-      const totalHeight = headerHeight + rowsHeight + summaryHeight + footerHeight;
+      // ── A4 @ 150 DPI ──────────────────────────────────────────────────────────
+      // A4 = 210mm × 297mm  →  @150dpi = 1240 × 1754 px (portrait)
+      // We use logical units of A4_W/A4_H and scale ×1 (no extra retina — 1240 px IS the output)
+      const A4_W = 1240;
+      const MARGIN = 60;
+      const CONTENT_W = A4_W - MARGIN * 2;
 
-      const scale = 2;
-      canvas.width = width * scale;
-      canvas.height = totalHeight * scale;
-      ctx.scale(scale, scale);
+      // Column X positions (all right-edge for right-aligned cols)
+      const COL_DATE_X   = MARGIN;            // left-aligned, max width ~140px
+      const COL_DESC_X   = MARGIN + 150;      // left-aligned, max width ~470px
+      const COL_DR_RIGHT = MARGIN + 740;      // right-aligned
+      const COL_CR_RIGHT = MARGIN + 900;      // right-aligned
+      const COL_BAL_RIGHT = A4_W - MARGIN;    // right-aligned
 
-      // Clean White Paper Background
+      const ROW_H = 36;
+      const HEADER_H = 260; // company + party info block
+      const TABLE_HEADER_H = 30;
+      const ROWS_H = Math.max(1, transactions.length) * ROW_H;
+      const SUMMARY_H = 160;
+      const FOOTER_H = 80;
+      const TOTAL_H = HEADER_H + TABLE_HEADER_H + ROWS_H + SUMMARY_H + FOOTER_H;
+
+      canvas.width = A4_W;
+      canvas.height = TOTAL_H;
+
+      // ── Background ─────────────────────────────────────────────────────────────
       ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(0, 0, width, totalHeight);
+      ctx.fillRect(0, 0, A4_W, TOTAL_H);
 
-      // Outer Border
-      ctx.strokeStyle = '#E2E8F0';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(4, 4, width - 8, totalHeight - 8);
+      // Subtle outer border
+      ctx.strokeStyle = '#CBD5E1';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(8, 8, A4_W - 16, TOTAL_H - 16);
 
-      let y = 32;
-
-      // Header
+      // Top accent bar
       ctx.fillStyle = '#0F172A';
-      ctx.font = 'bold 22px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(tenantName.toUpperCase(), width / 2, y);
+      ctx.fillRect(8, 8, A4_W - 16, 6);
 
-      y += 20;
+      let y = 50;
+
+      // ── Company Name ───────────────────────────────────────────────────────────
+      ctx.fillStyle = '#0F172A';
+      ctx.font = 'bold 38px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(tenantName.toUpperCase(), A4_W / 2, y);
+
+      y += 32;
       ctx.fillStyle = '#64748B';
-      ctx.font = 'bold 12px "JetBrains Mono", monospace';
+      ctx.font = 'bold 16px "JetBrains Mono", monospace';
       ctx.fillText(
         partyType === 'client' ? 'CUSTOMER ACCOUNT STATEMENT' : 'SUPPLIER KHATA STATEMENT',
-        width / 2,
+        A4_W / 2,
         y
       );
 
-      y += 24;
-      // Party Info Box
-      ctx.fillStyle = '#F8FAFC';
-      ctx.fillRect(20, y, width - 40, 56);
+      y += 10;
+      // Thin rule under subtitle
       ctx.strokeStyle = '#E2E8F0';
-      ctx.strokeRect(20, y, width - 40, 56);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(MARGIN, y + 10);
+      ctx.lineTo(A4_W - MARGIN, y + 10);
+      ctx.stroke();
+      y += 30;
 
+      // ── Party Info Box ─────────────────────────────────────────────────────────
+      ctx.fillStyle = '#F8FAFC';
+      ctx.fillRect(MARGIN, y, CONTENT_W, 80);
+      ctx.strokeStyle = '#E2E8F0';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(MARGIN, y, CONTENT_W, 80);
+
+      // Left side
       ctx.textAlign = 'left';
-      ctx.font = 'bold 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      ctx.font = 'bold 18px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
       ctx.fillStyle = '#0F172A';
-      ctx.fillText(`Party: ${party.name} (${party.code || '—'})`, 32, y + 22);
+      ctx.fillText(`Party: ${party.name} (${party.code || '—'})`, MARGIN + 20, y + 30);
 
-      ctx.font = '11px "JetBrains Mono", monospace';
+      ctx.font = '14px "JetBrains Mono", monospace';
       ctx.fillStyle = '#475569';
-      ctx.fillText(`Phone: ${party.phone || 'No phone'}`, 32, y + 42);
+      ctx.fillText(`Phone: ${party.phone || 'No phone on record'}`, MARGIN + 20, y + 56);
 
+      // Right side
       ctx.textAlign = 'right';
-      ctx.fillText(`Statement Date: ${new Date().toLocaleDateString('en-GB')}`, width - 32, y + 22);
-      ctx.fillText(`Total Txns: ${transactions.length}`, width - 32, y + 42);
+      ctx.font = '14px "JetBrains Mono", monospace';
+      ctx.fillStyle = '#475569';
+      ctx.fillText(`Statement Date: ${new Date().toLocaleDateString('en-GB')}`, A4_W - MARGIN - 20, y + 30);
+      ctx.fillText(
+        `Period: ${dateRangeLabel}  |  Txns: ${transactions.length}`,
+        A4_W - MARGIN - 20,
+        y + 56
+      );
 
-      y += 74;
+      y += 100;
 
-      // Table Header
+      // ── Table Header ───────────────────────────────────────────────────────────
       ctx.fillStyle = '#0F172A';
-      ctx.fillRect(20, y, width - 40, 24);
-      ctx.font = 'bold 10px "JetBrains Mono", monospace';
+      ctx.fillRect(MARGIN, y, CONTENT_W, TABLE_HEADER_H);
+      ctx.font = 'bold 13px "JetBrains Mono", monospace';
       ctx.fillStyle = '#FFFFFF';
 
       ctx.textAlign = 'left';
-      ctx.fillText('DATE', 30, y + 16);
-      ctx.fillText('DESCRIPTION / ITEMS', 120, y + 16);
+      ctx.fillText('DATE', COL_DATE_X + 4, y + 20);
+      ctx.fillText('DESCRIPTION / INVOICE', COL_DESC_X, y + 20);
       ctx.textAlign = 'right';
-      ctx.fillText('DEBIT (DR)', 400, y + 16);
-      ctx.fillText('CREDIT (CR)', 510, y + 16);
-      ctx.fillText('BALANCE', width - 30, y + 16);
+      ctx.fillText('DEBIT (DR)', COL_DR_RIGHT, y + 20);
+      ctx.fillText('CREDIT (CR)', COL_CR_RIGHT, y + 20);
+      ctx.fillText('BALANCE', COL_BAL_RIGHT, y + 20);
 
-      y += 24;
+      y += TABLE_HEADER_H;
 
+      // ── Transaction Rows ───────────────────────────────────────────────────────
       let totalDr = 0;
       let totalCr = 0;
 
-      // Rows
       transactions.forEach((tx, idx) => {
         totalDr += Number(tx.debit || 0);
         totalCr += Number(tx.credit || 0);
 
+        // Alternating row background
         ctx.fillStyle = idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC';
-        ctx.fillRect(20, y, width - 40, rowHeight);
+        ctx.fillRect(MARGIN, y, CONTENT_W, ROW_H);
 
-        ctx.font = '10.5px "JetBrains Mono", monospace';
+        // Light row separator
+        ctx.strokeStyle = '#F1F5F9';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(MARGIN, y + ROW_H);
+        ctx.lineTo(A4_W - MARGIN, y + ROW_H);
+        ctx.stroke();
+
+        const midY = y + ROW_H / 2 + 5;
+
+        // Date
+        ctx.font = '13px "JetBrains Mono", monospace';
         ctx.textAlign = 'left';
-        ctx.fillStyle = '#475569';
-        ctx.fillText(tx.date || '—', 30, y + 19);
+        ctx.fillStyle = '#64748B';
+        ctx.fillText(tx.date || '—', COL_DATE_X + 4, midY);
 
+        // Description — truncate to fit column (approx 52 chars at 13px mono in 470px)
         ctx.fillStyle = '#0F172A';
-        const descText = tx.desc && tx.desc.length > 36 ? tx.desc.substring(0, 34) + '...' : tx.desc || '—';
-        ctx.fillText(descText, 120, y + 19);
+        const maxDescLen = 48;
+        const descText = tx.desc && tx.desc.length > maxDescLen
+          ? tx.desc.substring(0, maxDescLen - 2) + '…'
+          : (tx.desc || '—');
+        ctx.fillText(descText, COL_DESC_X, midY);
 
+        // Debit
         ctx.textAlign = 'right';
-        ctx.fillStyle = tx.debit > 0 ? '#DC2626' : '#94A3B8';
-        ctx.fillText(tx.debit > 0 ? `Rs. ${tx.debit.toLocaleString()}` : '—', 400, y + 19);
+        if (tx.debit > 0) {
+          ctx.fillStyle = '#DC2626';
+          ctx.font = 'bold 13px "JetBrains Mono", monospace';
+          ctx.fillText(`Rs. ${tx.debit.toLocaleString()}`, COL_DR_RIGHT, midY);
+        } else {
+          ctx.fillStyle = '#CBD5E1';
+          ctx.font = '13px "JetBrains Mono", monospace';
+          ctx.fillText('—', COL_DR_RIGHT, midY);
+        }
 
-        ctx.fillStyle = tx.credit > 0 ? '#059669' : '#94A3B8';
-        ctx.fillText(tx.credit > 0 ? `Rs. ${tx.credit.toLocaleString()}` : '—', 510, y + 19);
+        // Credit
+        if (tx.credit > 0) {
+          ctx.fillStyle = '#059669';
+          ctx.font = 'bold 13px "JetBrains Mono", monospace';
+          ctx.fillText(`Rs. ${tx.credit.toLocaleString()}`, COL_CR_RIGHT, midY);
+        } else {
+          ctx.fillStyle = '#CBD5E1';
+          ctx.font = '13px "JetBrains Mono", monospace';
+          ctx.fillText('—', COL_CR_RIGHT, midY);
+        }
 
+        // Balance
         ctx.fillStyle = '#0F172A';
-        ctx.font = 'bold 10.5px "JetBrains Mono", monospace';
-        ctx.fillText(`Rs. ${(tx.bal || 0).toLocaleString()}`, width - 30, y + 19);
+        ctx.font = 'bold 13px "JetBrains Mono", monospace';
+        ctx.fillText(`Rs. ${(tx.bal || 0).toLocaleString()}`, COL_BAL_RIGHT, midY);
 
-        y += rowHeight;
+        y += ROW_H;
       });
 
-      y += 12;
-      drawDashedLine(ctx, 20, y, width - 20);
-      y += 20;
+      // ── Summary Section ────────────────────────────────────────────────────────
+      y += 16;
+      drawDashedLine(ctx, MARGIN, y, A4_W - MARGIN);
+      y += 28;
 
-      // Summary Box
       ctx.textAlign = 'right';
-      ctx.font = '12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      ctx.font = '15px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
       ctx.fillStyle = '#475569';
-      ctx.fillText(`Total Debits (Billed): Rs. ${totalDr.toLocaleString()}`, width - 30, y);
-      y += 18;
-      ctx.fillText(`Total Credits (Paid): Rs. ${totalCr.toLocaleString()}`, width - 30, y);
-      y += 22;
+      ctx.fillText(`Total Debits (Billed):  Rs. ${totalDr.toLocaleString()}`, A4_W - MARGIN, y);
+      y += 24;
+      ctx.fillText(`Total Credits (Paid):   Rs. ${totalCr.toLocaleString()}`, A4_W - MARGIN, y);
+      y += 30;
 
+      // Net outstanding highlight
       const closingBal = Number(party.current_balance ?? (totalDr - totalCr));
-      ctx.font = 'bold 15px "JetBrains Mono", monospace';
+      ctx.font = 'bold 20px "JetBrains Mono", monospace';
       ctx.fillStyle = closingBal > 0 ? '#DC2626' : '#059669';
       ctx.fillText(
-        `NET CLOSING OUTSTANDING: Rs. ${closingBal.toLocaleString()}`,
-        width - 30,
+        `NET CLOSING OUTSTANDING:  Rs. ${closingBal.toLocaleString()}`,
+        A4_W - MARGIN,
         y
       );
 
+      y += 28;
+      drawDashedLine(ctx, MARGIN, y, A4_W - MARGIN);
       y += 26;
-      drawDashedLine(ctx, 20, y, width - 20);
-      y += 20;
 
-      // Footer
+      // ── Footer ─────────────────────────────────────────────────────────────────
       ctx.textAlign = 'center';
-      ctx.fillStyle = '#64748B';
-      ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-      ctx.fillText('This is a computer generated account statement for reconciliation.', width / 2, y);
+      ctx.fillStyle = '#94A3B8';
+      ctx.font = '12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      ctx.fillText('This is a computer-generated account statement for reconciliation purposes.', A4_W / 2, y);
+      y += 20;
+      ctx.font = '11px "JetBrains Mono", monospace';
+      ctx.fillStyle = '#CBD5E1';
+      ctx.fillText('Generated by Pyntflow POS  •  Confidential', A4_W / 2, y);
 
       canvas.toBlob((blob) => {
         if (blob) resolve(blob);
-        else reject(new Error('Failed to generate ledger statement blob'));
+        else reject(new Error('Failed to generate A4 ledger statement blob'));
       }, 'image/png');
     } catch (err) {
       reject(err);
