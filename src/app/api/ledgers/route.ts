@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
     } else if (partyType === 'supplier') {
       const { data: purchases, error: purErr } = await supabaseAdmin
         .from('purchases')
-        .select('*')
+        .select('*, purchase_items(*)')
         .eq('tenant_id', tenantId)
         .eq('supplier_id', partyId)
         .order('created_at', { ascending: true });
@@ -38,6 +38,15 @@ export async function GET(req: NextRequest) {
         const netTotal = Number(p.net_total || 0);
         const paidAmt = Number(p.paid_amount || 0);
         const dueAmt = Number(p.due_amount || 0);
+        const mappedItems = (p.purchase_items || []).map((it: any) => ({
+          item_name: it.item_name || it.name,
+          code: it.item_code || it.code,
+          shade_code: it.shade_code || '',
+          pack_size: it.pack_size || it.unit || 'Can',
+          qty: it.qty,
+          unit_price: it.unit_price,
+          total_price: it.total_price || (it.qty * it.unit_price),
+        }));
 
         if (isReturn) {
           return {
@@ -49,6 +58,7 @@ export async function GET(req: NextRequest) {
             desc: `${p.purchase_no} (PURCHASE RETURN) — Rs. ${netTotal.toLocaleString()}`,
             debit: 0,
             credit: netTotal,
+            items: mappedItems,
           };
         }
 
@@ -61,12 +71,13 @@ export async function GET(req: NextRequest) {
           desc: `${p.purchase_no} (${p.payment_type?.toUpperCase() || 'PURCHASE'}) — Total: Rs. ${netTotal.toLocaleString()}, Paid: Rs. ${paidAmt.toLocaleString()}`,
           debit: dueAmt,
           credit: 0,
+          items: mappedItems,
         };
       });
     } else {
       const { data: invoices, error: invErr } = await supabaseAdmin
         .from('invoices')
-        .select('*')
+        .select('*, invoice_items(*)')
         .eq('tenant_id', tenantId)
         .eq('client_id', partyId)
         .order('created_at', { ascending: true });
@@ -77,6 +88,15 @@ export async function GET(req: NextRequest) {
         const netTotal = Number(inv.net_total || 0);
         const paidAmt = Number(inv.paid_amount || 0);
         const dueAmt = Number(inv.due_amount || 0);
+        const mappedItems = (inv.invoice_items || []).map((it: any) => ({
+          item_name: it.item_name || it.name,
+          code: it.item_code || it.code,
+          shade_code: it.shade_code || '',
+          pack_size: it.pack_size || it.unit || 'Can',
+          qty: it.qty,
+          unit_price: it.unit_price,
+          total_price: it.total_price || (it.qty * it.unit_price),
+        }));
 
         if (isReturn) {
           return {
@@ -88,6 +108,7 @@ export async function GET(req: NextRequest) {
             desc: `${inv.invoice_no} (SALES RETURN) — Rs. ${netTotal.toLocaleString()}`,
             debit: 0,
             credit: netTotal,
+            items: mappedItems,
           };
         }
 
@@ -100,6 +121,7 @@ export async function GET(req: NextRequest) {
           desc: `${inv.invoice_no} (${inv.payment_type?.toUpperCase() || 'SALE'}) — Total: Rs. ${netTotal.toLocaleString()}, Paid: Rs. ${paidAmt.toLocaleString()}`,
           debit: dueAmt,
           credit: 0,
+          items: mappedItems,
         };
       });
     }

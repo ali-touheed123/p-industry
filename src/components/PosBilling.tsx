@@ -39,14 +39,26 @@ interface Props {
   onNavigateToOrders?: () => void;
 }
 
+export interface ProductLastPurchase {
+  lastPrice: number;
+  lastDate: string;
+  invoiceNo: string;
+  qty: number;
+  unit: string;
+  shadeCode?: string;
+}
+
 export interface InvoiceLineItem {
   id: string;
   item?: Item;
   code: string;
+  originalCode?: string;
   productName: string;
+  originalName?: string;
   brand?: string;
   category?: string;
   shadeCode: string;
+  originalShade?: string;
   shadeColorHex: string;
   packSize: string;
   qty: number;
@@ -121,6 +133,18 @@ export default function PosBilling({
     lastPurchase: '—',
     totalSales: '—',
   });
+
+  // Client Product Last Purchase Lookup Map (key = itemId / code / name)
+  const [clientProductHistory, setClientProductHistory] = useState<Record<string, ProductLastPurchase>>({});
+  // Pending confirmation modal when customer previously purchased the item
+  const [pendingRateConfirm, setPendingRateConfirm] = useState<{
+    product: Item;
+    lastPurchase: ProductLastPurchase;
+  } | null>(null);
+
+  // Keyboard navigation active indexes
+  const [activeProductIndex, setActiveProductIndex] = useState<number>(0);
+  const [activeClientIndex, setActiveClientIndex] = useState<number>(0);
 
   // Cart / Line items
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
@@ -200,6 +224,7 @@ export default function PosBilling({
   useEffect(() => {
     if (!selectedClient || !tenantId) {
       setClientHistory({ lastPurchase: '—', totalSales: '—' });
+      setClientProductHistory({});
       return;
     }
 
@@ -228,15 +253,46 @@ export default function PosBilling({
             lastPurchase: formattedDate,
             totalSales: `Rs. ${Math.max(0, sumSales).toLocaleString()}`,
           });
+
+          // Build Product Last Purchase Map for this Client
+          const historyMap: Record<string, ProductLastPurchase> = {};
+          for (const inv of invoices) {
+            if (inv.status === 'cancelled') continue;
+            const items = inv.invoice_items || inv.items || [];
+            for (const it of items) {
+              const record: ProductLastPurchase = {
+                lastPrice: Number(it.unit_price ?? it.rate ?? it.price ?? 0),
+                lastDate: inv.date || '',
+                invoiceNo: inv.invoice_no || '',
+                qty: Number(it.qty) || 1,
+                unit: it.unit || 'PCS',
+                shadeCode: it.shade_code || it.shadeCode || '',
+              };
+              if (it.item_id && !historyMap[it.item_id]) {
+                historyMap[it.item_id] = record;
+              }
+              if (it.item_code) {
+                const codeKey = String(it.item_code).trim().toLowerCase();
+                if (!historyMap[codeKey]) historyMap[codeKey] = record;
+              }
+              if (it.item_name) {
+                const nameKey = String(it.item_name).trim().toLowerCase();
+                if (!historyMap[nameKey]) historyMap[nameKey] = record;
+              }
+            }
+          }
+          setClientProductHistory(historyMap);
         } else {
           setClientHistory({
             lastPurchase: 'No purchases yet',
             totalSales: 'Rs. 0',
           });
+          setClientProductHistory({});
         }
       } catch (err) {
         console.error('Failed to fetch client history', err);
         setClientHistory({ lastPurchase: '—', totalSales: '—' });
+        setClientProductHistory({});
       }
     };
 
@@ -382,14 +438,23 @@ export default function PosBilling({
 
   // Auto-sync cash payment continuously whenever netTotal changes if not manually edited & no other tenders
   useEffect(() => {
-    if (cardPayment === 0 && bankPayment === 0 && othersPayment === 0 && appliedTokenAmount === 0 && !isCashManuallyEdited) {
+    if (cardPayment === 0 && bankPayment === 0 && othersPayment === 0 && !isCashManuallyEdited) {
+      const remainingCash = Math.max(0, netTotal - appliedTokenAmount);
       if (lineItems.length > 0) {
-        setCashPayment(netTotal);
+        setCashPayment(remainingCash);
       } else {
         setCashPayment(0);
       }
     }
   }, [netTotal, lineItems.length, isCashManuallyEdited, cardPayment, bankPayment, othersPayment, appliedTokenAmount]);
+
+  // Keep appliedTokenAmount clamped to netTotal if items are removed/discounted
+  useEffect(() => {
+    if (appliedTokenAmount > netTotal) {
+      setAppliedTokenAmount(Math.max(0, netTotal));
+      setIsCashManuallyEdited(false);
+    }
+  }, [netTotal, appliedTokenAmount]);
 
   // Helper for shade info — always use the product's own shade_code from DB.
   const getShadeInfo = (item: Item) => {
@@ -400,13 +465,29 @@ export default function PosBilling({
   };
 
   // Add Item to table with stock validation and immutable state updates
-  const handleAddItem = (specificItem?: Item) => {
+  const handleAddItem = (specificItem?: Item, overrideRate?: number, skipCheck: boolean = false) => {
     const prod = specificItem || selectedProduct;
     if (!prod) {
       if (filteredCatalog.length === 1) {
-        handleAddItem(filteredCatalog[0]);
+        handleAddItem(filteredCatalog[0], overrideRate, skipCheck);
       }
       return;
+    }
+
+    // Check if registered customer previously bought this product before adding
+    if (selectedClient && !skipCheck && overrideRate === undefined) {
+      const prodCodeKey = (prod.code || '').trim().toLowerCase();
+      const prodNameKey = (prod.name || '').trim().toLowerCase();
+      const lastPurch =
+        clientProductHistory[prod.id] ||
+        clientProductHistory[prodCodeKey] ||
+        clientProductHistory[prodNameKey];
+
+      if (lastPurch && lastPurch.lastPrice > 0) {
+        setPendingRateConfirm({ product: prod, lastPurchase: lastPurch });
+        setShowProductDropdown(false);
+        return;
+      }
     }
 
     const requestedQty = Math.max(1, inputQty);
@@ -426,11 +507,14 @@ export default function PosBilling({
     const { shadeCode, shadeColorHex } = getShadeInfo(prod);
     const hasToken = Boolean(prod.has_token && (Number(prod.token_value) || 0) > 0);
     const tokenVal = hasToken ? Number(prod.token_value) || 0 : 0;
+    const itemRate = overrideRate !== undefined ? overrideRate : (prod.retail_price || 0);
 
     if (existingIndex >= 0) {
       setLineItems((prev) =>
         prev.map((li, idx) =>
-          idx === existingIndex ? { ...li, qty: li.qty + requestedQty } : li
+          idx === existingIndex
+            ? { ...li, qty: li.qty + requestedQty, rate: overrideRate !== undefined ? overrideRate : li.rate }
+            : li
         )
       );
     } else {
@@ -438,16 +522,19 @@ export default function PosBilling({
         id: `li-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         item: prod,
         code: prod.code,
+        originalCode: prod.code,
         productName: prod.name,
+        originalName: prod.name,
         brand: prod.brand,
         category: prod.category,
         shadeCode,
+        originalShade: shadeCode,
         shadeColorHex,
         packSize: prod.pack_size || prod.unit || 'Can',
         qty: requestedQty,
         unit: prod.unit || 'PCS',
-        rate: prod.retail_price || 0,
-        originalRate: prod.retail_price || 0,
+        rate: itemRate,
+        originalRate: itemRate,
         discountPercent: 0,
         hasToken,
         tokenValue: tokenVal,
@@ -1168,18 +1255,35 @@ export default function PosBilling({
                   ref={searchInputRef}
                   type="text"
                   value={productQuery}
-                  onFocus={() => setShowProductDropdown(true)}
+                  onFocus={() => {
+                    setShowProductDropdown(true);
+                    setActiveProductIndex(0);
+                  }}
                   onChange={(e) => {
                     setProductQuery(e.target.value);
                     setShowProductDropdown(true);
+                    setActiveProductIndex(0);
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      if (selectedProduct) {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setShowProductDropdown(true);
+                      setActiveProductIndex((prev) => (filteredCatalog.length ? (prev + 1) % filteredCatalog.length : 0));
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setShowProductDropdown(true);
+                      setActiveProductIndex((prev) => (filteredCatalog.length ? (prev - 1 + filteredCatalog.length) % filteredCatalog.length : 0));
+                    } else if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (showProductDropdown && filteredCatalog.length > 0 && activeProductIndex >= 0 && activeProductIndex < filteredCatalog.length) {
+                        handleAddItem(filteredCatalog[activeProductIndex]);
+                      } else if (selectedProduct) {
                         handleAddItem(selectedProduct);
                       } else if (filteredCatalog.length === 1) {
                         handleAddItem(filteredCatalog[0]);
                       }
+                    } else if (e.key === 'Escape') {
+                      setShowProductDropdown(false);
                     }
                   }}
                   placeholder="Search product by name, code, barcode or shade... (F3)"
@@ -1201,11 +1305,21 @@ export default function PosBilling({
                       No matching products found
                     </div>
                   ) : (
-                    filteredCatalog.map((prod) => {
-                      const { shadeCode, shadeColorHex } = getShadeInfo(prod);
+                    filteredCatalog.map((prod, idx) => {
+                      const { shadeCode } = getShadeInfo(prod);
+                      const prodCodeKey = (prod.code || '').trim().toLowerCase();
+                      const prodNameKey = (prod.name || '').trim().toLowerCase();
+                      const lastPurch = selectedClient
+                        ? (clientProductHistory[prod.id] ||
+                           clientProductHistory[prodCodeKey] ||
+                           clientProductHistory[prodNameKey])
+                        : undefined;
+                      const isHighlighted = idx === activeProductIndex;
+
                       return (
                         <div
                           key={prod.id}
+                          onMouseEnter={() => setActiveProductIndex(idx)}
                           onClick={() => {
                             setSelectedProduct(prod);
                             setProductQuery(`${prod.name} (${shadeCode})`);
@@ -1213,13 +1327,23 @@ export default function PosBilling({
                             handleAddItem(prod);
                           }}
                           className="pos-dropdown-item"
+                          style={{
+                            background: isHighlighted ? '#FFF7ED' : undefined,
+                            borderLeft: isHighlighted ? '3px solid #F97316' : '3px solid transparent',
+                            cursor: 'pointer',
+                          }}
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <div>
-                              <div style={{ fontWeight: 700, color: '#0F172A' }}>{prod.name}</div>
+                              <div style={{ fontWeight: 700, color: isHighlighted ? '#C2410C' : '#0F172A' }}>{prod.name}</div>
                               <div style={{ fontSize: '11px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
                                 {prod.code} · {prod.pack_size || prod.unit || 'Can'} · {shadeCode}
                               </div>
+                              {lastPurch && (
+                                <div style={{ marginTop: '2px', display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#ECFDF5', color: '#047857', border: '1px solid #A7F3D0', padding: '1px 6px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 700 }}>
+                                  🏷️ Last bought: Rs. {lastPurch.lastPrice.toLocaleString()} ({lastPurch.lastDate})
+                                </div>
+                              )}
                             </div>
                           </div>
                           <div style={{ textAlign: 'right' }}>
@@ -1306,11 +1430,54 @@ export default function PosBilling({
                           <td style={{ textAlign: 'center', fontFamily: 'JetBrains Mono, monospace', color: '#94A3B8', fontSize: '11px' }}>
                             {index + 1}
                           </td>
-                          <td style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#334155', fontSize: '11px', whiteSpace: 'nowrap' }}>
-                            {item.code}
+                          <td style={{ whiteSpace: 'nowrap' }}>
+                            <input
+                              type="text"
+                              value={item.code}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setLineItems((prev) => prev.map((li) => (li.id === item.id ? { ...li, code: val } : li)));
+                              }}
+                              style={{
+                                fontFamily: 'JetBrains Mono, monospace',
+                                fontWeight: 700,
+                                color: '#334155',
+                                fontSize: '11px',
+                                background: 'transparent',
+                                border: '1px solid transparent',
+                                borderRadius: '4px',
+                                padding: '2px 4px',
+                                width: '85px',
+                                outline: 'none',
+                              }}
+                              onFocus={(e) => (e.target.style.borderColor = '#F97316')}
+                              onBlur={(e) => (e.target.style.borderColor = 'transparent')}
+                              title="Click to edit code"
+                            />
                           </td>
                           <td style={{ fontWeight: 600, color: '#0F172A' }}>
-                            <div>{item.productName}</div>
+                            <input
+                              type="text"
+                              value={item.productName}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setLineItems((prev) => prev.map((li) => (li.id === item.id ? { ...li, productName: val } : li)));
+                              }}
+                              style={{
+                                fontWeight: 600,
+                                color: '#0F172A',
+                                fontSize: '12px',
+                                background: 'transparent',
+                                border: '1px solid transparent',
+                                borderRadius: '4px',
+                                padding: '2px 4px',
+                                width: '100%',
+                                outline: 'none',
+                              }}
+                              onFocus={(e) => (e.target.style.borderColor = '#F97316')}
+                              onBlur={(e) => (e.target.style.borderColor = 'transparent')}
+                              title="Click to edit product name for bill"
+                            />
                             {item.hasToken && (item.tokenValue || 0) > 0 && (
                               <div style={{ marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                                 <span
@@ -1403,9 +1570,28 @@ export default function PosBilling({
                             )}
                           </td>
                           <td style={{ whiteSpace: 'nowrap' }}>
-                            <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '11px', color: '#334155' }}>
-                              {item.shadeCode}
-                            </span>
+                            <input
+                              type="text"
+                              value={item.shadeCode}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setLineItems((prev) => prev.map((li) => (li.id === item.id ? { ...li, shadeCode: val } : li)));
+                              }}
+                              style={{
+                                fontFamily: 'JetBrains Mono, monospace',
+                                fontSize: '11px',
+                                color: '#334155',
+                                background: 'transparent',
+                                border: '1px solid transparent',
+                                borderRadius: '4px',
+                                padding: '2px 4px',
+                                width: '85px',
+                                outline: 'none',
+                              }}
+                              onFocus={(e) => (e.target.style.borderColor = '#F97316')}
+                              onBlur={(e) => (e.target.style.borderColor = 'transparent')}
+                              title="Click to edit shade code"
+                            />
                           </td>
                           <td style={{ fontFamily: 'JetBrains Mono, monospace', color: '#475569', fontSize: '11px', whiteSpace: 'nowrap' }}>
                             {item.packSize}
@@ -1702,6 +1888,109 @@ export default function PosBilling({
         </div>
       </aside>
 
+      {/* ── Pending Last Rate Confirmation Modal ── */}
+      {pendingRateConfirm && (
+        <div className="pos-modal-overlay">
+          <div className="pos-modal-card" style={{ maxWidth: '420px', border: '1px solid #FED7AA' }}>
+            <div style={{ padding: '1rem', borderBottom: '1px solid #FED7AA', background: '#FFF7ED', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '18px' }}>🏷️</span>
+                <h3 style={{ fontWeight: 800, fontSize: '14px', color: '#9A3412' }}>
+                  Previous Price Record Detected
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPendingRateConfirm(null)}
+                style={{ background: 'none', border: 'none', color: '#9A3412', fontSize: '16px', fontWeight: 700, cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ fontSize: '12px', color: '#334155' }}>
+                <strong>{selectedClient?.name}</strong> previously bought <strong>{pendingRateConfirm.product.name}</strong>:
+              </div>
+
+              <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                  <span style={{ color: '#64748B' }}>Last Purchase Price:</span>
+                  <span style={{ fontWeight: 800, color: '#047857', fontFamily: 'JetBrains Mono, monospace', fontSize: '13px' }}>
+                    Rs. {pendingRateConfirm.lastPurchase.lastPrice.toLocaleString()}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#64748B' }}>
+                  <span>Invoice &amp; Date:</span>
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                    {pendingRateConfirm.lastPurchase.invoiceNo || '—'} · {pendingRateConfirm.lastPurchase.lastDate || '—'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', borderTop: '1px dashed #CBD5E1', paddingTop: '6px' }}>
+                  <span style={{ color: '#64748B' }}>Current Retail Price:</span>
+                  <span style={{ fontWeight: 700, color: '#0F172A', fontFamily: 'JetBrains Mono, monospace' }}>
+                    Rs. {(pendingRateConfirm.product.retail_price || 0).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              <p style={{ fontSize: '11px', color: '#64748B', margin: 0 }}>
+                Would you like to give the customer their previous rate or charge the current retail price?
+              </p>
+
+              <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const prod = pendingRateConfirm.product;
+                    const rate = pendingRateConfirm.lastPurchase.lastPrice;
+                    setPendingRateConfirm(null);
+                    handleAddItem(prod, rate, true);
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '9px',
+                    background: '#059669',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontWeight: 700,
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 4px rgba(5,150,105,0.2)',
+                  }}
+                >
+                  Use Last Price (Rs. {pendingRateConfirm.lastPurchase.lastPrice.toLocaleString()})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const prod = pendingRateConfirm.product;
+                    const rate = prod.retail_price;
+                    setPendingRateConfirm(null);
+                    handleAddItem(prod, rate, true);
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '9px',
+                    background: '#F1F5F9',
+                    color: '#0F172A',
+                    border: '1px solid #CBD5E1',
+                    borderRadius: '8px',
+                    fontWeight: 700,
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Use Retail (Rs. {(pendingRateConfirm.product.retail_price || 0).toLocaleString()})
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Customer Directory Modal ── */}
       {showCustomerModal && (
         <div className="pos-modal-overlay">
@@ -1721,78 +2010,145 @@ export default function PosBilling({
             </div>
 
             <div style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {/* Search Bar */}
-              <div className="pos-input-wrapper">
-                <Search style={{ width: 16, height: 16, color: '#94A3B8', position: 'absolute', left: '10px' }} />
-                <input
-                  type="text"
-                  value={clientSearchQuery}
-                  onChange={(e) => setClientSearchQuery(e.target.value)}
-                  placeholder="Search customer by name or phone number..."
-                  className="pos-text-input"
-                  style={{ paddingLeft: '34px' }}
-                  autoFocus
-                />
-              </div>
-
-              {/* Clients List */}
-              <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid #E2E8F0', borderRadius: '10px' }}>
-                {/* Walk-in Customer Option */}
-                <div
-                  onClick={() => {
-                    setSelectedClient(null);
-                    setCustomerSearch('Walk-in Customer');
-                    setShowCustomerModal(false);
-                  }}
-                  style={{ padding: '10px 12px', borderBottom: '1px solid #F1F5F9', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px' }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 700, color: '#0F172A' }}>Walk-in Customer (General Counter)</div>
-                    <div style={{ fontSize: '11px', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>No credit account · Immediate cash checkout</div>
-                  </div>
-                  <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, padding: '2px 6px', background: '#F1F5F9', borderRadius: '4px', color: '#475569' }}>
-                    Walk-in
-                  </span>
-                </div>
-
-                {clients.length === 0 ? (
-                  <div style={{ padding: '16px', textAlign: 'center', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', fontSize: '11px' }}>
-                    Loading customers...
-                  </div>
-                ) : (
-                  clients
+              {/* Search Bar & Clients List */}
+              {(() => {
+                const filteredClients: { isWalkIn: boolean; client?: Client; name?: string }[] = [
+                  { isWalkIn: true, name: 'Walk-in Customer (General Counter)' },
+                  ...clients
                     .filter((c) =>
                       c.name.toLowerCase().includes(clientSearchQuery.toLowerCase()) ||
-                      (c.phone && c.phone.includes(clientSearchQuery))
+                      (c.phone && c.phone.includes(clientSearchQuery)) ||
+                      (c.code && c.code.toLowerCase().includes(clientSearchQuery.toLowerCase()))
                     )
-                    .map((client) => (
-                      <div
-                        key={client.id}
-                        onClick={() => {
-                          setSelectedClient(client);
-                          setCustomerSearch(client.name);
-                          setShowCustomerModal(false);
+                    .map((c) => ({ isWalkIn: false, client: c, name: c.name })),
+                ];
+
+                return (
+                  <>
+                    <div className="pos-input-wrapper">
+                      <Search style={{ width: 16, height: 16, color: '#94A3B8', position: 'absolute', left: '10px' }} />
+                      <input
+                        type="text"
+                        value={clientSearchQuery}
+                        onChange={(e) => {
+                          setClientSearchQuery(e.target.value);
+                          setActiveClientIndex(0);
                         }}
-                        style={{ padding: '10px 12px', borderBottom: '1px solid #F1F5F9', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px' }}
-                      >
-                        <div>
-                          <div style={{ fontWeight: 700, color: '#0F172A' }}>{client.name}</div>
-                          <div style={{ fontSize: '11px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
-                            {client.phone || 'No phone'} · {client.city || 'Pakistan'}
+                        onKeyDown={(e) => {
+                          if (e.key === 'ArrowDown') {
+                            e.preventDefault();
+                            setActiveClientIndex((prev) => (filteredClients.length ? (prev + 1) % filteredClients.length : 0));
+                          } else if (e.key === 'ArrowUp') {
+                            e.preventDefault();
+                            setActiveClientIndex((prev) => (filteredClients.length ? (prev - 1 + filteredClients.length) % filteredClients.length : 0));
+                          } else if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const target = filteredClients[activeClientIndex];
+                            if (target) {
+                              if (target.isWalkIn) {
+                                setSelectedClient(null);
+                                setCustomerSearch('Walk-in Customer');
+                              } else if (target.client) {
+                                setSelectedClient(target.client);
+                                setCustomerSearch(target.client.name);
+                              }
+                              setShowCustomerModal(false);
+                              setTimeout(() => searchInputRef.current?.focus(), 60);
+                            }
+                          } else if (e.key === 'Escape') {
+                            setShowCustomerModal(false);
+                          }
+                        }}
+                        placeholder="Search customer by name or phone number..."
+                        className="pos-text-input"
+                        style={{ paddingLeft: '34px' }}
+                        autoFocus
+                      />
+                    </div>
+
+                    {/* Clients List */}
+                    <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid #E2E8F0', borderRadius: '10px' }}>
+                      {filteredClients.map((item, idx) => {
+                        const isHighlighted = idx === activeClientIndex;
+                        if (item.isWalkIn) {
+                          return (
+                            <div
+                              key="walkin-opt"
+                              onMouseEnter={() => setActiveClientIndex(idx)}
+                              onClick={() => {
+                                setSelectedClient(null);
+                                setCustomerSearch('Walk-in Customer');
+                                setShowCustomerModal(false);
+                                setTimeout(() => searchInputRef.current?.focus(), 60);
+                              }}
+                              style={{
+                                padding: '10px 12px',
+                                borderBottom: '1px solid #F1F5F9',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                fontSize: '12px',
+                                background: isHighlighted ? '#FFF7ED' : '#FFFFFF',
+                                borderLeft: isHighlighted ? '3px solid #F97316' : '3px solid transparent',
+                              }}
+                            >
+                              <div>
+                                <div style={{ fontWeight: 700, color: isHighlighted ? '#C2410C' : '#0F172A' }}>Walk-in Customer (General Counter)</div>
+                                <div style={{ fontSize: '11px', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>No credit account · Immediate cash checkout</div>
+                              </div>
+                              <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, padding: '2px 6px', background: isHighlighted ? '#FED7AA' : '#F1F5F9', borderRadius: '4px', color: '#475569' }}>
+                                Walk-in
+                              </span>
+                            </div>
+                          );
+                        }
+
+                        const client = item.client;
+                        if (!client) return null;
+                        return (
+                          <div
+                            key={client.id}
+                            onMouseEnter={() => setActiveClientIndex(idx)}
+                            onClick={() => {
+                              setSelectedClient(client);
+                              setCustomerSearch(client.name);
+                              setShowCustomerModal(false);
+                              setTimeout(() => searchInputRef.current?.focus(), 60);
+                            }}
+                            style={{
+                              padding: '10px 12px',
+                              borderBottom: '1px solid #F1F5F9',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              fontSize: '12px',
+                              background: isHighlighted ? '#FFF7ED' : '#FFFFFF',
+                              borderLeft: isHighlighted ? '3px solid #F97316' : '3px solid transparent',
+                            }}
+                          >
+                            <div>
+                              <div style={{ fontWeight: 700, color: isHighlighted ? '#C2410C' : '#0F172A' }}>{client.name}</div>
+                              <div style={{ fontSize: '11px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
+                                {client.code ? `${client.code} · ` : ''}{client.phone || 'No phone'} · {client.city || 'Pakistan'}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A' }}>
+                                Limit: Rs. {(client.credit_limit || 0).toLocaleString()}
+                              </div>
+                              <div style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600, color: client.current_balance > 0 ? '#DC2626' : '#16A34A' }}>
+                                Balance: Rs. {(client.current_balance || 0).toLocaleString()}
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A' }}>
-                            Limit: Rs. {(client.credit_limit || 0).toLocaleString()}
-                          </div>
-                          <div style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600, color: client.current_balance > 0 ? '#DC2626' : '#16A34A' }}>
-                            Balance: Rs. {(client.current_balance || 0).toLocaleString()}
-                          </div>
-                        </div>
-                      </div>
-                    ))
-                )}
-              </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                );
+              })()}
 
               {/* Quick Add Client */}
               <div style={{ paddingTop: '8px', borderTop: '1px solid #F1F5F9', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1990,7 +2346,9 @@ export default function PosBilling({
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <div>
                         <div style={{ fontWeight: 700, color: '#000000' }}>{item.productName || item.item_name}</div>
-                        <div style={{ color: '#555555', fontSize: '9.5px' }}>
+                        <div style={{ color: '#444444', fontSize: '9.5px' }}>
+                          {(item.code || item.item_code) ? `${item.code || item.item_code} · ` : ''}
+                          {(item.shadeCode || item.shade_code) && (item.shadeCode || item.shade_code) !== '—' ? `Shade: ${item.shadeCode || item.shade_code} · ` : ''}
                           {item.qty} x Rs. {(item.rate || item.unit_price || 0).toLocaleString()}
                         </div>
                       </div>

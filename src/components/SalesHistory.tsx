@@ -26,7 +26,12 @@ import {
   ShoppingBag,
   Ticket,
   Coins,
+  Copy,
+  Check,
+  ExternalLink,
+  MessageCircle,
 } from 'lucide-react';
+import { generateReceiptImageBlob } from '@/utils/receiptCanvas';
 
 interface TokenRedemptionRow {
   id: string;
@@ -111,6 +116,29 @@ export default function SalesHistory({
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [thermalPrintInvoice, setThermalPrintInvoice] = useState<Invoice | null>(null);
 
+  // Registered Clients Directory (for WhatsApp Phone Resolution)
+  const [clientsMap, setClientsMap] = useState<Record<string, { name: string; phone?: string }>>({});
+
+  // WhatsApp Image Modal State
+  const [whatsAppModal, setWhatsAppModal] = useState<{
+    invoice: Invoice;
+    phone: string;
+    blob: Blob;
+    imageUrl: string;
+  } | null>(null);
+  const [isGeneratingWhatsApp, setIsGeneratingWhatsApp] = useState<boolean>(false);
+  const [copiedReceipt, setCopiedReceipt] = useState<boolean>(false);
+
+  // Helper: Strictly Registered Customer Check (Excludes Walk-in)
+  const isRegisteredCustomer = (inv: Invoice | null | undefined): boolean => {
+    if (!inv || !inv.client_id) return false;
+    const name = (inv.client_name || '').toLowerCase().trim();
+    if (name.includes('walk-in') || name.includes('walk in') || name.includes('cash customer') || name === 'walkin') {
+      return false;
+    }
+    return true;
+  };
+
   // Fetch Invoices from Backend
   const fetchInvoices = async () => {
     if (!tenantId) return;
@@ -173,9 +201,33 @@ export default function SalesHistory({
     }
   };
 
+  // Fetch Clients Directory
+  const fetchClients = async () => {
+    if (!tenantId) return;
+    try {
+      const res = await fetch(`/api/clients?tenant_id=${tenantId}`);
+      if (res.ok) {
+        const json = await res.json();
+        const list = json.data || json || [];
+        const map: Record<string, { name: string; phone?: string }> = {};
+        if (Array.isArray(list)) {
+          list.forEach((c: any) => {
+            if (c.id) {
+              map[c.id] = { name: c.name, phone: c.phone };
+            }
+          });
+        }
+        setClientsMap(map);
+      }
+    } catch (err) {
+      console.error('Failed to fetch clients in SalesHistory', err);
+    }
+  };
+
   useEffect(() => {
     fetchInvoices();
     fetchTokenRedemptions();
+    fetchClients();
   }, [tenantId, startDate, endDate, typeFilter, paymentFilter, activeDatePreset]);
 
   // Handle Preset Clicks
@@ -386,25 +438,94 @@ export default function SalesHistory({
     document.body.removeChild(link);
   };
 
-  // WhatsApp Share Invoice
-  const handleWhatsAppShare = (inv: Invoice) => {
-    let msg = `*PaintERP Invoice: ${inv.invoice_no}*\n`;
-    msg += `Branch: ${tenantName}\n`;
-    msg += `Date: ${inv.date}\n`;
-    msg += `Customer: ${inv.client_name || 'Walk-in Customer'}\n\n`;
-    msg += `*Items:*\n`;
-    ((inv.invoice_items || inv.items) || []).forEach((it, idx) => {
-      msg += `${idx + 1}. ${it.item_name} ${it.shade_code ? `(${it.shade_code})` : ''} - ${it.qty} x Rs. ${it.unit_price} = Rs. ${it.total_price}\n`;
-    });
-    msg += `\n*Net Total:* Rs. ${Number(inv.net_total).toLocaleString()}\n`;
-    msg += `*Paid Amount:* Rs. ${Number(inv.paid_amount).toLocaleString()}\n`;
-    if (Number(inv.due_amount) > 0) {
-      msg += `*Remaining Balance:* Rs. ${Number(inv.due_amount).toLocaleString()}\n`;
+  // WhatsApp Share Receipt Image (Registered Customers Only)
+  const handleWhatsAppShare = async (inv: Invoice) => {
+    if (!isRegisteredCustomer(inv)) {
+      alert('WhatsApp receipt sharing is strictly available for registered clients.');
+      return;
     }
-    msg += `\nThank you for doing business with us!`;
 
-    const encodedMsg = encodeURIComponent(msg);
-    window.open(`https://wa.me/?text=${encodedMsg}`, '_blank');
+    try {
+      setIsGeneratingWhatsApp(true);
+      const blob = await generateReceiptImageBlob(inv, tenantName);
+      const imageUrl = URL.createObjectURL(blob);
+
+      // Customer phone formatting
+      const rawPhone = clientsMap[inv.client_id!]?.phone || (inv as any).client_phone || '';
+      let cleanPhone = rawPhone.replace(/[^0-9]/g, '');
+      if (cleanPhone.startsWith('0')) {
+        cleanPhone = '92' + cleanPhone.slice(1);
+      }
+
+      // Automatically copy image to clipboard if supported
+      let copied = false;
+      try {
+        if (navigator.clipboard && window.ClipboardItem) {
+          await navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': blob })
+          ]);
+          copied = true;
+        }
+      } catch (clipErr) {
+        console.warn('Clipboard write permission denied or unsupported:', clipErr);
+        copied = false;
+      }
+
+      setCopiedReceipt(copied);
+      setWhatsAppModal({
+        invoice: inv,
+        phone: cleanPhone,
+        blob,
+        imageUrl,
+      });
+    } catch (err: any) {
+      console.error('Error generating WhatsApp receipt image:', err);
+      alert('Could not render receipt image. Please use thermal print.');
+    } finally {
+      setIsGeneratingWhatsApp(false);
+    }
+  };
+
+  const handleCopyReceiptImage = async () => {
+    if (!whatsAppModal) return;
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'image/png': whatsAppModal.blob })
+      ]);
+      setCopiedReceipt(true);
+      setTimeout(() => setCopiedReceipt(false), 3000);
+    } catch (err) {
+      console.error('Failed to copy receipt image to clipboard', err);
+      alert('Unable to copy to clipboard automatically. Please download the image below.');
+    }
+  };
+
+  const handleDownloadReceiptImage = () => {
+    if (!whatsAppModal) return;
+    const a = document.createElement('a');
+    a.href = whatsAppModal.imageUrl;
+    a.download = `Receipt_${whatsAppModal.invoice.invoice_no}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const handleOpenWhatsAppChat = () => {
+    if (!whatsAppModal) return;
+    const phone = whatsAppModal.phone.replace(/[^0-9]/g, '');
+    if (!phone) {
+      alert('Please enter a valid phone number for the customer (e.g. 923001234567).');
+      return;
+    }
+    window.open(`https://wa.me/${phone}`, '_blank');
+  };
+
+  const closeWhatsAppModal = () => {
+    if (whatsAppModal) {
+      URL.revokeObjectURL(whatsAppModal.imageUrl);
+    }
+    setWhatsAppModal(null);
+    setCopiedReceipt(false);
   };
 
   return (
@@ -1480,22 +1601,25 @@ export default function SalesHistory({
                                 <Printer style={{ width: 14, height: 14 }} />
                               </button>
 
-                              <button
-                                type="button"
-                                onClick={() => handleWhatsAppShare(inv)}
-                                title="Share via WhatsApp"
-                                style={{
-                                  padding: '5px',
-                                  background: '#DCFCE7',
-                                  color: '#16A34A',
-                                  border: '1px solid #BBF7D0',
-                                  borderRadius: '6px',
-                                  cursor: 'pointer',
-                                  display: 'flex',
-                                }}
-                              >
-                                <Share2 style={{ width: 14, height: 14 }} />
-                              </button>
+                              {isRegisteredCustomer(inv) && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleWhatsAppShare(inv)}
+                                  disabled={isGeneratingWhatsApp}
+                                  title="Share Receipt Image via WhatsApp"
+                                  style={{
+                                    padding: '5px',
+                                    background: '#DCFCE7',
+                                    color: '#16A34A',
+                                    border: '1px solid #BBF7D0',
+                                    borderRadius: '6px',
+                                    cursor: isGeneratingWhatsApp ? 'wait' : 'pointer',
+                                    display: 'flex',
+                                  }}
+                                >
+                                  <Share2 style={{ width: 14, height: 14 }} />
+                                </button>
+                              )}
 
                               {onEditInvoiceInPos && !isReturn && (
                                 <button
@@ -1781,6 +1905,11 @@ export default function SalesHistory({
                       {(selectedInvoice.invoice_items || selectedInvoice.items)?.map((it, idx) => (
                         <tr key={idx} style={{ borderBottom: '1px solid #F1F5F9' }}>
                           <td style={{ padding: '8px 12px', fontWeight: 600, color: '#0F172A' }}>
+                            {it.item_code && (
+                              <span style={{ fontSize: '10.5px', color: '#64748B', marginRight: '6px', fontFamily: 'JetBrains Mono, monospace' }}>
+                                [{it.item_code}]
+                              </span>
+                            )}
                             {it.item_name} <span style={{ color: '#64748B', fontSize: '11px' }}>({it.pack_size || it.unit || 'Can'})</span>
                           </td>
                           <td style={{ padding: '8px 12px' }}>
@@ -1872,25 +2001,28 @@ export default function SalesHistory({
                 justifyContent: 'space-between',
               }}
             >
-              <button
-                onClick={() => handleWhatsAppShare(selectedInvoice)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '8px 14px',
-                  background: '#16A34A',
-                  color: '#FFFFFF',
-                  border: 'none',
-                  borderRadius: '8px',
-                  fontSize: '13px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                <Share2 style={{ width: 14, height: 14 }} />
-                Share WhatsApp
-              </button>
+              {isRegisteredCustomer(selectedInvoice) && (
+                <button
+                  onClick={() => handleWhatsAppShare(selectedInvoice)}
+                  disabled={isGeneratingWhatsApp}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '8px 14px',
+                    background: '#16A34A',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    cursor: isGeneratingWhatsApp ? 'wait' : 'pointer',
+                  }}
+                >
+                  <Share2 style={{ width: 14, height: 14 }} />
+                  Share WhatsApp Image
+                </button>
+              )}
 
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 {onEditInvoiceInPos && selectedInvoice.invoice_type !== 'return' && (
@@ -2009,7 +2141,7 @@ export default function SalesHistory({
               {(thermalPrintInvoice.invoice_items || thermalPrintInvoice.items)?.map((it, idx) => (
                 <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
                   <span>
-                    {it.item_name} {it.shade_code ? `(${it.shade_code})` : ''} x{it.qty}
+                    {it.item_code ? `[${it.item_code}] ` : ''}{it.item_name} {it.shade_code ? `(${it.shade_code})` : ''} x{it.qty}
                   </span>
                   <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700 }}>
                     Rs. {Number(it.total_price || (it.qty * it.unit_price)).toLocaleString()}
@@ -2076,6 +2208,265 @@ export default function SalesHistory({
                   fontWeight: 700,
                   cursor: 'pointer',
                   fontSize: '13px',
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── WHATSAPP RECEIPT IMAGE SHARE MODAL ── */}
+      {whatsAppModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.75)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1.25rem',
+            zIndex: 2500,
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '460px',
+              background: '#FFFFFF',
+              borderRadius: '16px',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
+              display: 'flex',
+              flexDirection: 'column',
+              maxHeight: '92vh',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                background: '#0F172A',
+                color: '#FFFFFF',
+                padding: '1rem 1.25rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: '34px',
+                    height: '34px',
+                    borderRadius: '8px',
+                    background: '#16A34A',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#FFFFFF',
+                  }}
+                >
+                  <MessageCircle style={{ width: 18, height: 18 }} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '15px', fontWeight: 800, margin: 0 }}>
+                    WhatsApp Receipt Image
+                  </h3>
+                  <div style={{ fontSize: '11px', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>
+                    {whatsAppModal.invoice.invoice_no} · {whatsAppModal.invoice.client_name}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeWhatsAppModal}
+                style={{
+                  background: 'rgba(255,255,255,0.1)',
+                  border: 'none',
+                  borderRadius: '6px',
+                  color: '#CBD5E1',
+                  width: '30px',
+                  height: '30px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                }}
+              >
+                <X style={{ width: 16, height: 16 }} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {/* Customer Phone Input Field */}
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', marginBottom: '4px', display: 'block' }}>
+                  Customer WhatsApp Number (with Country Code e.g. 923001234567)
+                </label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    value={whatsAppModal.phone}
+                    onChange={(e) => setWhatsAppModal({ ...whatsAppModal, phone: e.target.value })}
+                    placeholder="923001234567"
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      fontSize: '13px',
+                      fontFamily: 'JetBrains Mono, monospace',
+                      border: '1px solid #CBD5E1',
+                      borderRadius: '8px',
+                      outline: 'none',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleOpenWhatsAppChat}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      padding: '8px 14px',
+                      background: '#16A34A',
+                      color: '#FFFFFF',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <ExternalLink style={{ width: 14, height: 14 }} />
+                    Open Chat
+                  </button>
+                </div>
+              </div>
+
+              {/* Status / Instructions Notice */}
+              <div
+                style={{
+                  background: copiedReceipt ? '#ECFDF5' : '#EFF6FF',
+                  border: `1px solid ${copiedReceipt ? '#A7F3D0' : '#BFDBFE'}`,
+                  borderRadius: '8px',
+                  padding: '10px 12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  fontSize: '12px',
+                  color: copiedReceipt ? '#065F46' : '#1E40AF',
+                }}
+              >
+                {copiedReceipt ? (
+                  <Check style={{ width: 16, height: 16, color: '#059669', flexShrink: 0 }} />
+                ) : (
+                  <Copy style={{ width: 16, height: 16, color: '#2563EB', flexShrink: 0 }} />
+                )}
+                <span>
+                  {copiedReceipt
+                    ? 'Receipt image copied to clipboard! In WhatsApp Web, simply press Ctrl + V to paste and send.'
+                    : 'Click "Copy Image" below to place receipt on clipboard, then Ctrl + V into customer WhatsApp chat.'}
+                </span>
+              </div>
+
+              {/* Thermal Receipt Visual Preview */}
+              <div
+                style={{
+                  background: '#F1F5F9',
+                  border: '1px solid #E2E8F0',
+                  borderRadius: '10px',
+                  padding: '12px',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  maxHeight: '340px',
+                  overflowY: 'auto',
+                }}
+              >
+                <img
+                  src={whatsAppModal.imageUrl}
+                  alt={`Receipt ${whatsAppModal.invoice.invoice_no}`}
+                  style={{
+                    maxWidth: '100%',
+                    height: 'auto',
+                    borderRadius: '6px',
+                    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer Actions */}
+            <div
+              style={{
+                background: '#F8FAFC',
+                borderTop: '1px solid #E2E8F0',
+                padding: '0.85rem 1.25rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '8px',
+              }}
+            >
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={handleCopyReceiptImage}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    padding: '8px 12px',
+                    background: copiedReceipt ? '#059669' : '#0F172A',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    borderRadius: '7px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {copiedReceipt ? <Check style={{ width: 14, height: 14 }} /> : <Copy style={{ width: 14, height: 14 }} />}
+                  <span>{copiedReceipt ? 'Copied!' : 'Copy Image'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadReceiptImage}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    padding: '8px 12px',
+                    background: '#FFFFFF',
+                    color: '#334155',
+                    border: '1px solid #CBD5E1',
+                    borderRadius: '7px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Download style={{ width: 14, height: 14 }} />
+                  <span>Download</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeWhatsAppModal}
+                style={{
+                  padding: '8px 14px',
+                  background: '#E2E8F0',
+                  color: '#0F172A',
+                  border: 'none',
+                  borderRadius: '7px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
                 }}
               >
                 Close
