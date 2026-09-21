@@ -51,18 +51,7 @@ export async function getSession(req: NextRequest): Promise<UserSession | null> 
   const devCookie = req.cookies.get(DEV_ADMIN_COOKIE)?.value;
   const authHeader = req.headers.get('authorization')?.replace('Bearer ', '');
 
-  // 1. Try standard user session
-  const primaryToken = userCookie || authHeader;
-  if (primaryToken) {
-    try {
-      const { payload } = await jwtVerify(primaryToken, getJwtSecret());
-      return payload as unknown as UserSession;
-    } catch {
-      // Fall through to try dev token
-    }
-  }
-
-  // 2. Try developer admin token
+  // 1. Try developer admin token FIRST (cookie or Authorization header)
   const devToken = devCookie || authHeader;
   if (devToken) {
     try {
@@ -75,7 +64,18 @@ export async function getSession(req: NextRequest): Promise<UserSession | null> 
         };
       }
     } catch {
-      // Invalid dev token
+      // Invalid dev token, proceed to check standard user session
+    }
+  }
+
+  // 2. Try standard user session
+  const primaryToken = userCookie || authHeader;
+  if (primaryToken) {
+    try {
+      const { payload } = await jwtVerify(primaryToken, getJwtSecret());
+      return payload as unknown as UserSession;
+    } catch {
+      // Invalid user token
     }
   }
 
@@ -98,8 +98,13 @@ export async function requireTenantAuth(req: NextRequest, targetTenantId?: strin
     return { authorized: true, session };
   }
 
-  // Staff and CEO must match the tenant they are accessing
-  if (targetTenantId && session.tenantId && session.tenantId !== targetTenantId) {
+  // Strict Tenant Isolation: Non-developers MUST have a tenantId assigned
+  if (!session.tenantId) {
+    return { authorized: false, error: 'Forbidden: No tenant assigned to this session', status: 403, session };
+  }
+
+  // Staff and CEO must strictly match the tenant they are accessing (IDOR protection)
+  if (targetTenantId && session.tenantId !== targetTenantId) {
     return { authorized: false, error: 'Forbidden: Access to this branch is denied', status: 403, session };
   }
 
@@ -112,13 +117,35 @@ export async function requireTenantAuth(req: NextRequest, targetTenantId?: strin
 export async function requireDevAuth(req: NextRequest) {
   const session = await getSession(req);
 
+  if (session && session.role === 'developer') {
+    return { authorized: true, session };
+  }
+
+  // Fallback: check devCookie and authHeader directly
+  const devCookie = req.cookies.get(DEV_ADMIN_COOKIE)?.value;
+  const authHeader = req.headers.get('authorization')?.replace('Bearer ', '');
+  const devToken = devCookie || authHeader;
+  if (devToken) {
+    try {
+      const { payload } = await jwtVerify(devToken, getDevSecret());
+      if ((payload as any).role === 'developer') {
+        return {
+          authorized: true,
+          session: {
+            userId: 'developer-super-admin',
+            username: 'developer',
+            role: 'developer',
+          } as UserSession,
+        };
+      }
+    } catch {
+      // Invalid dev token
+    }
+  }
+
   if (!session) {
     return { authorized: false, error: 'Unauthorized: Login session required', status: 401, session: null };
   }
 
-  if (session.role !== 'developer') {
-    return { authorized: false, error: 'Forbidden: Developer privileges required', status: 403, session };
-  }
-
-  return { authorized: true, session };
+  return { authorized: false, error: 'Forbidden: Developer privileges required', status: 403, session };
 }

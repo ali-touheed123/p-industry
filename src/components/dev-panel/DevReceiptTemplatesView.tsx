@@ -56,11 +56,21 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
   const [previewScale, setPreviewScale] = useState<number>(1);
   const [previewShopName, setPreviewShopName] = useState<string>('');
 
+  const getDevAuthHeaders = (extra: Record<string, string> = {}) => {
+    const token = typeof window !== 'undefined' ? sessionStorage.getItem('aura_dev_token') : null;
+    return {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extra,
+    };
+  };
+
   // Fetch all templates
   const fetchTemplates = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/receipt-templates');
+      const res = await fetch('/api/receipt-templates', {
+        headers: getDevAuthHeaders(),
+      });
       const data = await res.json();
       if (data.success) {
         setTemplates(data.templates || []);
@@ -108,7 +118,7 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
       const clonedJson = JSON.parse(JSON.stringify(tmpl.template_json || DEFAULT_TEMPLATE_JSON));
       const res = await fetch('/api/receipt-templates', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getDevAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           name: `${tmpl.name} (Copy)`,
           description: tmpl.description ? `Copy of ${tmpl.description}` : 'Cloned receipt layout',
@@ -134,7 +144,7 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
     try {
       const res = await fetch('/api/receipt-templates', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getDevAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ id: tmpl.id, is_default: true }),
       });
       const data = await res.json();
@@ -160,7 +170,10 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
     }
 
     try {
-      const res = await fetch(`/api/receipt-templates?id=${tmpl.id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/receipt-templates?id=${tmpl.id}`, {
+        method: 'DELETE',
+        headers: getDevAuthHeaders(),
+      });
       const data = await res.json();
       if (data.success) {
         onShowToast('Template deleted successfully.');
@@ -197,7 +210,7 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
 
       const res = await fetch(endpoint, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: getDevAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload),
       });
 

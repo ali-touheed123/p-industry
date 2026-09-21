@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SignJWT } from 'jose';
+import { checkRateLimit, resetRateLimit } from '@/lib/rate-limit';
 
 function getDevAdminSecret(): Uint8Array {
   const secret = process.env.DEV_ADMIN_SECRET || process.env.SESSION_SECRET;
@@ -16,23 +17,39 @@ const DEV_ADMIN_COOKIE = 'aura_dev_token';
 
 export async function POST(req: NextRequest) {
   try {
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || '127.0.0.1';
+
+    // 1. Rate Limiting: Max 5 attempts per 15 minutes per IP (Brute-Force Shield)
+    const rateCheck = checkRateLimit(`dev-pin:${ip}`, 5, 15 * 60 * 1000);
+    if (!rateCheck.success) {
+      const waitMin = Math.ceil(rateCheck.retryAfterSec / 60);
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Security Lockout: Too many failed attempts. Try again in ${waitMin} minute${waitMin > 1 ? 's' : ''}.`,
+        },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(rateCheck.retryAfterSec) },
+        }
+      );
+    }
+
     const { pin } = await req.json();
-    const envPin = process.env.DEV_ADMIN_PIN;
     const cleanPin = String(pin || '').trim();
 
-    // Accepted PINs: explicitly configured env PIN, or defaults 'dev2026' and '1234'
-    const validPins = [
-      'dev2026',
-      '1234',
-      ...(envPin ? [String(envPin).trim()] : []),
-    ];
+    // In production, PIN must come exclusively from environment variable
+    const masterPin = (process.env.DEV_ADMIN_PIN || (process.env.NODE_ENV !== 'production' ? 'dev2026' : '')).trim();
 
-    if (!cleanPin || !validPins.includes(cleanPin)) {
+    if (!masterPin || !cleanPin || cleanPin !== masterPin) {
       return NextResponse.json(
         { success: false, error: 'Invalid Developer Master PIN' },
         { status: 401 }
       );
     }
+
+    // Reset rate limiter on valid PIN authentication
+    resetRateLimit(`dev-pin:${ip}`);
 
     // Sign developer super-admin token valid for 8 hours
     const token = await new SignJWT({
@@ -54,7 +71,7 @@ export async function POST(req: NextRequest) {
     res.cookies.set(DEV_ADMIN_COOKIE, token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: 'lax',
       maxAge: 60 * 60 * 8, // 8 hours
       path: '/',
     });

@@ -49,11 +49,22 @@ export default function AuraDevPanel() {
     setCheckingAuth(false);
   }, []);
 
+  // Helper to attach dev token from sessionStorage
+  const getDevAuthHeaders = (extra: Record<string, string> = {}) => {
+    const token = typeof window !== 'undefined' ? sessionStorage.getItem('aura_dev_token') : null;
+    return {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extra,
+    };
+  };
+
   // Fetch Tenants from real Supabase API
   const fetchTenants = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/tenants');
+      const res = await fetch('/api/tenants', {
+        headers: getDevAuthHeaders(),
+      });
       const data = await res.json();
       if (data.success) {
         setTenants(data.tenants || []);
@@ -70,7 +81,9 @@ export default function AuraDevPanel() {
   // Fetch Users from real Supabase API
   const fetchUsers = useCallback(async () => {
     try {
-      const res = await fetch('/api/users');
+      const res = await fetch('/api/users', {
+        headers: getDevAuthHeaders(),
+      });
       const data = await res.json();
       if (data.success) {
         setUsers(data.users || []);
@@ -93,6 +106,7 @@ export default function AuraDevPanel() {
   // Lock handler
   const handleLock = () => {
     sessionStorage.removeItem('aura_dev_auth');
+    sessionStorage.removeItem('aura_dev_token');
     setIsAuthenticated(false);
   };
 
@@ -121,7 +135,7 @@ export default function AuraDevPanel() {
 
       const res = await fetch(endpoint, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: getDevAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload),
       });
 
@@ -148,7 +162,7 @@ export default function AuraDevPanel() {
     try {
       const res = await fetch('/api/tenants', {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getDevAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ id }),
       });
       const data = await res.json();
@@ -168,7 +182,7 @@ export default function AuraDevPanel() {
     try {
       const res = await fetch('/api/tenants', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getDevAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ id, is_active: !currentStatus }),
       });
       const data = await res.json();
@@ -198,7 +212,7 @@ export default function AuraDevPanel() {
     try {
       const res = await fetch('/api/users', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getDevAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(userData),
       });
       const data = await res.json();
@@ -221,7 +235,7 @@ export default function AuraDevPanel() {
     try {
       const res = await fetch('/api/users', {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getDevAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ id }),
       });
       const data = await res.json();
