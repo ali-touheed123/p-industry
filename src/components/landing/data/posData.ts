@@ -213,38 +213,37 @@ export const PRICING_PLANS: PricingPlan[] = [
   {
     id: 'pos-only',
     name: 'POS Only',
-    tagline: 'Sales, sales returns, basic inventory, purchase/returns & day close',
+    tagline: 'Complete store operations: billing, inventory, khatas, recovery & team management',
     priceMonthly: 'Rs. 14,999',
     priceAnnual: 'Rs. 14,999',
     period: '/month',
-    priceNote: 'Flat monthly plan for counter operations',
+    priceNote: 'Flat monthly plan for full shop operations (excluding CEO Panel)',
     isPopular: false,
     ctaText: 'Get POS Only',
     features: [
       'High-Speed POS Counter Sales & Billing',
       'Sales Return & Instant Invoice Adjustments',
-      'Basic Paint Inventory (Gallons, Drums, Liters)',
+      'Complete Paint Inventory (Gallons, Drums, Liters)',
       'Supplier Purchase Logging & Cost History',
       'Supplier Purchase Returns & Distributor Debit Notes',
       'Day Close & Cash Drawer Register Balancing',
-      'Thermal Receipt & Silent Direct Printing (F5)',
+      'Credit Customers & Painter Khata Ledgers',
+      'Debt Recovery Management & Due Alerts',
+      'Sales Team Management & Staff Quotas',
+      'Percentage Pool Commission System for Managers',
+      'Branch Order & Inter-Branch Stock Transfers',
       'AI Purchase Invoice Scanning',
       'Paint Token Management (Issued, Redeemed & Retained)',
-      'Cloud Sync & Resilient Counter Operation'
+      'Thermal Receipt & Silent Direct Printing (F5)'
     ],
     omittedFeatures: [
-      'Branch Order & Central Stock Transfer',
-      'Sales Management & Team Tracking',
-      'Credit Customers & Painter Khata Ledgers',
-      'Customer Debt Recovery System',
-      'Percentage Pool for Managers',
-      'Full CEO Oversight & Executive Control'
+      'Full CEO Oversight & Executive Control Panel'
     ]
   },
   {
     id: 'full-pos-ceo',
     name: 'Full (POS + CEO)',
-    tagline: 'Everything above + Branch Order, Sales Mgmt, Credit customers, Recovery, percentage pool & full CEO oversight',
+    tagline: 'Everything in POS Only + Executive CEO Control Panel & Remote Audit Dashboards',
     priceMonthly: 'Rs. 19,999',
     priceAnnual: 'Rs. 19,999',
     period: '/month base',
@@ -254,13 +253,11 @@ export const PRICING_PLANS: PricingPlan[] = [
     ctaText: 'Get Full (POS + CEO)',
     features: [
       'Everything in POS Only Plan included',
-      'AI Invoice Scanning & Paint Token Management (included)',
-      'Branch Order & Inter-Branch Stock Transfers',
-      'Complete Sales Management & Rep Performance',
-      'Credit Customers & Contractor Khata Accounts',
-      'Debt Recovery Management & Aging Due Alerts',
-      'Percentage Pool Commission System for Managers',
-      'Full CEO Oversight, Remote Audits & Executive Dashboards',
+      'Dedicated Executive CEO Control Panel',
+      'Remote Audits & Live Mobile Executive Dashboards',
+      'Multi-Branch Consolidated P&L Analytics',
+      'Real-Time Margin & Hidden Expense Tracking',
+      'Executive Security & Master Access Controls',
       'Per-Branch Add-on Option (Rs. 2,999/branch/mo)',
       'Priority Phone & WhatsApp Support with Free Onboarding'
     ]
@@ -338,7 +335,7 @@ export const FAQ_ITEMS: FAQItem[] = [
   {
     id: 'faq-7',
     question: 'What is the difference between POS Only and Full (POS + CEO)?',
-    answer: 'POS Only (Rs. 14,999/mo) covers complete single-counter operational essentials: fast billing, sales returns, gallon/drum inventory, purchase logging, purchase returns, and daily register close. Full (POS + CEO) (Rs. 19,999/mo base) adds inter-branch orders, sales rep management, contractor credit accounts, debt recovery workflows, manager percentage pools, and complete executive audit dashboards.'
+    answer: 'POS Only (Rs. 14,999/mo) includes everything for complete shop operations: fast counter billing, sales returns, inventory, supplier purchases/returns, credit customer khatas, debt recovery, sales team tracking, manager percentage pools, branch transfers, AI invoice scanning, and token management. The Full (POS + CEO) plan (Rs. 19,999/mo base) adds the dedicated Executive CEO Control Panel with live mobile dashboards, remote audit oversight, and consolidated multi-branch executive analytics.'
   },
   {
     id: 'faq-8',

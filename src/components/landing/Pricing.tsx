@@ -247,31 +247,31 @@ export const Pricing: React.FC<PricingProps> = ({ onSelectPlan }) => {
                 </tr>
                 <tr>
                   <td className="py-3.5 px-4 font-semibold text-slate-900">Branch Orders & Inter-Branch Stock Transfers</td>
-                  <td className="py-3.5 px-4 text-center"><X className="w-4 h-4 text-slate-300 mx-auto" /></td>
+                  <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                   <td className="py-3.5 px-4 text-center bg-blue-50/30"><Check className="w-4 h-4 text-emerald-600 mx-auto font-bold" /></td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                 </tr>
                 <tr>
                   <td className="py-3.5 px-4 font-semibold text-slate-900">Sales Team Management & Staff Quotas</td>
-                  <td className="py-3.5 px-4 text-center"><X className="w-4 h-4 text-slate-300 mx-auto" /></td>
+                  <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                   <td className="py-3.5 px-4 text-center bg-blue-50/30"><Check className="w-4 h-4 text-emerald-600 mx-auto font-bold" /></td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                 </tr>
                 <tr>
                   <td className="py-3.5 px-4 font-semibold text-slate-900">Credit Customers & Painter Khata Ledgers</td>
-                  <td className="py-3.5 px-4 text-center"><X className="w-4 h-4 text-slate-300 mx-auto" /></td>
+                  <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                   <td className="py-3.5 px-4 text-center bg-blue-50/30"><Check className="w-4 h-4 text-emerald-600 mx-auto font-bold" /></td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                 </tr>
                 <tr>
                   <td className="py-3.5 px-4 font-semibold text-slate-900">Recovery Management & Overdue Debt Tracking</td>
-                  <td className="py-3.5 px-4 text-center"><X className="w-4 h-4 text-slate-300 mx-auto" /></td>
+                  <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                   <td className="py-3.5 px-4 text-center bg-blue-50/30"><Check className="w-4 h-4 text-emerald-600 mx-auto font-bold" /></td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                 </tr>
                 <tr>
                   <td className="py-3.5 px-4 font-semibold text-slate-900">Percentage Pool Commission for Managers</td>
-                  <td className="py-3.5 px-4 text-center"><X className="w-4 h-4 text-slate-300 mx-auto" /></td>
+                  <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                   <td className="py-3.5 px-4 text-center bg-blue-50/30"><Check className="w-4 h-4 text-emerald-600 mx-auto font-bold" /></td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                 </tr>
