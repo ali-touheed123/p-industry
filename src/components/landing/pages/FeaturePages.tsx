@@ -300,3 +300,87 @@ export const ReportsFeaturePage: React.FC<FeaturePageWrapperProps> = ({ onNaviga
     ]}
   />
 );
+
+// 8. AI Invoice Scan Feature Page
+export const AiInvoiceScanFeaturePage: React.FC<FeaturePageWrapperProps> = ({ onNavigate, onOpenDemo }) => (
+  <ProductDetailView
+    onNavigate={onNavigate}
+    onOpenDemo={onOpenDemo}
+    title="AI Purchase Invoice Scanner for Paint Shops"
+    seoTitle="AI Purchase Invoice Scanner for Paint Shops | Pyntflow"
+    metaDescription="Scan paper supplier purchase bills in seconds using Gemini Vision AI. Auto-extract items, quantities, wholesale prices, and taxes into Pyntflow."
+    canonical="https://pyntflow.com/features/ai-invoice-scan"
+    keywords={['AI purchase invoice scanner', 'OCR invoice entry paint shop', 'automated supplier bill entry', 'AI stock entry paint store']}
+    heroBadge="Module: AI Automation"
+    h1="AI Purchase Invoice Scanner for Paint Shops"
+    subtitle="Eliminate manual stock entry. Upload or photograph paper supplier invoices and let Gemini Vision AI extract products, quantities, prices, and batch details in seconds."
+    overviewHeading="Zero-Typing Stock Ingestion Powered by AI"
+    overviewParagraphs={[
+      'Receiving multi-page paper invoices from paint manufacturers (Dulux, Berger, Master, Brighto) used to take 20+ minutes of manual typing into POS stock ledgers.',
+      'With Pyntflow AI Invoice Scanner, simply snap a photo or upload a photo/PDF of your supplier bill. Our vision AI automatically parses items, unit costs, discounts, and tax figures into draft purchase receipts ready for 1-click confirmation.'
+    ]}
+    keyFeatures={[
+      { title: 'Instant OCR & Vision Parsing', description: 'Extract complex table structures from handwritten or printed paint supplier bills.' },
+      { title: 'Automatic Item & Brand Matching', description: 'Matches scanned invoice line items against your existing inventory catalog automatically.' },
+      { title: '1-Click Vault Ingestion', description: 'Review extracted quantities and prices, then approve to instantly update godown inventory.' }
+    ]}
+    whyItMatters={[
+      { title: 'Save 90% Data Entry Time', description: 'Turn 20 minutes of manual purchase entry into a 15-second scan and click.' },
+      { title: 'Zero Price & Quantity Errors', description: 'Prevent costly inventory balance mismatches caused by human entry typos.' },
+      { title: 'Instant Cost Price Updates', description: 'Automatically update your landed purchase costs to keep profit margin calculations accurate.' }
+    ]}
+    faqItems={[
+      {
+        question: 'Does the AI scanner work with handwritten supplier bills in Pakistan?',
+        directAnswer: 'Yes, Gemini 2.0 Flash Vision processes both printed thermal/A4 vendor invoices and legible handwritten wholesale slips.',
+        answer: 'You can always review and edit the parsed line items before final submission to your inventory ledger.'
+      }
+    ]}
+    relatedPages={[
+      { title: 'Purchase Management', url: '/features/purchases', category: 'Feature' },
+      { title: 'Paint Inventory Software', url: '/features/inventory', category: 'Feature' }
+    ]}
+  />
+);
+
+// 9. Token Management Feature Page
+export const TokenManagementFeaturePage: React.FC<FeaturePageWrapperProps> = ({ onNavigate, onOpenDemo }) => (
+  <ProductDetailView
+    onNavigate={onNavigate}
+    onOpenDemo={onOpenDemo}
+    title="Paint Token Management & Painter Loyalty System"
+    seoTitle="Paint Token Management & Painter Loyalty System | Pyntflow"
+    metaDescription="Track paint bucket cash tokens, painter reward redemptions, and manufacturer rebate ledgers seamlessly in Pyntflow POS."
+    canonical="https://pyntflow.com/features/token-management"
+    keywords={['paint token management', 'painter token redemption software', 'paint bucket token tracking', 'paint loyalty program software']}
+    heroBadge="Module: Token Ledger & Painter Loyalty"
+    h1="Paint Token Management & Painter Loyalty System"
+    subtitle="Track paint bucket tokens, record painter cash redemptions, adjust counter bills, and claim rebates back from paint companies with complete transparency."
+    overviewHeading="Complete Financial Control Over Paint Bucket Tokens"
+    overviewParagraphs={[
+      'Paint manufacturers hide cash/reward tokens inside bucket lids for painters and contractors. Managing these tokens manually leads to lost cash, disputed painter balances, and unclaimed vendor rebates.',
+      'Pyntflow Paint Token Ledger provides dedicated tracking for collected tokens. Cashiers can instantly accept tokens as partial invoice payment or pay painters cash out of drawer while logging full audit trails.'
+    ]}
+    keyFeatures={[
+      { title: 'Token Acceptance at Checkout', description: 'Deduct token values directly from active billing invoices with instant receipt recording.' },
+      { title: 'Painter Redemption History', description: 'Maintain clear individual redemption ledgers for painters and commercial contractors.' },
+      { title: 'Vendor Rebate Tracking', description: 'Generate monthly token summaries to claim exact reimbursement amounts from paint manufacturers.' }
+    ]}
+    whyItMatters={[
+      { title: 'Stop Cash Leakage', description: 'Track every single token collected at the counter to prevent cash drawer drift.' },
+      { title: 'Build Painter Loyalty', description: 'Offer contractors fast, transparent token redemption to secure repeat commercial business.' },
+      { title: '100% Vendor Claim Accuracy', description: 'Never miss out on claiming token reimbursements from Dulux, Berger, or Master Paints.' }
+    ]}
+    faqItems={[
+      {
+        question: 'Can painter tokens be deducted directly from customer counter invoices?',
+        directAnswer: 'Yes! Cashiers can apply token redemptions as a payment tender or direct discount on active bills.',
+        answer: 'The system logs the exact token brand, denomination, and painter profile associated with the transaction.'
+      }
+    ]}
+    relatedPages={[
+      { title: 'POS System for Paint Shops', url: '/features/pos', category: 'Feature' },
+      { title: 'Customer & Painter Khata', url: '/features/sales', category: 'Feature' }
+    ]}
+  />
+);

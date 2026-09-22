@@ -13,7 +13,9 @@ import {
   FileSpreadsheet, 
   ShieldCheck, 
   Users, 
-  Building2 
+  Building2,
+  ScanLine,
+  Ticket
 } from 'lucide-react';
 
 interface FeaturesHubViewProps {
@@ -71,6 +73,20 @@ export const FeaturesHubView: React.FC<FeaturesHubViewProps> = ({ onNavigate, on
       description: 'Real-time sales registers, gross margin analytics, inventory valuations, and shift reconciliation logs.',
       icon: FileSpreadsheet,
       badge: 'Live Analytics'
+    },
+    {
+      title: 'AI Invoice Scanning',
+      url: '/features/ai-invoice-scan',
+      description: 'Upload a supplier invoice photo and Google Gemini Vision AI extracts every line item in ~10 seconds — handwritten, Urdu, or dot-matrix printed.',
+      icon: ScanLine,
+      badge: 'Gemini AI'
+    },
+    {
+      title: 'Paint Token Management',
+      url: '/features/token-management',
+      description: 'Track tokens issued, redeemed, and retained per shift by brand and quality category, with a complete company reimbursement summary.',
+      icon: Ticket,
+      badge: 'Token Ledger'
     }
   ];
 

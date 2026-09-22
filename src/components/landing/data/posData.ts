@@ -176,6 +176,36 @@ export const POS_FEATURES: PosFeature[] = [
       'Export to PDF and Excel in one click'
     ],
     gridSpan: 'col-span-1 md:col-span-1'
+  },
+  {
+    id: 'ai-invoice-scan',
+    title: 'AI Invoice Scanning',
+    tagline: 'Photograph a supplier invoice — AI reads every item in seconds',
+    description: 'Upload a photo of any supplier invoice (handwritten, printed, Urdu or English) and Google Gemini AI extracts all line items automatically. What used to take 45 minutes now takes 10 seconds.',
+    iconName: 'ScanLine',
+    badge: 'AI-Powered',
+    details: [
+      'Google Gemini 2.0 Flash Vision AI parsing',
+      'Reads handwritten, dot-matrix & Urdu invoices',
+      'Fuzzy-matches extracted items to your inventory',
+      'Review & confirm before stock is committed'
+    ],
+    gridSpan: 'col-span-1 md:col-span-2'
+  },
+  {
+    id: 'token-management',
+    title: 'Paint Token Management',
+    tagline: 'Track paint brand tokens issued, redeemed & retained per shift',
+    description: 'Paint products carry physical brand tokens worth hundreds of rupees. Pyntflow tracks every token — whether kept by the customer, removed by the shop, or redeemed for cash — and produces a complete brand-wise shift summary for company reimbursement.',
+    iconName: 'Ticket',
+    badge: 'Token Ledger',
+    details: [
+      'Token issued / removed / redeemed workflows',
+      'Registered & walk-in customer partial redemptions',
+      'Per-shift brand & quality category token summary',
+      'Company reimbursement report by brand'
+    ],
+    gridSpan: 'col-span-1 md:col-span-1'
   }
 ];
 
@@ -197,7 +227,9 @@ export const PRICING_PLANS: PricingPlan[] = [
       'Supplier Purchase Logging & Cost History',
       'Supplier Purchase Returns & Distributor Debit Notes',
       'Day Close & Cash Drawer Register Balancing',
-      'Thermal Receipt & Standard Invoice Printing',
+      'Thermal Receipt & Silent Direct Printing (F5)',
+      'AI Purchase Invoice Scanning',
+      'Paint Token Management (Issued, Redeemed & Retained)',
       'Cloud Sync & Resilient Counter Operation'
     ],
     omittedFeatures: [
@@ -222,6 +254,7 @@ export const PRICING_PLANS: PricingPlan[] = [
     ctaText: 'Get Full (POS + CEO)',
     features: [
       'Everything in POS Only Plan included',
+      'AI Invoice Scanning & Paint Token Management (included)',
       'Branch Order & Inter-Branch Stock Transfers',
       'Complete Sales Management & Rep Performance',
       'Credit Customers & Contractor Khata Accounts',
@@ -243,6 +276,7 @@ export const PRICING_PLANS: PricingPlan[] = [
     isPopular: false,
     ctaText: 'Request Custom Quote',
     features: [
+      'All Standard Features (AI Scanning, Token Management, etc.)',
       'One-Off Custom Features & Unique Shop Workflows',
       'New Custom Report Types & Audit Statements',
       'Specialized Hardware & Barcode Scale Integrations',
@@ -256,6 +290,21 @@ export const PRICING_PLANS: PricingPlan[] = [
 ];
 
 export const FAQ_ITEMS: FAQItem[] = [
+  {
+    id: 'faq-ai-scan',
+    question: 'Does Pyntflow support AI invoice scanning for purchases?',
+    answer: 'Yes. Pyntflow uses Google Gemini 2.0 Flash Vision AI to read supplier invoice photos — including handwritten, dot-matrix printed, and mixed Urdu/English invoices. Simply upload a photo from your phone or scanner, and the AI extracts every line item (product name, code, quantity, unit, rate) in approximately 10 seconds. You review and confirm the results before stock is updated.'
+  },
+  {
+    id: 'faq-token',
+    question: 'What is the Paint Token Management feature?',
+    answer: 'Many paint brands (Berger, Nippon, etc.) include physical tokens inside paint cans with monetary values of Rs. 200–1,000. Pyntflow tracks three token scenarios: (1) Token Issued — customer keeps the token inside the paint and receives the product at full price, their account is credited; (2) Token Removed — shop removes the token before sale, price is reduced by the token value, and the token is recorded for company reimbursement; (3) Token Redeemed — a customer returns to claim their token value in cash (partial redemptions supported). The shift close report shows a full brand-wise token summary for Berger, Nippon, and others.'
+  },
+  {
+    id: 'faq-thermal-print',
+    question: 'Can receipts print directly to a thermal printer without a preview dialog?',
+    answer: 'Yes. For high-speed counter environments, Pyntflow supports silent direct printing using Chrome Kiosk mode. Set your thermal printer (Xprinter, Rongta, Bixolon, Epson, Black Copper, etc.) as the Windows default printer, then launch Chrome with the --kiosk-printing flag in the desktop shortcut. When a cashier presses F5 (Save & Print), the thermal receipt prints silently to the roll printer in under 1 second — no preview dialog, no extra clicks.'
+  },
   {
     id: 'faq-1',
     question: 'Is pyntflow specifically designed for paint shops?',
@@ -314,13 +363,17 @@ export const BEFORE_AFTER_ITEMS = {
     { title: 'Confusing Gallon vs Drum Stock', desc: 'No clear count of 4L gallons vs 16L drums, resulting in unexpected stockouts during busy hours.' },
     { title: 'Scattered Supplier Invoices', desc: 'Distributor delivery receipts piled up on the counter with no clear record of what is owed to paint companies.' },
     { title: 'Painful Return Adjustments', desc: 'Messy cross-outs on invoices when painters return unused buckets, destroying inventory accuracy.' },
-    { title: 'Unknown Daily Profit Margins', desc: 'No idea how much money was actually made today after deducting paint cost, discounts, and tinting fees.' }
+    { title: 'Unknown Daily Profit Margins', desc: 'No idea how much money was actually made today after deducting paint cost, discounts, and tinting fees.' },
+    { title: '45-Minute Manual Invoice Entry', desc: 'Typing hundreds of purchase line items from paper supplier invoices by hand, prone to entry errors and stock discrepancies.' },
+    { title: 'No Token Tracking', desc: 'Paint brand tokens (Rs. 200–1,000 each) tracked on paper scraps with no accountability and no company reimbursement records.' }
   ],
   after: [
     { title: 'Instant 2-Second Digital Invoicing', desc: 'Scan or click paint codes, apply contractor discounts automatically, and print clean thermal receipts.' },
     { title: 'Real-Time Multi-Unit Inventory', desc: 'Accurate stock for every single can size (1L, 4L, 16L) plus separate Base-A, B, C and colorant tracking.' },
     { title: 'Organized Supplier Ledgers', desc: 'Every distributor invoice, payment, and pending balance tracked clearly in one centralized ledger.' },
-    { title: '1-Click Linked Returns & Credits', desc: 'Scan the old bill, select returned cans, and automatically credit the painter’s running khata account.' },
-    { title: 'Instant Daily Profit & Sales Reports', desc: 'At shop closing, see exact revenue, cash in drawer, contractor debt, and brand-by-brand gross profit.' }
+    { title: '1-Click Linked Returns & Credits', desc: "Scan the old bill, select returned cans, and automatically credit the painter's running khata account." },
+    { title: 'Instant Daily Profit & Sales Reports', desc: 'At shop closing, see exact revenue, cash in drawer, contractor debt, and brand-by-brand gross profit.' },
+    { title: '10-Second AI Purchase Entry', desc: 'Photograph a supplier invoice — AI reads all 50+ line items and updates stock automatically in seconds.' },
+    { title: 'Automatic Token Tracking', desc: 'Token issued, redeemed, and retained flows tracked per shift, by brand, for seamless company reimbursement.' }
   ]
 };

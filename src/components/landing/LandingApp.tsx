@@ -30,6 +30,8 @@ import {
   PurchasesFeaturePage,
   PurchaseReturnsFeaturePage,
   ReportsFeaturePage,
+  AiInvoiceScanFeaturePage,
+  TokenManagementFeaturePage,
 } from './pages/FeaturePages';
 import { FeaturesHubView } from './pages/FeaturesHubView';
 import { BlogHubView } from './pages/BlogHubView';
@@ -103,6 +105,10 @@ export default function LandingApp() {
       return <PurchaseReturnsFeaturePage onNavigate={navigateTo} onOpenDemo={() => handleOpenDemo()} />;
     if (currentPath === '/features/reports')
       return <ReportsFeaturePage onNavigate={navigateTo} onOpenDemo={() => handleOpenDemo()} />;
+    if (currentPath === '/features/ai-invoice-scan')
+      return <AiInvoiceScanFeaturePage onNavigate={navigateTo} onOpenDemo={() => handleOpenDemo()} />;
+    if (currentPath === '/features/token-management')
+      return <TokenManagementFeaturePage onNavigate={navigateTo} onOpenDemo={() => handleOpenDemo()} />;
     if (currentPath === '/features')
       return <FeaturesHubView onNavigate={navigateTo} onOpenDemo={() => handleOpenDemo()} />;
     if (currentPath === '/pricing')

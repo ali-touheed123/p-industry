@@ -63,7 +63,7 @@ export const Hero: React.FC<HeroProps> = ({ onOpenDemo, onExploreFeatures }) => 
             transition={{ duration: 0.5, delay: 0.16 }}
             className="text-slate-600 text-base sm:text-lg lg:text-xl leading-relaxed max-w-2xl"
           >
-            Stop forcing grocery software onto paint inventory. Manage gallons, 16L drums, tinting formulas, painter credit balances, and supplier bills from one purpose-built counter system.
+            Stop forcing grocery software onto paint inventory. Manage AI invoice scanning, paint tokens, gallons, 16L drums, tinting formulas, painter credit balances, and supplier bills from one purpose-built counter system.
           </motion.p>
 
           {/* CTA Buttons */}
@@ -97,11 +97,15 @@ export const Hero: React.FC<HeroProps> = ({ onOpenDemo, onExploreFeatures }) => 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.6, delay: 0.32 }}
-            className="flex flex-wrap items-center justify-center gap-4 sm:gap-8 pt-3 text-xs text-slate-600"
+            className="flex flex-wrap items-center justify-center gap-4 sm:gap-6 pt-3 text-xs text-slate-600"
           >
             <div className="flex items-center gap-1.5">
               <Check className="w-4 h-4 text-emerald-600 font-bold" />
-              <span className="font-medium text-slate-700">Real-time Cloud Sync</span>
+              <span className="font-medium text-slate-700">AI Invoice Scanner</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Check className="w-4 h-4 text-emerald-600 font-bold" />
+              <span className="font-medium text-slate-700">Paint Token Ledger</span>
             </div>
             <div className="flex items-center gap-1.5">
               <Check className="w-4 h-4 text-emerald-600 font-bold" />
@@ -109,7 +113,7 @@ export const Hero: React.FC<HeroProps> = ({ onOpenDemo, onExploreFeatures }) => 
             </div>
             <div className="flex items-center gap-1.5">
               <Check className="w-4 h-4 text-emerald-600 font-bold" />
-              <span className="font-medium text-slate-700">Thermal Slip Printing</span>
+              <span className="font-medium text-slate-700">Silent Thermal Printing</span>
             </div>
           </motion.div>
         </div>

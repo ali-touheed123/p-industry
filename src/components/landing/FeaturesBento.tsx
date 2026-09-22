@@ -9,7 +9,9 @@ import {
   Users, 
   BarChart3, 
   Tag, 
-  Check 
+  Check,
+  ScanLine,
+  Ticket
 } from 'lucide-react';
 import { POS_FEATURES } from './data/posData';
 
@@ -34,6 +36,10 @@ export const FeaturesBento: React.FC<FeaturesBentoProps> = ({ onSelectFeature })
         return <Users className="w-5 h-5 text-emerald-600" />;
       case 'BarChart3':
         return <BarChart3 className="w-5 h-5 text-blue-600" />;
+      case 'ScanLine':
+        return <ScanLine className="w-5 h-5 text-violet-600" />;
+      case 'Ticket':
+        return <Ticket className="w-5 h-5 text-amber-600" />;
       default:
         return <Tag className="w-5 h-5 text-slate-700" />;
     }

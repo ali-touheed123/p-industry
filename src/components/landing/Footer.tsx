@@ -139,6 +139,16 @@ export const Footer: React.FC<FooterProps> = ({ onOpenDemo, onNavigate }) => {
                   Shift Close & Margin Reports
                 </button>
               </li>
+              <li>
+                <button onClick={() => handleNav('/features/ai-invoice-scan')} className="hover:text-[#FF6B00] transition-colors text-left cursor-pointer">
+                  AI Purchase Invoice Scanner
+                </button>
+              </li>
+              <li>
+                <button onClick={() => handleNav('/features/token-management')} className="hover:text-[#FF6B00] transition-colors text-left cursor-pointer">
+                  Paint Token & Loyalty Ledger
+                </button>
+              </li>
             </ul>
           </div>
 
