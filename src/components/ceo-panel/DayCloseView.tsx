@@ -105,17 +105,32 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
             const salesInvs = shiftInvoices.filter((i: any) => (i.invoice_type || 'sales') !== 'return');
             const returnInvs = shiftInvoices.filter((i: any) => (i.invoice_type || 'sales') === 'return');
 
-            const cashSales = salesInvs
-              .filter((i: any) => !i.payment_type || i.payment_type === 'cash')
-              .reduce((sum: number, i: any) => sum + Number(i.cash_paid || i.paid_amount || i.net_total || 0), 0);
+            const cashSales = salesInvs.reduce((sum: number, i: any) => {
+              const cp = Number(i.cash_paid || 0);
+              if (cp > 0) return sum + cp;
+              if (!i.payment_type || i.payment_type === 'cash') {
+                return sum + Number(i.paid_amount || i.net_total || 0);
+              }
+              return sum;
+            }, 0);
 
-            const creditSales = salesInvs
-              .filter((i: any) => i.payment_type === 'credit')
-              .reduce((sum: number, i: any) => sum + Number(i.due_amount || i.net_total || 0), 0);
+            const creditSales = salesInvs.reduce((sum: number, i: any) => {
+              const due = Number(i.due_amount || 0);
+              if (due > 0) return sum + due;
+              if (i.payment_type === 'credit') {
+                return sum + Number(i.net_total || 0);
+              }
+              return sum;
+            }, 0);
 
-            const bankSales = salesInvs
-              .filter((i: any) => i.payment_type === 'bank' || i.payment_type === 'card' || i.payment_type === 'cheque')
-              .reduce((sum: number, i: any) => sum + Number(i.bank_paid || i.card_paid || i.net_total || 0), 0);
+            const bankSales = salesInvs.reduce((sum: number, i: any) => {
+              const bp = Number(i.bank_paid || 0) + Number(i.card_paid || 0);
+              if (bp > 0) return sum + bp;
+              if (i.payment_type === 'bank' || i.payment_type === 'card' || i.payment_type === 'cheque') {
+                return sum + Number(i.paid_amount || i.net_total || 0);
+              }
+              return sum;
+            }, 0);
 
             const grossSales = salesInvs.reduce((sum: number, i: any) => sum + Number(i.net_total || 0), 0);
             const returnTotal = returnInvs.reduce((sum: number, i: any) => sum + Number(i.net_total || 0), 0);

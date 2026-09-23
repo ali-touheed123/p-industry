@@ -1499,35 +1499,46 @@ export default function SalesHistory({
 
                           {/* Payment Mode */}
                           <td style={{ padding: '10px 14px' }}>
-                            <span
-                              style={{
-                                display: 'inline-block',
-                                padding: '2px 8px',
-                                borderRadius: '6px',
-                                fontSize: '11px',
-                                fontWeight: 700,
-                                textTransform: 'uppercase',
-                                fontFamily: 'JetBrains Mono, monospace',
-                                background:
-                                  inv.payment_type === 'cash'
-                                    ? '#DCFCE7'
-                                    : inv.payment_type === 'credit'
-                                    ? '#FEF3C7'
-                                    : inv.payment_type === 'card'
-                                    ? '#EFF6FF'
-                                    : '#F3E8FF',
-                                color:
-                                  inv.payment_type === 'cash'
-                                    ? '#166534'
-                                    : inv.payment_type === 'credit'
-                                    ? '#92400E'
-                                    : inv.payment_type === 'card'
-                                    ? '#1E40AF'
-                                    : '#6B21A8',
-                              }}
-                            >
-                              {inv.payment_type === 'credit' ? 'ON ACCOUNT' : (inv.payment_type || 'cash')}
-                            </span>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-start' }}>
+                              <span
+                                style={{
+                                  display: 'inline-block',
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  fontSize: '11px',
+                                  fontWeight: 700,
+                                  textTransform: 'uppercase',
+                                  fontFamily: 'JetBrains Mono, monospace',
+                                  background:
+                                    inv.payment_type === 'cash'
+                                      ? '#DCFCE7'
+                                      : inv.payment_type === 'credit'
+                                      ? '#FEF3C7'
+                                      : inv.payment_type === 'card'
+                                      ? '#EFF6FF'
+                                      : '#F3E8FF',
+                                  color:
+                                    inv.payment_type === 'cash'
+                                      ? '#166534'
+                                      : inv.payment_type === 'credit'
+                                      ? '#92400E'
+                                      : inv.payment_type === 'card'
+                                      ? '#1E40AF'
+                                      : '#6B21A8',
+                                }}
+                              >
+                                {inv.payment_type === 'credit' ? 'ON ACCOUNT' : (inv.payment_type || 'cash')}
+                              </span>
+
+                              {(inv.payment_type === 'split' || (Number(inv.cash_paid || 0) > 0 && (Number(inv.card_paid || 0) > 0 || Number(inv.bank_paid || 0) > 0 || Number(inv.others_paid || 0) > 0))) && (
+                                <div style={{ fontSize: '10px', color: '#475569', fontFamily: 'JetBrains Mono, monospace', lineHeight: '1.2' }}>
+                                  {Number(inv.cash_paid || 0) > 0 && <div>Cash: Rs. {Number(inv.cash_paid).toLocaleString()}</div>}
+                                  {Number(inv.card_paid || 0) > 0 && <div>Card: Rs. {Number(inv.card_paid).toLocaleString()}</div>}
+                                  {Number(inv.bank_paid || 0) > 0 && <div>Bank: Rs. {Number(inv.bank_paid).toLocaleString()}</div>}
+                                  {Number(inv.others_paid || 0) > 0 && <div>Other: Rs. {Number(inv.others_paid).toLocaleString()}</div>}
+                                </div>
+                              )}
+                            </div>
                           </td>
 
                           {/* Items Count */}
@@ -2019,9 +2030,37 @@ export default function SalesHistory({
                   </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', color: '#16A34A', fontWeight: 600 }}>
-                  <span>Paid Amount:</span>
+                  <span>Paid Amount ({selectedInvoice.payment_type?.toUpperCase() || 'CASH'}):</span>
                   <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {Number(selectedInvoice.paid_amount || 0).toLocaleString()}</span>
                 </div>
+                {(selectedInvoice.payment_type === 'split' || (Number(selectedInvoice.cash_paid || 0) > 0 && (Number(selectedInvoice.card_paid || 0) > 0 || Number(selectedInvoice.bank_paid || 0) > 0 || Number(selectedInvoice.others_paid || 0) > 0))) && (
+                  <div style={{ paddingLeft: '12px', fontSize: '11.5px', color: '#475569', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                    {Number(selectedInvoice.cash_paid || 0) > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>• Cash Paid:</span>
+                        <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {Number(selectedInvoice.cash_paid).toLocaleString()}</span>
+                      </div>
+                    )}
+                    {Number(selectedInvoice.card_paid || 0) > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>• Card Paid:</span>
+                        <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {Number(selectedInvoice.card_paid).toLocaleString()}</span>
+                      </div>
+                    )}
+                    {Number(selectedInvoice.bank_paid || 0) > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>• Bank Transfer:</span>
+                        <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {Number(selectedInvoice.bank_paid).toLocaleString()}</span>
+                      </div>
+                    )}
+                    {Number(selectedInvoice.others_paid || 0) > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>• Tokens/Other:</span>
+                        <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {Number(selectedInvoice.others_paid).toLocaleString()}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {Number(selectedInvoice.due_amount) > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#D97706', fontWeight: 700 }}>
                     <span>Invoice Balance Due:</span>
@@ -2208,9 +2247,37 @@ export default function SalesHistory({
                 <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {Number(thermalPrintInvoice.net_total || 0).toLocaleString()}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
-                <span>PAID:</span>
+                <span>PAID ({thermalPrintInvoice.payment_type?.toUpperCase() || 'CASH'}):</span>
                 <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {Number(thermalPrintInvoice.paid_amount || 0).toLocaleString()}</span>
               </div>
+              {(thermalPrintInvoice.payment_type === 'split' || (Number(thermalPrintInvoice.cash_paid || 0) > 0 && (Number(thermalPrintInvoice.card_paid || 0) > 0 || Number(thermalPrintInvoice.bank_paid || 0) > 0 || Number(thermalPrintInvoice.others_paid || 0) > 0))) && (
+                <div style={{ paddingLeft: '8px', fontSize: '11px', color: '#444', display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                  {Number(thermalPrintInvoice.cash_paid || 0) > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>• Cash:</span>
+                      <span>Rs. {Number(thermalPrintInvoice.cash_paid).toLocaleString()}</span>
+                    </div>
+                  )}
+                  {Number(thermalPrintInvoice.card_paid || 0) > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>• Card:</span>
+                      <span>Rs. {Number(thermalPrintInvoice.card_paid).toLocaleString()}</span>
+                    </div>
+                  )}
+                  {Number(thermalPrintInvoice.bank_paid || 0) > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>• Bank:</span>
+                      <span>Rs. {Number(thermalPrintInvoice.bank_paid).toLocaleString()}</span>
+                    </div>
+                  )}
+                  {Number(thermalPrintInvoice.others_paid || 0) > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>• Tokens/Other:</span>
+                      <span>Rs. {Number(thermalPrintInvoice.others_paid).toLocaleString()}</span>
+                    </div>
+                  )}
+                </div>
+              )}
               {Number(thermalPrintInvoice.due_amount) > 0 && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
                   <span>BALANCE DUE:</span>

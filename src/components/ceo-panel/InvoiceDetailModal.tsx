@@ -47,7 +47,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         </div>
 
         {/* Invoice Meta Grid */}
-        <div style={{ padding: '16px 24px', backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', fontSize: '12px' }}>
+        <div style={{ padding: '16px 24px', backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', fontSize: '12px' }}>
           <div style={{ backgroundColor: '#FFFFFF', padding: '12px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
             <div style={{ color: '#64748B', marginBottom: '2px', fontWeight: 600, fontSize: '11px' }}>Customer Details</div>
             <div className="ceo-font-heading" style={{ color: '#0F172A', fontWeight: 700, fontSize: '14px' }}>{invoice.customerName}</div>
@@ -67,6 +67,25 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             </div>
             <div style={{ color: '#64748B', fontSize: '11px', marginTop: '2px' }}>
               {invoice.discountAmount > 0 ? `Discount: ${formatCurrency(invoice.discountAmount)}` : 'Full Retail Price'}
+            </div>
+          </div>
+
+          <div style={{ backgroundColor: '#FFFFFF', padding: '12px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+            <div style={{ color: '#64748B', marginBottom: '2px', fontWeight: 600, fontSize: '11px' }}>Payment Tender</div>
+            <div className="ceo-font-heading" style={{ color: '#0F172A', fontWeight: 700, fontSize: '13px' }}>
+              {invoice.paymentMode}
+            </div>
+            <div style={{ color: '#64748B', fontSize: '10.5px', marginTop: '2px', lineHeight: '1.3' }}>
+              {(invoice.paymentMode === 'Split' || (Number(invoice.cashPaid || 0) > 0 && (Number(invoice.cardPaid || 0) > 0 || Number(invoice.bankPaid || 0) > 0))) ? (
+                <>
+                  {Number(invoice.cashPaid || 0) > 0 && <div>Cash: {formatCurrency(Number(invoice.cashPaid))}</div>}
+                  {Number(invoice.cardPaid || 0) > 0 && <div>Card: {formatCurrency(Number(invoice.cardPaid))}</div>}
+                  {Number(invoice.bankPaid || 0) > 0 && <div>Bank: {formatCurrency(Number(invoice.bankPaid))}</div>}
+                  {Number(invoice.othersPaid || 0) > 0 && <div>Other: {formatCurrency(Number(invoice.othersPaid))}</div>}
+                </>
+              ) : (
+                <div>Total: {formatCurrency(invoice.netAmount)}</div>
+              )}
             </div>
           </div>
         </div>

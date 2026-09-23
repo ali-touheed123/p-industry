@@ -42,6 +42,11 @@ export interface ReceiptInvoiceData {
   paid_amount?: number;
   due_amount?: number;
   payment_type?: string;
+  cash_paid?: number;
+  card_paid?: number;
+  bank_paid?: number;
+  others_paid?: number;
+  change_returned?: number;
   items?: ReceiptItemData[];
   invoice_items?: ReceiptItemData[];
 }
@@ -67,7 +72,7 @@ export async function generateReceiptImageBlob(
       const baseHeaderHeight = 160;
       const itemRowHeight = 44;
       const itemsHeight = items.length * itemRowHeight;
-      const financialHeight = 180;
+      const financialHeight = 240;
       const footerHeight = 90;
       const totalHeight = baseHeaderHeight + itemsHeight + financialHeight + footerHeight;
 
@@ -211,8 +216,33 @@ export async function generateReceiptImageBlob(
       drawSummaryRow(ctx, 'NET TOTAL:', `Rs. ${netTotal.toLocaleString()}`, y + 3, width, true, '#0F172A', 14);
       y += 26;
 
-      drawSummaryRow(ctx, `Paid (${invoice.payment_type || 'Cash'}):`, `Rs. ${paid.toLocaleString()}`, y, width, true, '#059669');
+      drawSummaryRow(ctx, `Paid (${invoice.payment_type?.toUpperCase() || 'CASH'}):`, `Rs. ${paid.toLocaleString()}`, y, width, true, '#059669');
       y += 18;
+
+      const isSplitOrMulti = invoice.payment_type === 'split' || (Number(invoice.cash_paid || 0) > 0 && (Number(invoice.card_paid || 0) > 0 || Number(invoice.bank_paid || 0) > 0 || Number(invoice.others_paid || 0) > 0));
+      if (isSplitOrMulti) {
+        if (Number(invoice.cash_paid || 0) > 0) {
+          drawSummaryRow(ctx, '  • Cash:', `Rs. ${Number(invoice.cash_paid).toLocaleString()}`, y, width, false, '#475569', 11);
+          y += 16;
+        }
+        if (Number(invoice.card_paid || 0) > 0) {
+          drawSummaryRow(ctx, '  • Card:', `Rs. ${Number(invoice.card_paid).toLocaleString()}`, y, width, false, '#475569', 11);
+          y += 16;
+        }
+        if (Number(invoice.bank_paid || 0) > 0) {
+          drawSummaryRow(ctx, '  • Bank Transfer:', `Rs. ${Number(invoice.bank_paid).toLocaleString()}`, y, width, false, '#475569', 11);
+          y += 16;
+        }
+        if (Number(invoice.others_paid || 0) > 0) {
+          drawSummaryRow(ctx, '  • Tokens/Other:', `Rs. ${Number(invoice.others_paid).toLocaleString()}`, y, width, false, '#475569', 11);
+          y += 16;
+        }
+      }
+
+      if (Number(invoice.change_returned || 0) > 0) {
+        drawSummaryRow(ctx, 'Change Returned (Wapsi):', `Rs. ${Number(invoice.change_returned).toLocaleString()}`, y, width, true, '#16A34A', 11);
+        y += 16;
+      }
 
       if (due > 0) {
         drawSummaryRow(ctx, 'Remaining Balance Due:', `Rs. ${due.toLocaleString()}`, y, width, true, '#DC2626');

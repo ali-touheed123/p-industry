@@ -59,6 +59,12 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
               grossAmount: Number(inv.subtotal || inv.net_total || 0),
               discountAmount: Number(inv.discount || 0),
               netAmount: Number(inv.net_total || 0),
+              paidAmount: Number(inv.paid_amount || 0),
+              dueAmount: Number(inv.due_amount || 0),
+              cashPaid: Number(inv.cash_paid || 0),
+              cardPaid: Number(inv.card_paid || 0),
+              bankPaid: Number(inv.bank_paid || 0),
+              othersPaid: Number(inv.others_paid || 0),
               itemsCount: rawItems.length,
               status: isReturn ? 'return' : (inv.status || 'Completed'),
               salesman: inv.created_by || 'Counter Staff',
@@ -122,12 +128,18 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
     });
 
     const netSales = forwardSales.reduce((acc, inv) => acc + inv.netAmount, 0);
-    const cashInflow = forwardSales
-      .filter((inv) => inv.paymentMode === 'Cash')
-      .reduce((acc, inv) => acc + inv.netAmount, 0);
-    const creditUdhaar = forwardSales
-      .filter((inv) => inv.paymentMode === 'Credit')
-      .reduce((acc, inv) => acc + inv.netAmount, 0);
+    const cashInflow = forwardSales.reduce((acc, inv) => {
+      const cp = Number(inv.cashPaid || 0);
+      if (cp > 0) return acc + cp;
+      if (inv.paymentMode === 'Cash') return acc + inv.netAmount;
+      return acc;
+    }, 0);
+    const creditUdhaar = forwardSales.reduce((acc, inv) => {
+      const due = Number(inv.dueAmount || 0);
+      if (due > 0) return acc + due;
+      if (inv.paymentMode === 'Credit') return acc + inv.netAmount;
+      return acc;
+    }, 0);
     const totalUnits = forwardSales.reduce(
       (acc, inv) => acc + (inv.items && inv.items.length > 0 ? inv.items.reduce((s, it) => s + (Number(it.qty) || 1), 0) : (inv.itemsCount || 1)),
       0
@@ -278,16 +290,26 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
                 <td style={{ fontWeight: 600, color: '#0F172A' }}>{inv.customerName}</td>
                 <td style={{ color: '#64748B' }}>{inv.customerCategory}</td>
                 <td>
-                  <span style={{
-                    fontSize: '10px',
-                    padding: '2px 8px',
-                    borderRadius: '4px',
-                    fontWeight: 600,
-                    backgroundColor: inv.paymentMode === 'Cash' ? 'rgba(52, 211, 153, 0.15)' : inv.paymentMode === 'Credit' ? 'rgba(248, 113, 113, 0.15)' : 'rgba(56, 189, 248, 0.15)',
-                    color: inv.paymentMode === 'Cash' ? '#34D399' : inv.paymentMode === 'Credit' ? '#F87171' : '#38BDF8',
-                  }}>
-                    {inv.paymentMode}
-                  </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-start' }}>
+                    <span style={{
+                      fontSize: '10px',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      fontWeight: 600,
+                      backgroundColor: inv.paymentMode === 'Cash' ? 'rgba(52, 211, 153, 0.15)' : inv.paymentMode === 'Credit' ? 'rgba(248, 113, 113, 0.15)' : inv.paymentMode === 'Split' ? 'rgba(168, 85, 247, 0.15)' : 'rgba(56, 189, 248, 0.15)',
+                      color: inv.paymentMode === 'Cash' ? '#34D399' : inv.paymentMode === 'Credit' ? '#F87171' : inv.paymentMode === 'Split' ? '#A855F7' : '#38BDF8',
+                    }}>
+                      {inv.paymentMode}
+                    </span>
+                    {(inv.paymentMode === 'Split' || (Number(inv.cashPaid || 0) > 0 && (Number(inv.cardPaid || 0) > 0 || Number(inv.bankPaid || 0) > 0))) && (
+                      <div style={{ fontSize: '9.5px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', lineHeight: '1.2' }}>
+                        {Number(inv.cashPaid || 0) > 0 && <div>Cash: Rs. {Number(inv.cashPaid).toLocaleString()}</div>}
+                        {Number(inv.cardPaid || 0) > 0 && <div>Card: Rs. {Number(inv.cardPaid).toLocaleString()}</div>}
+                        {Number(inv.bankPaid || 0) > 0 && <div>Bank: Rs. {Number(inv.bankPaid).toLocaleString()}</div>}
+                        {Number(inv.othersPaid || 0) > 0 && <div>Other: Rs. {Number(inv.othersPaid).toLocaleString()}</div>}
+                      </div>
+                    )}
+                  </div>
                 </td>
                 <td style={{ textAlign: 'center', color: '#64748B' }} className="ceo-font-mono">{inv.items.length} items</td>
                 <td style={{ textAlign: 'right', fontWeight: 700, color: '#0F172A' }} className="ceo-font-mono">{formatCurrency(inv.netAmount)}</td>

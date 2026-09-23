@@ -42,6 +42,12 @@ export interface Invoice {
   grossAmount: number;
   discountAmount: number;
   netAmount: number;
+  paidAmount?: number;
+  dueAmount?: number;
+  cashPaid?: number;
+  cardPaid?: number;
+  bankPaid?: number;
+  othersPaid?: number;
   itemsCount: number;
   status: 'Completed' | 'Returned' | 'Partial Return';
   salesman: string;

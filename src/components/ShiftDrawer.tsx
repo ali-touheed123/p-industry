@@ -143,21 +143,44 @@ export default function ShiftDrawer({
   const totalSalesReturns = returnInvoices.reduce((s, i) => s + Number(i.grandTotal || i.net_total || 0), 0);
   const netSales = Math.max(0, grossSales - totalSalesReturns);
 
+  // Extract accurate payment components (handles pure cash, pure credit, pure bank/card, and split payments)
   const cashSales = salesInvoices.length > 0
-    ? salesInvoices.filter(i => !i.payment_type || i.payment_type === 'cash').reduce((s, i) => s + Number(i.cash_paid || i.paid_amount || i.grandTotal || i.net_total || 0), 0)
+    ? salesInvoices.reduce((s, i) => {
+        const cp = Number(i.cash_paid || 0);
+        if (cp > 0) return s + cp;
+        if (!i.payment_type || i.payment_type === 'cash') {
+          return s + Number(i.paid_amount || i.grandTotal || i.net_total || 0);
+        }
+        return s;
+      }, 0)
     : (totalSales > 0 ? totalSales : 0);
 
-  const cashReturns = returnInvoices
-    .filter(i => !i.payment_type || i.payment_type === 'cash')
-    .reduce((s, i) => s + Number(i.paid_amount || i.grandTotal || i.net_total || 0), 0);
+  const cashReturns = returnInvoices.reduce((s, i) => {
+    const cp = Number(i.cash_paid || 0);
+    if (cp > 0) return s + cp;
+    if (!i.payment_type || i.payment_type === 'cash') {
+      return s + Number(i.paid_amount || i.grandTotal || i.net_total || 0);
+    }
+    return s;
+  }, 0);
 
-  const creditSales = salesInvoices
-    .filter(i => i.payment_type === 'credit')
-    .reduce((s, i) => s + Number(i.due_amount || i.grandTotal || i.net_total || 0), 0);
+  const creditSales = salesInvoices.reduce((s, i) => {
+    const due = Number(i.due_amount || 0);
+    if (due > 0) return s + due;
+    if (i.payment_type === 'credit') {
+      return s + Number(i.grandTotal || i.net_total || 0);
+    }
+    return s;
+  }, 0);
 
-  const bankSales = salesInvoices
-    .filter(i => i.payment_type === 'bank' || i.payment_type === 'card' || i.payment_type === 'cheque')
-    .reduce((s, i) => s + Number(i.bank_paid || i.card_paid || i.grandTotal || i.net_total || 0), 0);
+  const bankSales = salesInvoices.reduce((s, i) => {
+    const bp = Number(i.bank_paid || 0) + Number(i.card_paid || 0);
+    if (bp > 0) return s + bp;
+    if (i.payment_type === 'bank' || i.payment_type === 'card' || i.payment_type === 'cheque') {
+      return s + Number(i.paid_amount || i.grandTotal || i.net_total || 0);
+    }
+    return s;
+  }, 0);
 
   // Dynamic Purchases breakdown
   const regularPurchases = purchases.filter(p => (p.purchase_type || 'purchase') !== 'return');
@@ -347,6 +370,8 @@ export default function ShiftDrawer({
       (totalSalesReturns > 0 ? `• Customer Returns: -Rs. ${totalSalesReturns.toLocaleString()} (${returnInvoices.length} returns)\n` : '') +
       `• Net Sales: Rs. ${netSales.toLocaleString()}\n` +
       `• Cash Inflow (Sales): +Rs. ${cashSales.toLocaleString()}\n` +
+      (bankSales > 0 ? `• Bank / Card Inflow: Rs. ${bankSales.toLocaleString()}\n` : '') +
+      (creditSales > 0 ? `• Credit / Udhaar Sales: Rs. ${creditSales.toLocaleString()}\n` : '') +
       (cashReturns > 0 ? `• Cash Returns Refunded: -Rs. ${cashReturns.toLocaleString()}\n` : '') +
       (supplierCashPaid > 0 ? `• Supplier Cash Paid: -Rs. ${supplierCashPaid.toLocaleString()}\n` : '') +
       `• Total Petty Expenses: -Rs. ${totalExpenses.toLocaleString()}\n` +

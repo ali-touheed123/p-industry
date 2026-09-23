@@ -436,10 +436,11 @@ export default function PosBilling({
   const totalPaid = cashPayment + cardPayment + bankPayment + othersPayment + appliedTokenAmount;
   const balanceDue = netTotal - totalPaid;
 
-  // Auto-sync cash payment continuously whenever netTotal changes if not manually edited & no other tenders
+  // Auto-sync cash payment continuously whenever netTotal or other tenders change (if cash not manually locked)
   useEffect(() => {
-    if (cardPayment === 0 && bankPayment === 0 && othersPayment === 0 && !isCashManuallyEdited) {
-      const remainingCash = Math.max(0, netTotal - appliedTokenAmount);
+    if (!isCashManuallyEdited) {
+      const otherTenders = cardPayment + bankPayment + othersPayment + appliedTokenAmount;
+      const remainingCash = Math.max(0, Math.round((netTotal - otherTenders) * 100) / 100);
       if (lineItems.length > 0) {
         setCashPayment(remainingCash);
       } else {
@@ -693,10 +694,23 @@ export default function PosBilling({
     setSubmitting(true);
 
     const roundedNetTotal = Math.round(netTotal * 100) / 100;
-    const computedTotalPaid = Math.round((cashPayment + cardPayment + bankPayment + othersPayment + appliedTokenAmount) * 100) / 100;
+    const nonCashPaid = Math.round((cardPayment + bankPayment + othersPayment + appliedTokenAmount) * 100) / 100;
+
+    // Hard Stop: Block checkout if non-cash tenders exceed Net Total
+    if (nonCashPaid > roundedNetTotal) {
+      showFeedback(`Non-cash payment (Rs. ${nonCashPaid.toLocaleString()}) exceeds Net Total (Rs. ${roundedNetTotal.toLocaleString()}). Please correct tender amounts.`);
+      setSubmitting(false);
+      return;
+    }
+
+    const maxCashRetained = Math.max(0, Math.round((roundedNetTotal - nonCashPaid) * 100) / 100);
+    const actualCashRetained = Math.min(cashPayment, maxCashRetained);
+    const cashChangeReturned = Math.max(0, Math.round((cashPayment - actualCashRetained) * 100) / 100);
+
+    const computedTotalPaid = Math.round((actualCashRetained + nonCashPaid) * 100) / 100;
     const rawDue = roundedNetTotal - computedTotalPaid;
     const finalDue = rawDue > 0.01 ? Math.round(rawDue * 100) / 100 : 0;
-    const finalPaid = finalDue === 0 ? roundedNetTotal : computedTotalPaid;
+    const finalPaid = computedTotalPaid;
     const isCreditSale = finalDue > 0;
 
     // Hard Stop: Block credit/debt sales for walk-in (no account) customers
@@ -727,12 +741,28 @@ export default function PosBilling({
     if (isCreditSale) {
       determinedPaymentType = finalPaid === 0 ? 'credit' : 'credit';
     } else {
-      if (appliedTokenAmount > 0 && appliedTokenAmount >= finalPaid) determinedPaymentType = 'tokens';
-      else if (cardPayment > 0 && cardPayment >= finalPaid) determinedPaymentType = 'card';
-      else if (bankPayment > 0 && bankPayment >= finalPaid) determinedPaymentType = 'bank';
-      else if (othersPayment > 0 && othersPayment >= finalPaid) determinedPaymentType = 'others';
-      else if (cardPayment > 0 || bankPayment > 0 || othersPayment > 0 || appliedTokenAmount > 0) determinedPaymentType = 'split';
-      else determinedPaymentType = 'cash';
+      const hasCard = cardPayment > 0;
+      const hasBank = bankPayment > 0;
+      const hasOthers = othersPayment > 0;
+      const hasTokens = appliedTokenAmount > 0;
+      const hasCash = actualCashRetained > 0;
+
+      const nonCashCount = (hasCard ? 1 : 0) + (hasBank ? 1 : 0) + (hasOthers ? 1 : 0) + (hasTokens ? 1 : 0);
+      const totalModes = nonCashCount + (hasCash ? 1 : 0);
+
+      if (totalModes > 1) {
+        determinedPaymentType = 'split';
+      } else if (hasTokens) {
+        determinedPaymentType = 'tokens';
+      } else if (hasCard) {
+        determinedPaymentType = 'card';
+      } else if (hasBank) {
+        determinedPaymentType = 'bank';
+      } else if (hasOthers) {
+        determinedPaymentType = 'others';
+      } else {
+        determinedPaymentType = 'cash';
+      }
     }
 
     const invoicePayload = {
@@ -741,6 +771,7 @@ export default function PosBilling({
       client_id: selectedClient?.id || null,
       client_name: customerDisplayName,
       shift_id: shiftId || null,
+      date: invoiceDate,
       subtotal: itemSubtotal,
       discount: invoiceDiscount,
       delivery_charge: deliveryCharge,
@@ -750,7 +781,7 @@ export default function PosBilling({
       paid_amount: finalPaid,
       due_amount: finalDue,
       payment_type: determinedPaymentType,
-      cash_paid: cashPayment,
+      cash_paid: actualCashRetained,
       card_paid: cardPayment,
       bank_paid: bankPayment,
       others_paid: othersPayment + appliedTokenAmount,
@@ -861,6 +892,12 @@ export default function PosBilling({
           delivery_charge: deliveryCharge,
           paid_amount: finalPaid,
           due_amount: finalDue,
+          payment_type: determinedPaymentType,
+          cash_paid: actualCashRetained,
+          card_paid: cardPayment,
+          bank_paid: bankPayment,
+          others_paid: othersPayment + appliedTokenAmount,
+          change_returned: cashChangeReturned,
           date: invoiceDate,
           time: new Date().toLocaleTimeString(),
           items: lineItems,
@@ -1818,26 +1855,49 @@ export default function PosBilling({
               </div>
             )}
 
-            <div style={{ paddingTop: '6px', borderTop: '1px solid #F1F5F9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
-              <span style={{ color: '#475569' }}>Paid Amount</span>
-              <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A' }}>
-                Rs. {totalPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-              </span>
-            </div>
+            {(() => {
+              const otherTenders = cardPayment + bankPayment + othersPayment + appliedTokenAmount;
+              const isNonCashOverpaid = otherTenders > netTotal;
+              const changeToReturn = !isNonCashOverpaid && totalPaid > netTotal ? Math.round((totalPaid - netTotal) * 100) / 100 : 0;
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
-              <span style={{ color: '#475569', fontWeight: 600 }}>Balance</span>
-              {balanceDue <= 0 ? (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '10px', fontWeight: 700, color: '#16A34A', background: '#DCFCE7', padding: '2px 8px', borderRadius: '6px', border: '1px solid #BBF7D0' }}>
-                  <CheckCircle2 style={{ width: 12, height: 12 }} />
-                  Payment Success
-                </span>
-              ) : (
-                <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#DC2626', background: '#FEE2E2', padding: '2px 8px', borderRadius: '6px', border: '1px solid #FECACA', fontSize: '11px' }}>
-                  Rs. {balanceDue.toLocaleString(undefined, { minimumFractionDigits: 2 })} (Due)
-                </span>
-              )}
-            </div>
+              return (
+                <>
+                  <div style={{ paddingTop: '6px', borderTop: '1px solid #F1F5F9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+                    <span style={{ color: '#475569' }}>Paid Amount</span>
+                    <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A' }}>
+                      Rs. {totalPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+
+                  {changeToReturn > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+                      <span style={{ color: '#16A34A', fontWeight: 700 }}>Change Return (Wapsi)</span>
+                      <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 800, color: '#16A34A', background: '#DCFCE7', padding: '2px 8px', borderRadius: '6px', border: '1px solid #BBF7D0' }}>
+                        Rs. {changeToReturn.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+                    <span style={{ color: '#475569', fontWeight: 600 }}>Balance</span>
+                    {isNonCashOverpaid ? (
+                      <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#DC2626', background: '#FEE2E2', padding: '2px 8px', borderRadius: '6px', border: '1px solid #FECACA', fontSize: '10.5px' }}>
+                        ⚠️ Over by Rs. {(otherTenders - netTotal).toLocaleString()} (Non-cash)
+                      </span>
+                    ) : balanceDue <= 0 ? (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '10px', fontWeight: 700, color: '#16A34A', background: '#DCFCE7', padding: '2px 8px', borderRadius: '6px', border: '1px solid #BBF7D0' }}>
+                        <CheckCircle2 style={{ width: 12, height: 12 }} />
+                        {changeToReturn > 0 ? 'Full Paid + Change Due' : 'Payment Success'}
+                      </span>
+                    ) : (
+                      <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#DC2626', background: '#FEE2E2', padding: '2px 8px', borderRadius: '6px', border: '1px solid #FECACA', fontSize: '11px' }}>
+                        Rs. {balanceDue.toLocaleString(undefined, { minimumFractionDigits: 2 })} (Due)
+                      </span>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
           </div>
 
           {/* 3. Bottom Stacked Action Buttons (Save & Print / Save / Hold / Cancel) */}
@@ -1845,7 +1905,7 @@ export default function PosBilling({
             {/* Primary Save & Print */}
             <button
               type="button"
-              disabled={submitting}
+              disabled={submitting || (cardPayment + bankPayment + othersPayment + appliedTokenAmount) > netTotal}
               onClick={() => handleCheckout(true)}
               className="pos-btn-checkout"
             >
@@ -1857,7 +1917,7 @@ export default function PosBilling({
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
               <button
                 type="button"
-                disabled={submitting}
+                disabled={submitting || (cardPayment + bankPayment + othersPayment + appliedTokenAmount) > netTotal}
                 onClick={() => handleCheckout(false)}
                 style={{ padding: '8px', background: '#F1F5F9', color: '#1E293B', fontWeight: 700, fontSize: '12px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', border: '1px solid #CBD5E1', cursor: 'pointer' }}
               >
@@ -2387,10 +2447,44 @@ export default function PosBilling({
                 <span>NET TOTAL:</span>
                 <span style={{ color: '#000000' }}>Rs. {(printReceiptData.grandTotal || 0).toLocaleString()}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', paddingTop: '2px', color: '#333333' }}>
-                <span>Paid ({printReceiptData.payment_type || 'Cash'}):</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 700, paddingTop: '3px', color: '#000000' }}>
+                <span>Paid ({printReceiptData.payment_type?.toUpperCase() || 'CASH'}):</span>
                 <span>Rs. {(printReceiptData.paid_amount || 0).toLocaleString()}</span>
               </div>
+              {(printReceiptData.payment_type === 'split' || (Number(printReceiptData.cash_paid || 0) > 0 && (Number(printReceiptData.card_paid || 0) > 0 || Number(printReceiptData.bank_paid || 0) > 0 || Number(printReceiptData.others_paid || 0) > 0))) && (
+                <div style={{ paddingLeft: '8px', fontSize: '9.5px', color: '#444444', display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                  {Number(printReceiptData.cash_paid || 0) > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>• Cash:</span>
+                      <span>Rs. {Number(printReceiptData.cash_paid).toLocaleString()}</span>
+                    </div>
+                  )}
+                  {Number(printReceiptData.card_paid || 0) > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>• Card:</span>
+                      <span>Rs. {Number(printReceiptData.card_paid).toLocaleString()}</span>
+                    </div>
+                  )}
+                  {Number(printReceiptData.bank_paid || 0) > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>• Bank:</span>
+                      <span>Rs. {Number(printReceiptData.bank_paid).toLocaleString()}</span>
+                    </div>
+                  )}
+                  {Number(printReceiptData.others_paid || 0) > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>• Tokens/Other:</span>
+                      <span>Rs. {Number(printReceiptData.others_paid).toLocaleString()}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              {Number(printReceiptData.change_returned || 0) > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#15803D', fontWeight: 700 }}>
+                  <span>Change Returned:</span>
+                  <span>Rs. {Number(printReceiptData.change_returned).toLocaleString()}</span>
+                </div>
+              )}
               {printReceiptData.due_amount > 0 && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', fontWeight: 700, color: '#000000' }}>
                   <span>Balance Due:</span>
