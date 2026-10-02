@@ -102,8 +102,20 @@ export const ReturnsView: React.FC<ReturnsViewProps> = ({ branch }) => {
     return returns.filter((ret) => {
       if (startDate && ret.date && ret.date < startDate) return false;
       if (endDate && ret.date && ret.date > endDate) return false;
-      if (reasonFilter !== 'All Reasons' && ret.reason !== reasonFilter) {
-        return false;
+      if (reasonFilter && reasonFilter !== 'All Reasons') {
+        const filterLower = reasonFilter.toLowerCase();
+        const reasonLower = (ret.reason || '').toLowerCase();
+        let isReasonMatch = reasonLower.includes(filterLower) || filterLower.includes(reasonLower);
+
+        if (!isReasonMatch) {
+          const keywords = filterLower
+            .split(/[\s/]+/)
+            .map((w) => w.trim())
+            .filter((w) => w.length > 3);
+          isReasonMatch = keywords.some((kw) => reasonLower.includes(kw));
+        }
+
+        if (!isReasonMatch) return false;
       }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();

@@ -21,6 +21,7 @@ export default function ClientCreditRecovery({
   const [totalCollected, setTotalCollected] = useState(0);
   const [totalCreditBilled, setTotalCreditBilled] = useState(0);
   const [thisMonthCollected, setThisMonthCollected] = useState(0);
+  const [invoices, setInvoices] = useState<any[]>([]);
 
   // Quick Payment Modal State
   const [selectedClientForPayment, setSelectedClientForPayment] = useState<Client | null>(null);
@@ -63,8 +64,9 @@ export default function ClientCreditRecovery({
       setThisMonthCollected(monthCollected);
 
       // Total credit billed to registered clients (excludes walk-in cash sales)
-      const invoices: any[] = invoicesData.success ? (invoicesData.invoices || []) : [];
-      const clientSales = invoices.filter((inv: any) => inv.client_id && inv.invoice_type === 'sales');
+      const invs: any[] = invoicesData.success ? (invoicesData.invoices || []) : [];
+      setInvoices(invs);
+      const clientSales = invs.filter((inv: any) => inv.client_id && inv.invoice_type === 'sales');
       const creditBilled = clientSales.reduce((s: number, inv: any) => s + Number(inv.net_total || 0), 0);
       setTotalCreditBilled(creditBilled);
     } catch (err) {
@@ -87,10 +89,11 @@ export default function ClientCreditRecovery({
     ? Math.min(100, Math.round((totalCollected / totalCreditPortfolio) * 100))
     : 100;
 
-  // Categorize aging by balance amount vs credit limit
+  // Categorize aging by days since oldest unpaid invoice & credit utilization
+  const nowMs = Date.now();
   const categorizedClients = clients.map(c => {
-    const bal = c.current_balance || 0;
-    const limit = c.credit_limit || 50000;
+    const bal = Number(c.current_balance || 0);
+    const limit = Number(c.credit_limit || 50000);
     let status: 'CRITICAL' | 'OVERDUE' | 'PENDING' | 'SETTLED' = 'PENDING';
     let d30: number | null = null;
     let d60: number | null = null;
@@ -98,15 +101,37 @@ export default function ClientCreditRecovery({
 
     if (bal <= 0) {
       status = 'SETTLED';
-    } else if (bal >= limit * 0.9) {
-      status = 'CRITICAL';
-      d90 = bal;
-    } else if (bal >= limit * 0.5) {
-      status = 'OVERDUE';
-      d60 = bal;
     } else {
-      status = 'PENDING';
-      d30 = bal;
+      // Find oldest sales invoice for this client with unpaid amount or credit terms
+      const clientInvoices = invoices.filter(
+        (inv: any) => inv.client_id === c.id && (inv.invoice_type || 'sales') === 'sales' && (Number(inv.due_amount || 0) > 0 || inv.payment_type === 'credit')
+      );
+
+      let oldestTime: number | null = null;
+      clientInvoices.forEach((inv: any) => {
+        const dStr = inv.date || inv.created_at;
+        if (dStr) {
+          const t = new Date(dStr).getTime();
+          if (!isNaN(t)) {
+            if (oldestTime === null || t < oldestTime) {
+              oldestTime = t;
+            }
+          }
+        }
+      });
+
+      const days = oldestTime !== null ? Math.max(0, Math.floor((nowMs - oldestTime) / (1000 * 60 * 60 * 24))) : 0;
+
+      if (days > 60 || bal >= limit * 0.95) {
+        status = 'CRITICAL';
+        d90 = bal;
+      } else if (days > 30) {
+        status = 'OVERDUE';
+        d60 = bal;
+      } else {
+        status = 'PENDING';
+        d30 = bal;
+      }
     }
 
     return { ...c, status, d30, d60, d90, totalDue: bal };

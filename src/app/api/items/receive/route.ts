@@ -53,16 +53,15 @@ export async function POST(req: NextRequest) {
     const nextSeq = (count || 0) + 1;
     const grn_no = `GRN-${currentYear}-${String(nextSeq).padStart(4, '0')}`;
 
-    // 3. Update Item stock quantity
+    // 3. Atomic stock quantity update (VAL-01 / DB-01 fix)
     const previousStock = Number(item.stock_qty || 0);
-    const newStock = previousStock + parsedQty;
+    const { data: rpcRes, error: rpcErr } = await supabaseAdmin.rpc('adjust_item_stock', {
+      p_item_id: item_id,
+      p_qty_delta: parsedQty,
+    });
 
-    const { error: updateErr } = await supabaseAdmin
-      .from('items')
-      .update({ stock_qty: newStock })
-      .eq('id', item_id);
-
-    if (updateErr) throw updateErr;
+    if (rpcErr) throw rpcErr;
+    const newStock = (rpcRes && rpcRes.length > 0) ? Number(rpcRes[0].new_stock_qty) : (previousStock + parsedQty);
 
     // 4. Record stock movement audit log
     try {

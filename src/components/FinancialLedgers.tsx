@@ -233,7 +233,7 @@ export default function FinancialLedgers({
     const supName = (selectedParty?.name || '').toLowerCase().trim();
     if (!supName) return availableSupplierTokens;
     return availableSupplierTokens.filter((t: any) => {
-      const brand = (t.brand || '').toLowerCase().trim();
+      const brand = (t.brand_name || t.brand || '').toLowerCase().trim();
       if (!brand) return false;
       const brandWords = brand.split(/\s+/).filter((w: string) => w.length > 2);
       const supWords = supName.split(/\s+/).filter((w: string) => w.length > 2);
@@ -976,17 +976,7 @@ export default function FinancialLedgers({
               </div>
             </div>
 
-            {/* Token Credit Print Footer — visible only when client has token balance */}
-            {activeTab === 'clients' && (selectedParty?.token_balance || 0) > 0 && (
-              <div style={{ padding: '8px 1.25rem', background: '#ECFDF5', borderTop: '1px solid #A7F3D0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
-                <span style={{ fontWeight: 700, color: '#059669' }}>
-                  🏷️ Loyalty Token Credit Balance: Rs. {(selectedParty.token_balance || 0).toLocaleString()}
-                </span>
-                <span style={{ fontWeight: 700, color: currentPartyBalance > (selectedParty.token_balance || 0) ? 'var(--error)' : '#065f46' }}>
-                  Net Effective Payable: Rs. {Math.max(0, currentPartyBalance - (selectedParty.token_balance || 0)).toLocaleString()}
-                </span>
-              </div>
-            )}
+            {/* Client Statement Footer */}
           </div>
         ) : (
           <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--on-surface-variant)' }}>
@@ -1044,27 +1034,6 @@ export default function FinancialLedgers({
               )}
             </div>
 
-            {/* Token Balance & Net Effective Payable (Clients Only) */}
-            {activeTab === 'clients' && (selectedParty?.token_balance || 0) > 0 && (
-              <div style={{ marginBottom: '1.25rem', padding: '10px 12px', background: '#ECFDF5', border: '1px solid #A7F3D0', borderRadius: 'var(--radius-sm)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#059669' }}>
-                    🏷️ Token Credit Balance
-                  </span>
-                  <strong className="font-mono" style={{ fontSize: '14px', color: '#059669' }}>
-                    Rs. {(selectedParty.token_balance || 0).toLocaleString()}
-                  </strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '6px', borderTop: '1px solid #A7F3D0' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#065F46' }}>
-                    Net Effective Payable
-                  </span>
-                  <strong className="font-mono" style={{ fontSize: '13px', color: Math.max(0, currentPartyBalance - (selectedParty.token_balance || 0)) > 0 ? 'var(--error)' : '#065f46' }}>
-                    Rs. {Math.max(0, currentPartyBalance - (selectedParty.token_balance || 0)).toLocaleString()}
-                  </strong>
-                </div>
-              </div>
-            )}
 
             {/* Credit Utilization (Clients Only) */}
             {activeTab === 'clients' && (
@@ -1307,7 +1276,7 @@ export default function FinancialLedgers({
                         {matchingSupplierTokens.map((t: any) => {
                           const isChecked = selectedSupplierTokenIds.includes(t.id);
                           const dateStr = t.created_at ? new Date(t.created_at).toLocaleDateString('en-PK') : '';
-                          const originLabel = t.transaction_type === 'shop_retained' ? 'Retained' : 'Redeemed';
+                          const originLabel = (t.type || t.transaction_type) === 'shop_retained' ? 'Retained' : (t.type || t.transaction_type) === 'opening_stock' ? 'Opening' : 'Redeemed';
 
                           return (
                             <div
@@ -1338,10 +1307,11 @@ export default function FinancialLedgers({
                                 />
                                 <div>
                                   <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#0F172A' }}>
-                                    {t.brand || 'General'} · <span style={{ fontWeight: 500, color: '#475569' }}>{t.item_name || 'Paint Token'}</span>
+                                    {t.brand_name || t.brand || 'General'} · <span style={{ fontWeight: 500, color: '#475569' }}>{[t.series_name, t.unit_name].filter(Boolean).join(' · ') || t.item_name || 'Paint Token'}</span>
                                   </div>
                                   <div style={{ fontSize: '9.5px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
                                     {dateStr} · {originLabel}
+                                    {Number(t.remaining_quantity ?? t.quantity ?? 1) > 1 ? ` · Qty: ${t.remaining_quantity ?? t.quantity}` : ''}
                                   </div>
                                 </div>
                               </div>

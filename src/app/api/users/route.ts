@@ -78,11 +78,7 @@ export async function POST(req: NextRequest) {
       throw error;
     }
 
-    if (role === 'ceo' && tenant_id) {
-      await supabaseAdmin
-        .from('ceo_tenants')
-        .insert({ user_id: newUser.id, tenant_id });
-    }
+
 
     return NextResponse.json({ success: true, user: newUser });
   } catch (error: any) {
@@ -106,15 +102,29 @@ export async function PUT(req: NextRequest) {
     }
 
     const updatePayload: any = {};
-    if (username) updatePayload.username = username.trim().toLowerCase();
+    if (username) {
+      const cleanUsername = username.trim().toLowerCase();
+      const { data: conflict } = await supabaseAdmin
+        .from('app_users')
+        .select('id')
+        .eq('username', cleanUsername)
+        .neq('id', id)
+        .maybeSingle();
+
+      if (conflict) {
+        return NextResponse.json({ success: false, error: 'Username is already taken by another account' }, { status: 400 });
+      }
+      updatePayload.username = cleanUsername;
+    }
+
     if (full_name !== undefined) updatePayload.full_name = full_name;
     if (role) updatePayload.role = role;
     if (tenant_id !== undefined) updatePayload.tenant_id = tenant_id || null;
     if (email !== undefined) updatePayload.email = email || null;
     if (is_active !== undefined) updatePayload.is_active = is_active;
 
-    if (password && password.trim()) {
-      updatePayload.password_hash = await hashPassword(password.trim());
+    if (password && String(password).trim()) {
+      updatePayload.password_hash = await hashPassword(String(password).trim());
     }
 
     const { data: updatedUser, error } = await supabaseAdmin
@@ -124,13 +134,21 @@ export async function PUT(req: NextRequest) {
       .select('id, username, full_name, email, role, tenant_id, is_active, created_at')
       .single();
 
-    if (error) throw error;
+    if (error) {
+      if (error.code === '23505') {
+        return NextResponse.json({ success: false, error: 'Username is already taken by another account' }, { status: 400 });
+      }
+      throw error;
+    }
+
+
 
     return NextResponse.json({ success: true, user: updatedUser });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
+
 
 // DELETE: Remove a user
 export async function DELETE(req: NextRequest) {
@@ -154,7 +172,6 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'User ID required' }, { status: 400 });
     }
 
-    await supabaseAdmin.from('ceo_tenants').delete().eq('user_id', id);
     const { error } = await supabaseAdmin.from('app_users').delete().eq('id', id);
     if (error) throw error;
 

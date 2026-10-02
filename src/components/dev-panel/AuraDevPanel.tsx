@@ -104,11 +104,20 @@ export default function AuraDevPanel() {
   }, [isAuthenticated, fetchTenants, fetchUsers]);
 
   // Lock handler
-  const handleLock = () => {
-    sessionStorage.removeItem('aura_dev_auth');
-    sessionStorage.removeItem('aura_dev_token');
-    setIsAuthenticated(false);
+  const handleLock = async () => {
+    try {
+      await fetch('/api/auth/dev-pin', {
+        method: 'DELETE',
+      });
+    } catch (err) {
+      console.error('Failed to clear developer cookie on lock:', err);
+    } finally {
+      sessionStorage.removeItem('aura_dev_auth');
+      sessionStorage.removeItem('aura_dev_token');
+      setIsAuthenticated(false);
+    }
   };
+
 
   // ----------------------------------------------------
   // BRANCH OPERATIONS (Real Supabase API)
@@ -210,14 +219,16 @@ export default function AuraDevPanel() {
     email?: string;
   }): Promise<boolean> => {
     try {
+      const isEditing = Boolean(userData.id);
+      const method = isEditing ? 'PUT' : 'POST';
       const res = await fetch('/api/users', {
-        method: 'POST',
+        method,
         headers: getDevAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(userData),
       });
       const data = await res.json();
       if (data.success) {
-        showToast('User account successfully saved!');
+        showToast(isEditing ? 'User account updated successfully!' : 'User account successfully saved!');
         fetchUsers();
         setEditingUser(null);
         return true;
@@ -263,6 +274,15 @@ export default function AuraDevPanel() {
   }
 
   const primarySlug = tenants[0]?.slug || 'tawakkal-paint-house';
+
+  const devUser = users.find((u) => u.role === 'developer');
+  const devIdentity = devUser
+    ? {
+        name: devUser.full_name || devUser.username,
+        email: devUser.email || `${devUser.username}@pyntflow.com`,
+        initials: (devUser.full_name || devUser.username).slice(0, 2).toUpperCase(),
+      }
+    : undefined;
 
   return (
     <div className="aura-container">
@@ -332,6 +352,7 @@ export default function AuraDevPanel() {
             users: users.length,
           }}
           primaryTenantSlug={primarySlug}
+          devIdentity={devIdentity}
         />
 
         {/* Dynamic Center Viewport */}

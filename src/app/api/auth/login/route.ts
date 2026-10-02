@@ -92,14 +92,9 @@ export async function POST(req: NextRequest) {
       }
 
       if (user.role === 'ceo') {
-        const { data: ceoAccess } = await supabaseAdmin
-          .from('ceo_tenants')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('tenant_id', targetTenant.id)
-          .single();
-
-        if (user.tenant_id !== targetTenant.id && !ceoAccess) {
+        const isOwnerMatch = user.tenants?.owner_name && targetTenant.owner_name && user.tenants.owner_name === targetTenant.owner_name;
+        const isEmailMatch = user.tenants?.email && targetTenant.email && user.tenants.email === targetTenant.email;
+        if (user.tenant_id !== targetTenant.id && !isOwnerMatch && !isEmailMatch) {
           return NextResponse.json({ success: false, error: 'You do not have CEO access to this branch' }, { status: 403 });
         }
       } else {
@@ -118,6 +113,26 @@ export async function POST(req: NextRequest) {
 
     sanitizedUser.tenant_id = sessionTenantId;
 
+    // Fetch sister branches for CEO to embed into session token
+    let ceoTenants: Array<{ id: string; slug: string; name?: string }> | undefined = undefined;
+    if (user.role === 'ceo') {
+      const activeTenant = sanitizedUser.tenant || user.tenants;
+      if (activeTenant?.owner_name || activeTenant?.email) {
+        let q = supabaseAdmin.from('tenants').select('id, slug, name').eq('is_active', true);
+        if (activeTenant.owner_name && activeTenant.email) {
+          q = q.or(`owner_name.eq.${activeTenant.owner_name},email.eq.${activeTenant.email}`);
+        } else if (activeTenant.owner_name) {
+          q = q.eq('owner_name', activeTenant.owner_name);
+        } else if (activeTenant.email) {
+          q = q.eq('email', activeTenant.email);
+        }
+        const { data: sisterBranches } = await q;
+        if (sisterBranches && sisterBranches.length > 0) {
+          ceoTenants = sisterBranches.map(b => ({ id: b.id, slug: b.slug, name: b.name }));
+        }
+      }
+    }
+
     // 4. Issue encrypted JWT session token
     const token = await createSessionToken({
       userId: user.id,
@@ -125,6 +140,7 @@ export async function POST(req: NextRequest) {
       role: user.role,
       tenantId: sessionTenantId,
       tenantSlug: sessionTenantSlug,
+      ceoTenants,
     });
 
     const res = NextResponse.json({

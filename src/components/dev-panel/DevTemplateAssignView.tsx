@@ -29,10 +29,20 @@ export const DevTemplateAssignView: React.FC<DevTemplateAssignViewProps> = ({
   const [savingTenantId, setSavingTenantId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
+  const getDevAuthHeaders = (extra: Record<string, string> = {}): Record<string, string> => {
+    const token = typeof window !== 'undefined' ? sessionStorage.getItem('aura_dev_token') : null;
+    return {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extra,
+    };
+  };
+
   const fetchAssignments = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/receipt-templates/assign');
+      const res = await fetch('/api/receipt-templates/assign', {
+        headers: getDevAuthHeaders(),
+      });
       const data = await res.json();
       if (data.success) {
         setAssignments(data.assignments || []);
@@ -55,7 +65,7 @@ export const DevTemplateAssignView: React.FC<DevTemplateAssignViewProps> = ({
       setSavingTenantId(tenantId);
       const res = await fetch('/api/receipt-templates/assign', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getDevAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           tenant_id: tenantId,
           template_id: templateId === '__default__' ? null : templateId,

@@ -79,9 +79,28 @@ export async function GET(req: NextRequest) {
             .limit(1);
 
           if (error) throw error;
+          const prevShift = prevShifts && prevShifts.length > 0 ? prevShifts[0] : null;
+          if (prevShift) {
+            const { data: prevInvoices } = await supabaseAdmin
+              .from('invoices')
+              .select('net_total, invoice_type')
+              .eq('shift_id', prevShift.id);
+
+            let prevNetSales = 0;
+            if (prevInvoices && prevInvoices.length > 0) {
+              prevNetSales = prevInvoices.reduce((sum: number, inv: any) => {
+                const amt = Number(inv.net_total || 0);
+                return (inv.invoice_type || 'sales') === 'return' ? sum - amt : sum + amt;
+              }, 0);
+            }
+            return NextResponse.json({
+              success: true,
+              previousSameDayShift: { ...prevShift, net_sales: prevNetSales },
+            });
+          }
           return NextResponse.json({
             success: true,
-            previousSameDayShift: prevShifts && prevShifts.length > 0 ? prevShifts[0] : null,
+            previousSameDayShift: null,
           });
         }
       }
@@ -139,6 +158,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
+    // FIX DB-08: block new shift if an open shift already exists for this tenant
+    const { data: existingOpen } = await supabaseAdmin
+      .from('shifts')
+      .select('id, start_time')
+      .eq('tenant_id', tenant_id)
+      .eq('status', 'open')
+      .maybeSingle();
+
+    if (existingOpen) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'A shift is already open for this register. Please close the current shift before opening a new one.',
+          existing_shift_id: existingOpen.id,
+        },
+        { status: 409 }
+      );
+    }
+
     const { data: shift, error } = await supabaseAdmin
       .from('shifts')
       .insert({
@@ -186,14 +224,103 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
+    // FIX DB-08: recompute expected_cash server-side from DB transactions.
+    // The client-supplied expected_cash cannot be trusted — a tampered POS could
+    // submit any value to hide a cash shortage on shift close.
+    let serverExpectedCash = Number(expected_cash); // client value as starting fallback
+    try {
+      const shiftRecord = await supabaseAdmin
+        .from('shifts')
+        .select('opening_cash, tenant_id, start_time')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (shiftRecord.data) {
+        const openingAmt = Number(shiftRecord.data.opening_cash || 0);
+        const tenantId = shiftRecord.data.tenant_id;
+        const startTime = shiftRecord.data.start_time || new Date().toISOString().split('T')[0] + 'T00:00:00';
+
+        // Sum cash received and cash returned: invoices linked to this shift
+        const { data: shiftInvoices } = await supabaseAdmin
+          .from('invoices')
+          .select('net_total, paid_amount, cash_paid, payment_type, invoice_type')
+          .eq('shift_id', id)
+          .eq('tenant_id', tenantId);
+
+        let cashIn = 0;
+        let cashReturns = 0;
+        if (shiftInvoices) {
+          shiftInvoices.forEach((inv: any) => {
+            const isReturn = (inv.invoice_type || 'sales') === 'return';
+            const cp = Number(inv.cash_paid || 0);
+            const pt = (inv.payment_type || '').toLowerCase();
+            const fallbackAmount = Number(inv.paid_amount || inv.net_total || 0);
+            const cashAmount = cp > 0 ? cp : (!pt || pt === 'cash' || pt === 'refund' ? fallbackAmount : 0);
+
+            if (isReturn) {
+              cashReturns += cashAmount;
+            } else {
+              cashIn += cashAmount;
+            }
+          });
+        }
+
+        // Deduct supplier purchases paid in cash from the drawer during this shift
+        let supplierCashPaid = 0;
+        const { data: shiftPurchases } = await supabaseAdmin
+          .from('purchases')
+          .select('net_total, paid_amount, payment_type, purchase_type')
+          .eq('tenant_id', tenantId)
+          .gte('created_at', startTime);
+
+        if (shiftPurchases) {
+          shiftPurchases.forEach((p: any) => {
+            if ((p.purchase_type || 'purchase') === 'return') return;
+            const pt = (p.payment_type || '').toLowerCase();
+            const paid = Number(p.paid_amount || (pt === 'cash' ? p.net_total : 0) || 0);
+            supplierCashPaid += paid;
+          });
+        }
+
+        // Deduct cash expenses
+        const { data: shiftExpenses } = await supabaseAdmin
+          .from('petty_expenses')
+          .select('amount')
+          .eq('shift_id', id)
+          .eq('tenant_id', tenantId);
+        const totalExpenses = (shiftExpenses || []).reduce((s: number, e: any) => s + Number(e.amount || 0), 0);
+
+        // Deduct token cash payouts from token_transactions (type = 'redeemed', matching ShiftDrawer authoritative path)
+        const { data: shiftRedemptions } = await supabaseAdmin
+          .from('token_transactions')
+          .select('total_amount')
+          .eq('shift_id', id)
+          .eq('tenant_id', tenantId)
+          .eq('type', 'redeemed');
+        const totalTokenPayouts = (shiftRedemptions || []).reduce(
+          (s: number, r: any) => s + Number(r.total_amount || 0), 0
+        );
+
+        // Formula matches ShiftDrawer.tsx parity:
+        // Expected Cash = Opening Cash + Cash Sales - Cash Returns - Supplier Cash Paid - Total Expenses - Tokens Redeemed Cash
+        serverExpectedCash = Math.max(
+          0,
+          openingAmt + cashIn - cashReturns - supplierCashPaid - totalExpenses - totalTokenPayouts
+        );
+      }
+    } catch (calcErr) {
+      // Non-blocking: fall back to client-supplied value if calculation fails
+      console.error('Server-side expected_cash recomputation failed, using client value:', calcErr);
+    }
+
     const { data: shift, error } = await supabaseAdmin
       .from('shifts')
       .update({
         closed_by: closed_by || null,
         end_time: new Date().toISOString(),
-        expected_cash: Number(expected_cash),
+        expected_cash: serverExpectedCash,
         actual_cash: Number(actual_cash),
-        difference: Number(difference),
+        difference: Number(actual_cash) - serverExpectedCash,
         notes: notes || 'Shift Closed & Reconciled',
         status: 'closed',
       })
@@ -203,7 +330,7 @@ export async function PATCH(req: NextRequest) {
 
     if (error) throw error;
 
-    return NextResponse.json({ success: true, shift });
+    return NextResponse.json({ success: true, shift, server_expected_cash: serverExpectedCash });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

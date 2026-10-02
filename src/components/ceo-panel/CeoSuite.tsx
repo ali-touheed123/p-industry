@@ -47,7 +47,8 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
         const data = await res.json();
 
         if (data.success && Array.isArray(data.tenants) && data.tenants.length > 0) {
-          // Filter branches belonging to this CEO (same email or owner_name) or all active
+          // SECURITY: Only include branches the CEO is authorized for — same id, email, or owner_name.
+          // NEVER fall back to data.tenants (all tenants); that would be a cross-tenant data leak.
           const matchingTenants = data.tenants.filter(
             (t: any) =>
               t.id === tenant.id ||
@@ -55,7 +56,13 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
               (tenant.owner_name && t.owner_name === tenant.owner_name)
           );
 
-          const finalTenants = matchingTenants.length > 0 ? matchingTenants : data.tenants;
+          // If the API returned no authorized branches for this CEO, fall through to the
+          // safe single-branch fallback below — do NOT expose all tenants.
+          if (matchingTenants.length === 0) {
+            throw new Error('No authorized sister branches found for this CEO account.');
+          }
+
+          const finalTenants = matchingTenants;
 
           // Concurrently fetch invoices & client receivables for all sister branches
           const branchesWithKpis: Branch[] = await Promise.all(
@@ -181,6 +188,7 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
           setSelectedBranch(branch);
           setCurrentSection('overview');
         }}
+        onLogout={onLogout}
       />
     );
   }
@@ -273,7 +281,7 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
           {currentSection === 'tokens'        && <TokensView key={selectedBranch.id} branch={selectedBranch} />}
           {currentSection === 'branch-orders' && <BranchOrdersView key={selectedBranch.id} branch={selectedBranch} />}
           {currentSection === 'audit-logs'    && <AuditLogsView key={selectedBranch.id} branch={selectedBranch} />}
-          {currentSection === 'settings'      && <SettingsView tenant={tenant} />}
+          {currentSection === 'settings'      && <SettingsView tenant={selectedBranch as any} />}
         </main>
       </div>
     </div>

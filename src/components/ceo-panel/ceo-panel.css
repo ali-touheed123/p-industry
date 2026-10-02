@@ -192,3 +192,20 @@
 .ceo-root ::-webkit-scrollbar-thumb:hover {
   background: #94A3B8;
 }
+
+/* Mobile hamburger button */
+.ceo-mobile-menu-btn {
+  display: flex !important;
+  transition: all 0.15s ease;
+}
+
+.ceo-mobile-menu-btn:hover {
+  background-color: #F1F5F9 !important;
+  border-color: #CBD5E1 !important;
+}
+
+@media (min-width: 1024px) {
+  .ceo-mobile-menu-btn {
+    display: none !important;
+  }
+}

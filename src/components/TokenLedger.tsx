@@ -86,13 +86,25 @@ export default function TokenLedger({
   // Suppliers list for vendor credit settlement
   const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
 
-  // Opening Stockpile Modal State
+  // Opening Stockpile Modal State — cascading Brand → Series → Unit → Token Value
   const [showOpeningModal, setShowOpeningModal] = useState<boolean>(false);
-  const [openingBrand, setOpeningBrand] = useState<string>('Master Paints');
-  const [openingItemName, setOpeningItemName] = useState<string>('');
-  const [openingTokenCount, setOpeningTokenCount] = useState<number>(10);
-  const [openingUnitValue, setOpeningUnitValue] = useState<string>('500');
-  const [openingNotes, setOpeningNotes] = useState<string>('Safe Drawer Initial Count');
+  // brand picker
+  const [allBrands, setAllBrands] = useState<{ id: string; name: string; status: string }[]>([]);
+  const [openingBrandId, setOpeningBrandId] = useState<string>('');
+  const [openingBrandName, setOpeningBrandName] = useState<string>('');
+  // series picker
+  const [openingSeriesList, setOpeningSeriesList] = useState<{ id: string; name: string }[]>([]);
+  const [openingSeriesId, setOpeningSeriesId] = useState<string>('');
+  const [openingSeriesName, setOpeningSeriesName] = useState<string>('');
+  // unit picker
+  const [openingUnitList, setOpeningUnitList] = useState<{ unit_name: string; token_value: number }[]>([]);
+  const [openingUnitName, setOpeningUnitName] = useState<string>('');
+  const [openingTokenValue, setOpeningTokenValue] = useState<number>(0);
+  // quantity and notes
+  const [openingTokenCount, setOpeningTokenCount] = useState<number>(1);
+  const [openingNotes, setOpeningNotes] = useState<string>('Opening physical stockpile balance');
+  const [loadingOpeningSeries, setLoadingOpeningSeries] = useState<boolean>(false);
+  const [loadingOpeningUnits, setLoadingOpeningUnits] = useState<boolean>(false);
   const [submittingOpening, setSubmittingOpening] = useState<boolean>(false);
 
   // Settle with Vendor Rep Modal State
@@ -107,7 +119,9 @@ export default function TokenLedger({
   // Write-Off Modal State
   const [showWriteOffModal, setShowWriteOffModal] = useState<boolean>(false);
   const [writeOffToken, setWriteOffToken] = useState<TokenTransaction | null>(null);
-  const [writeOffReason, setWriteOffReason] = useState<string>('Company Rep Rejected');
+  const [writeOffReason, setWriteOffReason] = useState<string>('Damaged');
+  const [writeOffCustomNote, setWriteOffCustomNote] = useState<string>('');
+  const [writeOffQty, setWriteOffQty] = useState<number>(1);
   const [submittingWriteOff, setSubmittingWriteOff] = useState<boolean>(false);
 
   // Data & Loading States
@@ -122,13 +136,57 @@ export default function TokenLedger({
       .then((d) => {
         if (d.success && Array.isArray(d.suppliers)) {
           setSuppliers(d.suppliers);
-          if (d.suppliers.length > 0) {
-            setSettleSupplierId(d.suppliers[0].id);
-          }
+          if (d.suppliers.length > 0) setSettleSupplierId(d.suppliers[0].id);
         }
       })
       .catch(() => {});
   }, [tenantId]);
+
+  // Load all brands for opening stock modal
+  useEffect(() => {
+    if (!tenantId) return;
+    fetch(`/api/brands?tenant_id=${tenantId}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success && Array.isArray(d.brands)) setAllBrands(d.brands);
+      })
+      .catch(() => {});
+  }, [tenantId]);
+
+  // Load series when brand changes
+  useEffect(() => {
+    if (!openingBrandId) { setOpeningSeriesList([]); setOpeningSeriesId(''); setOpeningSeriesName(''); setOpeningUnitList([]); setOpeningUnitName(''); setOpeningTokenValue(0); return; }
+    setLoadingOpeningSeries(true);
+    fetch(`/api/brand-series?tenant_id=${tenantId}&brand_id=${openingBrandId}`)
+      .then((r) => r.json())
+      .then((d) => {
+        const list = d.series || d.brand_series || [];
+        setOpeningSeriesList(list);
+        setOpeningSeriesId('');
+        setOpeningSeriesName('');
+        setOpeningUnitList([]);
+        setOpeningUnitName('');
+        setOpeningTokenValue(0);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingOpeningSeries(false));
+  }, [openingBrandId, tenantId]);
+
+  // Load units when series changes
+  useEffect(() => {
+    if (!openingSeriesId) { setOpeningUnitList([]); setOpeningUnitName(''); setOpeningTokenValue(0); return; }
+    setLoadingOpeningUnits(true);
+    fetch(`/api/token-configs?tenant_id=${tenantId}&series_id=${openingSeriesId}&enabled_only=true`)
+      .then((r) => r.json())
+      .then((d) => {
+        const configs = d.configs || d.series_token_configs || [];
+        setOpeningUnitList(configs);
+        setOpeningUnitName('');
+        setOpeningTokenValue(0);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingOpeningUnits(false));
+  }, [openingSeriesId, tenantId]);
 
   // Fetch all token transactions for the selected period
   const fetchTokenTransactions = useCallback(async () => {
@@ -165,31 +223,38 @@ export default function TokenLedger({
   // Handlers for Opening Stock, Settle Rep, and Write-Off
   const handleSaveOpeningStock = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenantId) return;
+    if (!tenantId || !openingBrandId || !openingSeriesId || !openingUnitName || !openingTokenValue) {
+      alert('Please select Brand, Series, and Unit before saving.');
+      return;
+    }
     setSubmittingOpening(true);
     try {
       const count = Math.max(1, Number(openingTokenCount) || 1);
-      const unitVal = parseFloat(openingUnitValue) || 0;
-      const totalVal = count * unitVal;
-
       const res = await fetch('/api/tokens', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'opening_stock',
           tenant_id: tenantId,
-          brand: openingBrand,
-          item_name: openingItemName.trim() || `${openingBrand} Opening Token`,
-          token_count: count,
-          unit_token_value: unitVal,
-          token_value: totalVal,
-          notes: openingNotes.trim() || 'Opening safe stockpile balance',
+          brand_id: openingBrandId,
+          brand_name: openingBrandName,
+          series_id: openingSeriesId,
+          series_name: openingSeriesName,
+          unit_name: openingUnitName,
+          token_value: openingTokenValue, // server will verify against config
+          quantity: count,
+          notes: openingNotes.trim() || 'Opening physical stockpile balance',
         }),
       });
-
       const data = await res.json();
       if (data.success) {
         setShowOpeningModal(false);
+        // Reset form
+        setOpeningBrandId(''); setOpeningBrandName('');
+        setOpeningSeriesId(''); setOpeningSeriesName('');
+        setOpeningUnitName(''); setOpeningTokenValue(0);
+        setOpeningTokenCount(1);
+        setOpeningNotes('Opening physical stockpile balance');
         fetchTokenTransactions();
       } else {
         alert(data.error || 'Failed to record opening stock');
@@ -244,6 +309,10 @@ export default function TokenLedger({
   const handleWriteOffToken = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!tenantId || !writeOffToken) return;
+    if (writeOffReason === 'Other' && !writeOffCustomNote.trim()) {
+      alert('A custom note is required when the reason is "Other".');
+      return;
+    }
     setSubmittingWriteOff(true);
     try {
       const res = await fetch('/api/tokens', {
@@ -254,13 +323,17 @@ export default function TokenLedger({
           tenant_id: tenantId,
           token_id: writeOffToken.id,
           write_off_reason: writeOffReason,
+          write_off_quantity: writeOffQty,
+          notes: writeOffReason === 'Other' ? writeOffCustomNote.trim() : undefined,
         }),
       });
-
       const data = await res.json();
       if (data.success) {
         setShowWriteOffModal(false);
         setWriteOffToken(null);
+        setWriteOffReason('Damaged');
+        setWriteOffCustomNote('');
+        setWriteOffQty(1);
         fetchTokenTransactions();
       } else {
         alert(data.error || 'Failed to write off token');
@@ -301,12 +374,13 @@ export default function TokenLedger({
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchClient = t.client_name?.toLowerCase().includes(q);
-        const matchItem = t.item_name?.toLowerCase().includes(q);
-        const matchBrand = t.brand?.toLowerCase().includes(q);
+        const matchBrand = t.brand_name?.toLowerCase().includes(q);
+        const matchSeries = t.series_name?.toLowerCase().includes(q);
+        const matchUnit = t.unit_name?.toLowerCase().includes(q);
         const matchNotes = t.notes?.toLowerCase().includes(q);
         const matchPurchaseNo = t.purchases?.purchase_no?.toLowerCase().includes(q);
         const matchSupplierName = t.purchases?.supplier_name?.toLowerCase().includes(q);
-        if (!matchClient && !matchItem && !matchBrand && !matchNotes && !matchPurchaseNo && !matchSupplierName) {
+        if (!matchClient && !matchBrand && !matchSeries && !matchUnit && !matchNotes && !matchPurchaseNo && !matchSupplierName) {
           return false;
         }
       }
@@ -329,14 +403,15 @@ export default function TokenLedger({
     let customerIssuedCount = 0;
 
     filteredTransactions.forEach((t) => {
-      const val = Number(t.token_value || 0);
-      const count = Number(t.token_count) || 1;
-      const remCount = Number(t.remaining_count ?? count) || 1;
-      const redeemedAmt = Number(t.redeemed_amount || val || 0);
+      const txType = t.type || t.transaction_type;
+      const val = Number(t.total_amount ?? t.token_value ?? 0);
+      const count = Number(t.quantity ?? t.token_count ?? 1);
+      const remCount = Number(t.remaining_quantity ?? t.remaining_count ?? count);
+      const redeemedAmt = Number(t.total_amount ?? t.redeemed_amount ?? val);
       const isWrittenOff = t.usage_status === 'written_off';
-      const isUsed = t.usage_status === 'used' || Boolean(t.used_against_purchase_id) || Boolean(t.used_against_voucher_id);
+      const isUsed = t.usage_status === 'used' || t.usage_status === 'settled' || Boolean(t.used_against_purchase_id) || Boolean(t.used_against_voucher_id);
 
-      if (t.transaction_type === 'shop_retained' || t.transaction_type === 'redeemed' || t.transaction_type === 'opening_stock') {
+      if (txType === 'shop_retained' || txType === 'redeemed' || txType === 'opening_stock') {
         if (isWrittenOff) {
           // Excluded from available pool
         } else if (isUsed) {
@@ -348,10 +423,10 @@ export default function TokenLedger({
         }
       }
 
-      if (t.transaction_type === 'redeemed') {
+      if (txType === 'redeemed') {
         customerRedeemedValue += redeemedAmt;
         customerRedeemedCount += count;
-      } else if (t.transaction_type === 'issued') {
+      } else if (txType === 'issued') {
         customerIssuedValue += val;
         customerIssuedCount += count;
       }
@@ -372,53 +447,58 @@ export default function TokenLedger({
   // ── Stockpile Transactions (Shop-Retained + Customer-Redeemed + Opening Stock) ─
   const stockpileTransactions = useMemo(() => {
     return filteredTransactions.filter((t) => {
-      if (t.transaction_type !== 'shop_retained' && t.transaction_type !== 'redeemed' && t.transaction_type !== 'opening_stock') return false;
+      const txType = t.type || t.transaction_type;
+      if (txType !== 'shop_retained' && txType !== 'redeemed' && txType !== 'opening_stock') return false;
       const isWrittenOff = t.usage_status === 'written_off';
-      const isUsed = t.usage_status === 'used' || Boolean(t.used_against_purchase_id) || Boolean(t.used_against_voucher_id);
+      const isUsed = t.usage_status === 'used' || t.usage_status === 'settled' || Boolean(t.used_against_purchase_id) || Boolean(t.used_against_voucher_id);
       if (retainedTab === 'written_off') return isWrittenOff;
       if (retainedTab === 'used') return isUsed && !isWrittenOff;
       return !isUsed && !isWrittenOff;
     });
   }, [filteredTransactions, retainedTab]);
 
-  // Grouped Brand Breakdown for Available Stockpile
+  // Grouped 4-Part Identity Breakdown for Available Stockpile
+  // Key: brand_name | series_name | unit_name | token_value
   const availableGroupedSummary = useMemo(() => {
-    const groups: Record<
-      string,
-      { brand: string; count: number; totalValue: number }
-    > = {};
+    const groups: Record<string, {
+      brand: string; series: string; unit: string; tokenValue: number;
+      count: number; totalValue: number;
+    }> = {};
 
     filteredTransactions
-      .filter(
-        (t) =>
-          (t.transaction_type === 'shop_retained' || t.transaction_type === 'redeemed' || t.transaction_type === 'opening_stock') &&
-          t.usage_status !== 'used' &&
+      .filter((t) => {
+        const txType = t.type;
+        return (
+          (txType === 'shop_retained' || txType === 'redeemed' || txType === 'opening_stock') &&
+          t.usage_status !== 'settled' &&
           t.usage_status !== 'written_off' &&
           !t.used_against_purchase_id &&
           !t.used_against_voucher_id
-      )
+        );
+      })
       .forEach((t) => {
-        const b = t.brand || 'General';
-        if (!groups[b]) {
-          groups[b] = {
-            brand: b,
-            count: 0,
-            totalValue: 0,
-          };
+        const brand = t.brand_name || 'General';
+        const series = t.series_name || '—';
+        const unit = t.unit_name || '—';
+        const tv = Number(t.token_value) || 0;
+        const key = `${brand}|${series}|${unit}|${tv}`;
+        if (!groups[key]) {
+          groups[key] = { brand, series, unit, tokenValue: tv, count: 0, totalValue: 0 };
         }
-        groups[b].count += (Number(t.remaining_count) || Number(t.token_count) || 1);
-        groups[b].totalValue += Number(t.token_value || 0);
+        groups[key].count += Number(t.remaining_quantity ?? t.quantity ?? 1);
+        groups[key].totalValue += Number(t.total_amount ?? 0);
       });
 
-    return Object.values(groups);
+    return Object.values(groups).sort((a, b) => b.totalValue - a.totalValue);
   }, [filteredTransactions]);
 
   // ── Customer Token Activity (Issued & Redeemed) ────────────────────────────
   const customerActivityTransactions = useMemo(() => {
     return filteredTransactions.filter((t) => {
-      if (t.transaction_type === 'shop_retained') return false;
-      if (customerTypeFilter === 'issued') return t.transaction_type === 'issued';
-      if (customerTypeFilter === 'redeemed') return t.transaction_type === 'redeemed';
+      const txType = t.type || t.transaction_type;
+      if (txType === 'shop_retained') return false;
+      if (customerTypeFilter === 'issued') return txType === 'issued';
+      if (customerTypeFilter === 'redeemed') return txType === 'redeemed';
       return true;
     });
   }, [filteredTransactions, customerTypeFilter]);
@@ -436,15 +516,16 @@ export default function TokenLedger({
       'Time',
       'Transaction Type',
       'Customer / Client',
-      'Item Name',
       'Brand',
-      'Category',
+      'Series',
+      'Unit',
       'Token Value (PKR)',
-      'Redeemed (PKR)',
+      'Quantity',
+      'Remaining Qty',
+      'Total Amount (PKR)',
       'Usage Status',
       'Applied Purchase No',
       'Purchase Supplier',
-      'Used Date',
       'Notes',
     ];
 
@@ -456,17 +537,19 @@ export default function TokenLedger({
         `"${t.id}"`,
         `"${dateStr}"`,
         `"${timeStr}"`,
+        `"${t.type || '—'}"`,
         `"${t.client_name || 'Walk-in Customer'}"`,
-        `"${t.item_name || '—'}"`,
-        `"${t.brand || '—'}"`,
-        `"${t.category || '—'}"`,
-        t.token_value || 0,
-        t.redeemed_amount || 0,
-        `"${t.usage_status || (t.transaction_type === 'shop_retained' ? 'available' : 'N/A')}"`,
+        `"${t.brand_name || '—'}"`,
+        `"${t.series_name || '—'}"`,
+        `"${t.unit_name || '—'}"`,
+        Number(t.token_value) || 0,
+        Number(t.quantity) || 0,
+        Number(t.remaining_quantity) || 0,
+        Number(t.total_amount) || 0,
+        `"${t.usage_status || 'N/A'}"`,
         `"${t.purchases?.purchase_no || t.used_against_purchase_id || '—'}"`,
         `"${t.purchases?.supplier_name || '—'}"`,
-        `"${t.used_date ? t.used_date.split('T')[0] : '—'}"`,
-        `"${t.notes || ''}"`,
+        `"${(t.notes || '').replace(/"/g, '""')}"`,
       ];
     });
 
@@ -609,10 +692,12 @@ export default function TokenLedger({
           <button
             type="button"
             onClick={() => {
-              const avail = stockpileTransactions.find(t => t.usage_status !== 'used' && t.usage_status !== 'written_off');
+              const avail = stockpileTransactions.find(
+                (t) => t.usage_status !== 'settled' && t.usage_status !== 'written_off'
+              );
               if (avail) {
                 setSettleToken(avail);
-                setSettleCount(avail.remaining_count || avail.token_count || 1);
+                setSettleCount(Number(avail.remaining_quantity ?? avail.quantity ?? 1));
               }
               setShowSettleModal(true);
             }}
@@ -1094,7 +1179,7 @@ export default function TokenLedger({
             </div>
           </div>
 
-          {/* Grouped Available Breakdown Badges */}
+          {/* Grouped 4-Part Identity Breakdown Badges */}
           {retainedTab === 'available' && availableGroupedSummary.length > 0 && (
             <div
               style={{
@@ -1108,7 +1193,7 @@ export default function TokenLedger({
               }}
             >
               <span style={{ fontSize: '11px', fontWeight: 700, color: '#92400E', textTransform: 'uppercase', marginRight: '4px' }}>
-                Stockpile by Brand:
+                Stockpile Breakdown:
               </span>
               {availableGroupedSummary.map((grp, gIdx) => (
                 <div
@@ -1117,7 +1202,7 @@ export default function TokenLedger({
                     background: '#FFFFFF',
                     border: '1px solid #FDE68A',
                     borderRadius: '6px',
-                    padding: '3px 8px',
+                    padding: '3px 10px',
                     fontSize: '11px',
                     display: 'flex',
                     alignItems: 'center',
@@ -1125,8 +1210,12 @@ export default function TokenLedger({
                   }}
                 >
                   <span style={{ fontWeight: 700, color: '#0F172A' }}>{grp.brand}</span>
+                  <span style={{ color: '#64748B' }}>·</span>
+                  <span style={{ color: '#475569' }}>{grp.series}</span>
+                  <span style={{ color: '#64748B' }}>·</span>
+                  <span style={{ color: '#475569' }}>{grp.unit}</span>
                   <span style={{ fontWeight: 800, color: '#D97706', fontFamily: 'JetBrains Mono, monospace' }}>
-                    {grp.count} tokens · Rs. {grp.totalValue.toLocaleString()}
+                    Rs.{grp.tokenValue.toLocaleString()} ×{grp.count} = Rs.{grp.totalValue.toLocaleString()}
                   </span>
                 </div>
               ))}
@@ -1179,16 +1268,16 @@ export default function TokenLedger({
                       Origin
                     </th>
                     <th style={{ padding: '10px 14px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '11px', fontFamily: 'JetBrains Mono, monospace' }}>
-                      Brand &amp; Category
+                      Brand
                     </th>
                     <th style={{ padding: '10px 14px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '11px', fontFamily: 'JetBrains Mono, monospace' }}>
-                      Paint Item
+                      Series · Unit
                     </th>
                     <th style={{ padding: '10px 14px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '11px', fontFamily: 'JetBrains Mono, monospace' }}>
-                      Qty &amp; Unit
+                      Qty (Rem / Total)
                     </th>
                     <th style={{ padding: '10px 14px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', textAlign: 'right' }}>
-                      Token Credit
+                      Unit Value · Total
                     </th>
                     {retainedTab === 'used' ? (
                       <>
@@ -1230,8 +1319,8 @@ export default function TokenLedger({
                       : t.created_at ? new Date(t.created_at) : new Date();
                     const dateStr = displayDate.toISOString().split('T')[0];
                     const timeStr = displayDate.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
-                    const isRetained = t.transaction_type === 'shop_retained';
-                    const isOpening = t.transaction_type === 'opening_stock';
+                    const isRetained = (t.type || t.transaction_type) === 'shop_retained';
+                    const isOpening = (t.type || t.transaction_type) === 'opening_stock';
 
                     return (
                       <tr
@@ -1325,37 +1414,32 @@ export default function TokenLedger({
                           )}
                         </td>
 
-                        {/* Brand & Category */}
+                        {/* Brand */}
                         <td style={{ padding: '10px 14px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span style={{ fontWeight: 700, color: '#0F172A' }}>{t.brand || 'General'}</span>
-                            {t.category && (
-                              <span style={{ fontSize: '10px', background: '#F1F5F9', color: '#475569', padding: '1px 5px', borderRadius: '4px', border: '1px solid #E2E8F0' }}>
-                                {t.category}
-                              </span>
-                            )}
-                          </div>
+                          <span style={{ fontWeight: 700, color: '#0F172A' }}>{t.brand_name || '—'}</span>
                         </td>
 
-                        {/* Item Name */}
-                        <td style={{ padding: '10px 14px', color: '#334155', fontWeight: 600 }}>
-                          {t.item_name || 'Standard Paint Can'}
+                        {/* Series · Unit */}
+                        <td style={{ padding: '10px 14px' }}>
+                          <span style={{ fontWeight: 600, color: '#334155' }}>{t.series_name || '—'}</span>
+                          <span style={{ color: '#94A3B8', margin: '0 4px' }}>·</span>
+                          <span style={{ fontSize: '11px', background: '#F1F5F9', color: '#475569', padding: '1px 5px', borderRadius: '4px', border: '1px solid #E2E8F0', fontWeight: 600 }}>
+                            {t.unit_name || '—'}
+                          </span>
                         </td>
 
-                        {/* Qty & Unit Value */}
+                        {/* Qty (Remaining / Total) */}
                         <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
                           <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '11.5px', fontWeight: 700, color: '#334155' }}>
-                            {t.remaining_count !== undefined ? `${t.remaining_count} / ${t.token_count || 1}` : `${t.token_count || 1}`} pcs
+                            {Number(t.remaining_quantity ?? t.quantity ?? 0)} / {Number(t.quantity ?? 0)}
                           </span>
-                          {t.unit_token_value ? (
-                            <div style={{ fontSize: '10px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
-                              @ Rs. {Number(t.unit_token_value).toLocaleString()}
-                            </div>
-                          ) : null}
                         </td>
 
-                        {/* Token Total Value */}
+                        {/* Unit Value · Total */}
                         <td style={{ padding: '10px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '11px', color: '#64748B' }}>
+                            Rs.{Number(t.token_value || 0).toLocaleString()} each
+                          </div>
                           <span
                             style={{
                               fontFamily: 'JetBrains Mono, monospace',
@@ -1367,7 +1451,7 @@ export default function TokenLedger({
                               fontSize: '12.5px',
                             }}
                           >
-                            Rs. {Number(t.token_value || 0).toLocaleString()}
+                            Rs. {Number(t.total_amount || 0).toLocaleString()}
                           </span>
                         </td>
 
@@ -1441,7 +1525,7 @@ export default function TokenLedger({
                                   type="button"
                                   onClick={() => {
                                     setSettleToken(t);
-                                    setSettleCount(t.remaining_count || t.token_count || 1);
+                                    setSettleCount(Number(t.remaining_quantity ?? t.quantity ?? 1));
                                     setShowSettleModal(true);
                                   }}
                                   style={{
@@ -1461,6 +1545,9 @@ export default function TokenLedger({
                                   type="button"
                                   onClick={() => {
                                     setWriteOffToken(t);
+                                    setWriteOffReason('Damaged');
+                                    setWriteOffCustomNote('');
+                                    setWriteOffQty(Number(t.remaining_quantity ?? t.quantity ?? 1));
                                     setShowWriteOffModal(true);
                                   }}
                                   style={{
@@ -1649,7 +1736,7 @@ export default function TokenLedger({
                 </thead>
                 <tbody>
                   {customerActivityTransactions.map((t, idx) => {
-                    const isRedeemed = t.transaction_type === 'redeemed';
+                    const isRedeemed = (t.type || t.transaction_type) === 'redeemed';
                     const createdDate = t.created_at ? new Date(t.created_at) : new Date();
                     const dateStr = createdDate.toISOString().split('T')[0];
                     const timeStr = createdDate.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
@@ -1719,13 +1806,14 @@ export default function TokenLedger({
                           {t.client_name || 'Walk-in Customer'}
                         </td>
 
-                        {/* Item & Brand */}
+                        {/* Token Identity */}
                         <td style={{ padding: '10px 14px' }}>
-                          <div style={{ fontWeight: 600, color: '#334155' }}>
-                            {t.item_name || 'Standard Paint'}
+                          <div style={{ fontWeight: 700, color: '#334155' }}>
+                            {t.brand_name || '—'}
                           </div>
                           <div style={{ fontSize: '11px', color: '#64748B' }}>
-                            {t.brand || 'General'} {t.category ? `· ${t.category}` : ''}
+                            {[t.series_name, t.unit_name].filter(Boolean).join(' · ') || '—'}
+                            {t.token_value ? ` · Rs.${Number(t.token_value).toLocaleString()}` : ''}
                           </div>
                         </td>
 
@@ -1750,7 +1838,7 @@ export default function TokenLedger({
                                 fontSize: '12.5px',
                               }}
                             >
-                              Rs. {Number(t.redeemed_amount || t.token_value || 0).toLocaleString()}
+                              Rs. {Number(t.total_amount || t.redeemed_amount || t.token_value || 0).toLocaleString()}
                             </span>
                           ) : (
                             <span style={{ color: '#94A3B8' }}>—</span>
@@ -1788,74 +1876,113 @@ export default function TokenLedger({
             </div>
 
             <form onSubmit={handleSaveOpeningStock} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {/* Step 1: Brand */}
               <div>
                 <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
-                  Paint Brand *
+                  Brand *
                 </label>
                 <select
-                  value={openingBrand}
-                  onChange={(e) => setOpeningBrand(e.target.value)}
+                  required
+                  value={openingBrandId}
+                  onChange={(e) => {
+                    const brand = allBrands.find((b) => b.id === e.target.value);
+                    setOpeningBrandId(e.target.value);
+                    setOpeningBrandName(brand?.name || '');
+                  }}
                   style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12.5px', fontWeight: 600, color: '#0F172A' }}
                 >
-                  {['Master Paints', 'Berger Paints', 'Dulux / AkzoNobel', 'Nippon Paint', 'Brighto Paints', 'Diamond Paints', 'Happilac Paints', 'Jotun Paints', 'Gobies Paints', 'General / Other'].map((b) => (
-                    <option key={b} value={b}>{b}</option>
+                  <option value="">— Select Brand —</option>
+                  {allBrands.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}{b.status === 'inactive' ? ' (Inactive)' : ''}
+                    </option>
                   ))}
                 </select>
               </div>
 
+              {/* Step 2: Series */}
               <div>
                 <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
-                  Token Item / Description
+                  Series *
+                </label>
+                <select
+                  required
+                  value={openingSeriesId}
+                  disabled={!openingBrandId || loadingOpeningSeries}
+                  onChange={(e) => {
+                    const s = openingSeriesList.find((x) => x.id === e.target.value);
+                    setOpeningSeriesId(e.target.value);
+                    setOpeningSeriesName(s?.name || '');
+                  }}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12.5px', color: '#0F172A', background: !openingBrandId ? '#F8FAFC' : '#FFFFFF' }}
+                >
+                  <option value="">{loadingOpeningSeries ? 'Loading...' : !openingBrandId ? '— Select Brand first —' : '— Select Series —'}</option>
+                  {openingSeriesList.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Step 3: Unit */}
+              <div>
+                <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  Unit *
+                </label>
+                <select
+                  required
+                  value={openingUnitName}
+                  disabled={!openingSeriesId || loadingOpeningUnits}
+                  onChange={(e) => {
+                    const cfg = openingUnitList.find((u) => u.unit_name === e.target.value);
+                    setOpeningUnitName(e.target.value);
+                    setOpeningTokenValue(cfg?.token_value || 0);
+                  }}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12.5px', color: '#0F172A', background: !openingSeriesId ? '#F8FAFC' : '#FFFFFF' }}
+                >
+                  <option value="">{loadingOpeningUnits ? 'Loading...' : !openingSeriesId ? '— Select Series first —' : '— Select Unit —'}</option>
+                  {openingUnitList.map((u) => (
+                    <option key={u.unit_name} value={u.unit_name}>{u.unit_name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Step 4: Authoritative Token Value (read-only) */}
+              <div>
+                <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  Token Value (Rs.) — Resolved from Configuration
+                </label>
+                <div style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid #FDE68A', background: '#FFFBEB', fontFamily: 'JetBrains Mono, monospace', fontSize: '13px', fontWeight: 800, color: openingTokenValue > 0 ? '#B45309' : '#94A3B8' }}>
+                  {openingTokenValue > 0 ? `Rs. ${openingTokenValue.toLocaleString()}` : '— Select unit to see configured value —'}
+                </div>
+              </div>
+
+              {/* Step 5: Quantity */}
+              <div>
+                <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  Quantity (Token Count) *
                 </label>
                 <input
-                  type="text"
-                  value={openingItemName}
-                  onChange={(e) => setOpeningItemName(e.target.value)}
-                  placeholder="e.g. Weathercoat 16L Safe Token"
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12.5px' }}
+                  type="number"
+                  min="1"
+                  required
+                  value={openingTokenCount}
+                  onChange={(e) => setOpeningTokenCount(Math.max(1, parseInt(e.target.value) || 1))}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12.5px', fontFamily: 'JetBrains Mono, monospace' }}
                 />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <div>
-                  <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
-                    Token Count (Pcs) *
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    value={openingTokenCount}
-                    onChange={(e) => setOpeningTokenCount(Math.max(1, parseInt(e.target.value) || 1))}
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12.5px', fontFamily: 'JetBrains Mono, monospace' }}
-                  />
+              {openingTokenValue > 0 && (
+                <div style={{ padding: '10px', background: '#FEF3C7', borderRadius: '8px', border: '1px solid #FDE68A', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#92400E' }}>Total Stockpile Asset Value:</span>
+                  <span style={{ fontSize: '16px', fontWeight: 900, color: '#B45309', fontFamily: 'JetBrains Mono, monospace' }}>
+                    Rs. {(openingTokenCount * openingTokenValue).toLocaleString()}
+                  </span>
                 </div>
-
-                <div>
-                  <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
-                    Value Per Token (Rs.) *
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    value={openingUnitValue}
-                    onChange={(e) => setOpeningUnitValue(e.target.value)}
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12.5px', fontFamily: 'JetBrains Mono, monospace' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ padding: '10px', background: '#FEF3C7', borderRadius: '8px', border: '1px solid #FDE68A', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '12px', fontWeight: 700, color: '#92400E' }}>Total Stockpile Asset Value:</span>
-                <span style={{ fontSize: '16px', fontWeight: 900, color: '#B45309', fontFamily: 'JetBrains Mono, monospace' }}>
-                  Rs. {(openingTokenCount * (parseFloat(openingUnitValue) || 0)).toLocaleString()}
-                </span>
-              </div>
+              )}
 
               <div>
                 <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
-                  Storage / Safe Notes
+                  Notes (Optional)
                 </label>
                 <input
                   type="text"
@@ -1876,8 +2003,8 @@ export default function TokenLedger({
                 </button>
                 <button
                   type="submit"
-                  disabled={submittingOpening}
-                  style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', background: '#D97706', fontSize: '12px', fontWeight: 700, color: '#FFFFFF', cursor: submittingOpening ? 'not-allowed' : 'pointer' }}
+                  disabled={submittingOpening || !openingBrandId || !openingSeriesId || !openingUnitName || openingTokenValue <= 0}
+                  style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', background: '#D97706', fontSize: '12px', fontWeight: 700, color: '#FFFFFF', cursor: (submittingOpening || !openingBrandId || !openingSeriesId || !openingUnitName || openingTokenValue <= 0) ? 'not-allowed' : 'pointer', opacity: (submittingOpening || !openingBrandId || !openingSeriesId || !openingUnitName || openingTokenValue <= 0) ? 0.6 : 1 }}
                 >
                   {submittingOpening ? 'Saving...' : 'Add to Stockpile'}
                 </button>
@@ -1907,10 +2034,10 @@ export default function TokenLedger({
               {settleToken ? (
                 <div style={{ padding: '10px 12px', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
                   <div style={{ fontWeight: 800, color: '#0F172A', fontSize: '13px' }}>
-                    {settleToken.item_name || 'Paint Token'} ({settleToken.brand || 'General'})
+                    {settleToken.brand_name || '—'} · {settleToken.series_name || '—'} · {settleToken.unit_name || '—'}
                   </div>
                   <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
-                    Available: <strong style={{ color: '#0F172A' }}>{settleToken.remaining_count ?? settleToken.token_count ?? 1} pcs</strong> @ Rs. {Number(settleToken.unit_token_value || (Number(settleToken.token_value) / (settleToken.remaining_count || 1))).toLocaleString()} each
+                    Available: <strong style={{ color: '#0F172A' }}>{Number(settleToken.remaining_quantity ?? settleToken.quantity ?? 1)} pcs</strong> @ Rs. {Number(settleToken.token_value || 0).toLocaleString()} each
                   </div>
                 </div>
               ) : (
@@ -1927,13 +2054,13 @@ export default function TokenLedger({
                   <input
                     type="number"
                     min="1"
-                    max={settleToken.remaining_count || settleToken.token_count || 1}
+                    max={Number(settleToken.remaining_quantity ?? settleToken.quantity ?? 1)}
                     value={settleCount}
-                    onChange={(e) => setSettleCount(Math.min(settleToken.remaining_count || settleToken.token_count || 1, Math.max(1, parseInt(e.target.value) || 1)))}
+                    onChange={(e) => setSettleCount(Math.min(Number(settleToken.remaining_quantity ?? settleToken.quantity ?? 1), Math.max(1, parseInt(e.target.value) || 1)))}
                     style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12.5px', fontFamily: 'JetBrains Mono, monospace' }}
                   />
                   <div style={{ fontSize: '10.5px', color: '#64748B', marginTop: '3px' }}>
-                    Max available in this batch: {settleToken.remaining_count || settleToken.token_count || 1} tokens
+                    Max available in this batch: {Number(settleToken.remaining_quantity ?? settleToken.quantity ?? 1)} tokens
                   </div>
                 </div>
               )}
@@ -1998,9 +2125,9 @@ export default function TokenLedger({
 
               {settleToken && (
                 <div style={{ padding: '10px', background: '#DCFCE7', borderRadius: '8px', border: '1px solid #BBF7D0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#166534' }}>Settled Value to Claim:</span>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#166534' }}>Settlement Value:</span>
                   <span style={{ fontSize: '16px', fontWeight: 900, color: '#15803D', fontFamily: 'JetBrains Mono, monospace' }}>
-                    Rs. {(settleCount * Number(settleToken.unit_token_value || (Number(settleToken.token_value) / (settleToken.remaining_count || 1)))).toLocaleString()}
+                    Rs. {(settleCount * Number(settleToken.token_value || 0)).toLocaleString()}
                   </span>
                 </div>
               )}
@@ -2046,11 +2173,32 @@ export default function TokenLedger({
               {writeOffToken && (
                 <div style={{ padding: '10px 12px', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
                   <div style={{ fontWeight: 800, color: '#0F172A', fontSize: '13px' }}>
-                    {writeOffToken.item_name || 'Paint Token'} ({writeOffToken.brand || 'General'})
+                    {writeOffToken.brand_name || '—'} · {writeOffToken.series_name || '—'} · {writeOffToken.unit_name || '—'}
                   </div>
-                  <div style={{ fontSize: '12px', color: '#DC2626', fontWeight: 700, marginTop: '2px', fontFamily: 'JetBrains Mono, monospace' }}>
-                    Value to Discard: Rs. {Number(writeOffToken.token_value || 0).toLocaleString()}
+                  <div style={{ fontSize: '12px', color: '#475569', marginTop: '2px', fontFamily: 'JetBrains Mono, monospace' }}>
+                    Available: {Number(writeOffToken.remaining_quantity ?? writeOffToken.quantity ?? 1)} pcs @ Rs.{Number(writeOffToken.token_value || 0).toLocaleString()}
                   </div>
+                </div>
+              )}
+
+              {/* Quantity to Write Off */}
+              {writeOffToken && (
+                <div>
+                  <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                    Quantity to Write Off * (max {Number(writeOffToken.remaining_quantity ?? writeOffToken.quantity ?? 1)})
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max={Number(writeOffToken.remaining_quantity ?? writeOffToken.quantity ?? 1)}
+                    required
+                    value={writeOffQty}
+                    onChange={(e) => setWriteOffQty(Math.min(
+                      Number(writeOffToken.remaining_quantity ?? writeOffToken.quantity ?? 1),
+                      Math.max(1, parseInt(e.target.value) || 1)
+                    ))}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12.5px', fontFamily: 'JetBrains Mono, monospace' }}
+                  />
                 </div>
               )}
 
@@ -2063,13 +2211,37 @@ export default function TokenLedger({
                   onChange={(e) => setWriteOffReason(e.target.value)}
                   style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12.5px', color: '#0F172A' }}
                 >
-                  <option value="Company Rep Rejected">Company Rep Rejected</option>
-                  <option value="Torn / Scratched Barcode">Torn / Scratched Barcode</option>
-                  <option value="Promotion Campaign Expired">Promotion Campaign Expired</option>
-                  <option value="Counterfeit / Void Token">Counterfeit / Void Token</option>
-                  <option value="Physical Token Lost">Physical Token Lost</option>
+                  <option value="Damaged">Damaged</option>
+                  <option value="Lost">Lost</option>
+                  <option value="Invalid">Invalid</option>
+                  <option value="Other">Other (specify below)</option>
                 </select>
               </div>
+
+              {writeOffReason === 'Other' && (
+                <div>
+                  <label style={{ fontSize: '11.5px', fontWeight: 700, color: '#DC2626', display: 'block', marginBottom: '4px' }}>
+                    Custom Note * (required for Other)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={writeOffCustomNote}
+                    onChange={(e) => setWriteOffCustomNote(e.target.value)}
+                    placeholder="e.g. Company rep refused these specific tokens"
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #FECACA', fontSize: '12.5px', background: '#FEF2F2' }}
+                  />
+                </div>
+              )}
+
+              {writeOffToken && writeOffQty > 0 && (
+                <div style={{ padding: '8px 10px', background: '#FEE2E2', borderRadius: '6px', border: '1px solid #FECACA', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#991B1B' }}>Value to Write Off:</span>
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 800, color: '#DC2626', fontSize: '13px' }}>
+                    Rs. {(writeOffQty * Number(writeOffToken.token_value || 0)).toLocaleString()}
+                  </span>
+                </div>
+              )}
 
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '10px' }}>
                 <button
@@ -2084,7 +2256,7 @@ export default function TokenLedger({
                   disabled={submittingWriteOff}
                   style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', background: '#DC2626', fontSize: '12px', fontWeight: 700, color: '#FFFFFF', cursor: submittingWriteOff ? 'not-allowed' : 'pointer' }}
                 >
-                  {submittingWriteOff ? 'Writing off...' : 'Confirm Write-Off'}
+                  {submittingWriteOff ? 'Writing off...' : `Confirm Write-Off (×${writeOffQty})`}
                 </button>
               </div>
             </form>

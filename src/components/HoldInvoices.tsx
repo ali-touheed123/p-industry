@@ -67,15 +67,10 @@ export default function HoldInvoices({
   }, [tenantId]);
 
   // Handle Resume
-  const handleResume = async (order: HeldInvoice) => {
-    // 1. Delete from DB so it's not held anymore
-    try {
-      await fetch(`/api/held-invoices?id=${order.id}`, { method: 'DELETE' });
-    } catch (err) {
-      console.error('Failed to remove from DB on resume', err);
-    }
-
-    // 2. Trigger Resume in parent & navigate to POS
+  const handleResume = (order: HeldInvoice) => {
+    // BUG-03 FIX: Do NOT delete from DB here.
+    // The held invoice should remain in Supabase until the resumed order is actually checked out
+    // or explicitly discarded, protecting against browser crashes, tab closing, or power cuts.
     onResumeOrder(order);
   };
 
@@ -392,16 +387,23 @@ export default function HoldInvoices({
 
                       {/* Total Amount */}
                       <td style={{ padding: '16px 20px', verticalAlign: 'middle' }}>
-                        <span
-                          style={{
-                            fontSize: '14px',
-                            fontWeight: 700,
-                            color: '#0F172A',
-                            fontFamily: 'Inter, sans-serif',
-                          }}
-                        >
-                          {totalFormatted}
-                        </span>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span
+                            style={{
+                              fontSize: '14px',
+                              fontWeight: 700,
+                              color: '#0F172A',
+                              fontFamily: 'Inter, sans-serif',
+                            }}
+                          >
+                            {totalFormatted}
+                          </span>
+                          {Number(order.discount || 0) > 0 && (
+                            <span style={{ fontSize: '11px', color: '#16A34A', fontWeight: 600 }}>
+                              Discount: Rs. {Number(order.discount).toLocaleString()}
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Action Button */}
@@ -571,6 +573,11 @@ export default function HoldInvoices({
                             ({it.shadeCode})
                           </span>
                         )}
+                        {Number(it.discountPercent || it.discount_percent || 0) > 0 && (
+                          <span style={{ fontSize: '11px', color: '#16A34A', marginLeft: '6px', fontWeight: 700 }}>
+                            ({it.discountPercent || it.discount_percent}% off)
+                          </span>
+                        )}
                       </td>
                       <td style={{ padding: '8px', textAlign: 'center', fontWeight: 700 }}>
                         {it.qty}
@@ -589,18 +596,51 @@ export default function HoldInvoices({
               <div
                 style={{
                   display: 'flex',
-                  justifyContent: 'space-between',
+                  flexDirection: 'column',
+                  gap: '6px',
                   marginTop: '1rem',
                   paddingTop: '0.75rem',
                   borderTop: '1px dashed #CBD5E1',
-                  fontWeight: 800,
-                  fontSize: '14px',
+                  fontSize: '13px',
                 }}
               >
-                <span>Net Total:</span>
-                <span style={{ color: '#1D4ED8' }}>
-                  Rs. {Number(selectedPreviewOrder.net_total || 0).toLocaleString()}
-                </span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B' }}>
+                  <span>Subtotal:</span>
+                  <span>Rs. {Number(selectedPreviewOrder.subtotal || 0).toLocaleString()}</span>
+                </div>
+                {Number(selectedPreviewOrder.discount || 0) > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#16A34A', fontWeight: 600 }}>
+                    <span>Discount:</span>
+                    <span>-Rs. {Number(selectedPreviewOrder.discount || 0).toLocaleString()}</span>
+                  </div>
+                )}
+                {Number(selectedPreviewOrder.delivery_charge || 0) > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B' }}>
+                    <span>Delivery Charge:</span>
+                    <span>+Rs. {Number(selectedPreviewOrder.delivery_charge || 0).toLocaleString()}</span>
+                  </div>
+                )}
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    fontWeight: 800,
+                    fontSize: '15px',
+                    color: '#0F172A',
+                    paddingTop: '6px',
+                    borderTop: '1px solid #F1F5F9',
+                  }}
+                >
+                  <span>Net Total:</span>
+                  <span style={{ color: '#1D4ED8' }}>
+                    Rs. {Number(selectedPreviewOrder.net_total || 0).toLocaleString()}
+                  </span>
+                </div>
+                {selectedPreviewOrder.remarks && (
+                  <div style={{ fontSize: '11px', color: '#64748B', fontStyle: 'italic', marginTop: '4px' }}>
+                    Note: {selectedPreviewOrder.remarks}
+                  </div>
+                )}
               </div>
             </div>
 

@@ -79,17 +79,25 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)+/g, '');
       setSlug(generatedSlug);
+      const prefix = generatedSlug ? `${generatedSlug.replace(/-paints?|-paint-house?/g, '')}_` : '';
       if (!ceoUsername && val) {
-        setCeoUsername(`${generatedSlug.replace(/-paints?|-paint-house?/g, '')}_ceo`);
+        setCeoUsername(`${prefix}ceo`);
       }
+      setCounters(prev => {
+        if (prev.length === 1 && (prev[0].username === 'counter1' || prev[0].username.endsWith('_counter1') || prev[0].username.endsWith('_c1'))) {
+          return [{ ...prev[0], username: prefix ? `${prefix}counter1` : 'counter1' }];
+        }
+        return prev;
+      });
     }
   };
 
   const addCounter = () => {
     const nextIdx = counters.length + 1;
+    const prefix = slug ? `${slug.replace(/-paints?|-paint-house?/g, '')}_` : '';
     setCounters([
       ...counters,
-      { username: `counter${nextIdx}`, password: '123', name: `Counter 0${nextIdx} (POS Register)` }
+      { username: `${prefix}counter${nextIdx}`, password: '123', name: `Counter 0${nextIdx} (POS Register)` }
     ]);
   };
 
@@ -136,7 +144,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
           ? {
               ceoUsername: ceoUsername.trim(),
               ceoPassword: ceoPassword.trim(),
-              staffUsername: counters[0]?.username.trim() || 'counter1',
+              staffUsername: counters[0]?.username.trim().toLowerCase() || `${cleanSlug}_counter1`,
               staffPassword: counters[0]?.password.trim() || '123',
               counters: counters.map(c => ({
                 username: c.username.trim().toLowerCase(),

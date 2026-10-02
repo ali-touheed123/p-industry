@@ -29,6 +29,7 @@ import {
 } from '@/types/receipt';
 import { DevReceiptPreview, MOCK_INVOICE_DATA } from './DevReceiptPreview';
 import { DevTemplateAssignView } from './DevTemplateAssignView';
+import { printViaIframe } from '@/utils/iframePrint';
 
 interface DevReceiptTemplatesViewProps {
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
@@ -229,7 +230,7 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
     }
   };
 
-  // Test Print
+  // Test Print — uses hidden iframe to avoid popup blocker (DEV-07)
   const handleTestPrint = () => {
     const printArea = document.getElementById('designer-preview-receipt');
     if (!printArea) {
@@ -237,51 +238,38 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
       return;
     }
 
-    const printWindow = window.open('', '_blank', 'width=600,height=800');
-    if (!printWindow) {
-      window.print();
-      return;
-    }
-
     const sizeConfig = PAPER_SIZE_CONFIG[paperSize];
     const isThermal = paperSize.startsWith('thermal');
+    const pageSize = isThermal
+      ? `${sizeConfig.widthMm}mm auto`
+      : paperSize === 'a5' ? 'A5' : 'A4';
 
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Receipt Test Print - ${templateName}</title>
-          <style>
-            @page {
-              size: ${isThermal ? `${sizeConfig.widthMm}mm auto` : paperSize === 'a5' ? 'A5' : 'A4'};
-              margin: 0;
-            }
-            body {
-              margin: 0;
-              padding: 0;
-              background: #fff;
-              color: #000;
-              -webkit-print-color-adjust: exact;
-              print-color-adjust: exact;
-            }
-            .receipt-preview-container {
-              box-shadow: none !important;
-              margin: 0 auto !important;
-            }
-          </style>
-        </head>
-        <body>
-          ${printArea.outerHTML}
-          <script>
-            window.onload = function() {
-              window.print();
-              window.onafterprint = function() { window.close(); };
-            };
-          </script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
+    const htmlDoc = `<!DOCTYPE html>
+<html>
+  <head>
+    <title>Receipt Test Print - ${templateName}</title>
+    <style>
+      @page { size: ${pageSize}; margin: 0; }
+      body {
+        margin: 0;
+        padding: 0;
+        background: #fff;
+        color: #000;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .receipt-preview-container {
+        box-shadow: none !important;
+        margin: 0 auto !important;
+      }
+    </style>
+  </head>
+  <body>
+    ${printArea.outerHTML}
+  </body>
+</html>`;
+
+    printViaIframe(htmlDoc);
   };
 
   // Helper to toggle table columns

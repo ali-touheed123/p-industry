@@ -51,6 +51,8 @@ export interface Invoice {
   itemsCount: number;
   status: 'Completed' | 'Returned' | 'Partial Return';
   salesman: string;
+  register?: string;
+  shiftId?: string;
   items: InvoiceItem[];
 }
 
@@ -96,6 +98,7 @@ export interface DayCloseRecord {
     creditSales: number;
     bankCardSales: number;
     pettyExpenses: number;
+    tokenPayouts: number;
     expectedCash: number;
     actualCashCounted: number;
     varianceAmount: number;
@@ -131,6 +134,11 @@ export interface DayCloseRecord {
     amount: number;
     direction: 'more' | 'less' | 'same';
     previousShiftNetSales: number;
+  };
+  dailyCashVariance?: {
+    totalVariance: number;
+    shiftCount: number;
+    allShort: boolean;
   };
 }
 
@@ -189,9 +197,37 @@ export interface PurchaseRecord {
   totalCost: number;
   paidAmount: number;
   dueAmount: number;
-  paymentStatus: 'Paid' | 'Partial' | 'Due';
+  paymentStatus: 'Paid' | 'Partial' | 'Due' | 'Credit';
   stockReceivedQty: number;
   invoiceBillRef: string;
   receivedBy: string;
   items: PurchaseItem[];
+}
+
+export interface SupplierTransaction {
+  id: string;
+  date: string;
+  time?: string;
+  type: 'PO' | 'PMT';
+  ref: string;
+  description: string;
+  debit: number;
+  credit: number;
+  balanceAfter: number;
+  paymentMode?: string;
+}
+
+export interface CeoSupplier {
+  id: string;
+  name: string;
+  code?: string;
+  phone?: string;
+  city?: string;
+  address?: string;
+  category?: string;
+  current_balance: number;
+  totalPurchases: number;
+  totalPaid: number;
+  poCount: number;
+  transactions: SupplierTransaction[];
 }

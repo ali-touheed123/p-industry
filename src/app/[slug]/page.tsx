@@ -13,6 +13,7 @@ import HoldInvoices from '@/components/HoldInvoices';
 import PurchasesView from '@/components/PurchasesView';
 import BranchOrders from '@/components/BranchOrders';
 import TokenLedger from '@/components/TokenLedger';
+import TokenManagementView from '@/components/TokenManagementView';
 
 import {
   ShoppingCart,
@@ -40,6 +41,7 @@ import {
   PackagePlus,
   RefreshCw,
   Coins,
+  Sliders,
 } from 'lucide-react';
 
 interface PageProps {
@@ -60,12 +62,14 @@ export default function TenantAppPage({ params }: PageProps) {
   const [loginRoleTab, setLoginRoleTab] = useState<'staff' | 'ceo'>('staff');
   const [loginError, setLoginError] = useState('');
   const [activeTab, setActiveTab] = useState<
-    'pos' | 'inventory' | 'purchases' | 'sales' | 'customers' | 'returns' | 'orders' | 'hold_invoices' | 'credit_recovery' | 'reports' | 'day_close' | 'stock' | 'ledgers' | 'credit' | 'shift' | 'ceo_reports' | 'tokens'
+    'pos' | 'inventory' | 'purchases' | 'sales' | 'customers' | 'returns' | 'orders' | 'hold_invoices' | 'credit_recovery' | 'reports' | 'day_close' | 'stock' | 'ledgers' | 'credit' | 'shift' | 'ceo_reports' | 'tokens' | 'token_management'
   >('pos');
   const [pendingOrdersCount, setPendingOrdersCount] = useState<number>(0);
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
   const [showOpenShiftModal, setShowOpenShiftModal] = useState(false);
   const [openingCashInput, setOpeningCashInput] = useState('');
+  const [shiftOpening, setShiftOpening] = useState(false);
+  const [shiftOpenError, setShiftOpenError] = useState<string | null>(null);
   const [lastClosedShift, setLastClosedShift] = useState<any | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
@@ -112,6 +116,29 @@ export default function TenantAppPage({ params }: PageProps) {
     fetchTenant();
   }, [slug]);
 
+  const refreshItems = async (explicitTenantId?: string) => {
+    const tid = explicitTenantId || tenant?.id;
+    if (!tid) return;
+    if (typeof window !== 'undefined' && !navigator.onLine) return;
+    try {
+      const itemsRes = await fetch(`/api/items?tenant_id=${tid}`);
+      if (!itemsRes.ok) return;
+      const itemsData = await itemsRes.json();
+      if (itemsData && itemsData.success) {
+        setItems(itemsData.items || []);
+      }
+    } catch {
+      // Silently ignore transient offline fetch failures
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {}
+    setCurrentUser(null);
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
@@ -126,8 +153,9 @@ export default function TenantAppPage({ params }: PageProps) {
         setLoginError(data.error || 'Invalid credentials');
       } else {
         setCurrentUser(data.user);
+        const targetTenantId = tenant?.id || data.user.tenant?.id || data.user.tenant_id || slug;
+        await refreshItems(targetTenantId);
         if (data.user.role !== 'ceo' && data.user.role !== 'developer') {
-          const targetTenantId = tenant?.id || data.user.tenant?.id || data.user.tenant_id || slug;
           if (!activeShift) {
             // Fetch last closed shift for handover display
             try {
@@ -157,6 +185,8 @@ export default function TenantAppPage({ params }: PageProps) {
 
   const handleOpenShift = async () => {
     if (!tenant) return;
+    setShiftOpening(true);
+    setShiftOpenError(null);
 
     // Defensively ensure lastClosedShift is available if previous shifts exist
     let currentLastClosed = lastClosedShift;
@@ -195,31 +225,18 @@ export default function TenantAppPage({ params }: PageProps) {
       if (data.success && data.shift) {
         setActiveShift(data.shift);
         setLastClosedShift(null);
+        setShowOpenShiftModal(false);
       } else {
-        setActiveShift({
-          id: Date.now().toString(),
-          tenant_id: tenant.id,
-          staff_id: currentUser?.id,
-          opening_cash: openingAmt,
-          previous_closing_cash: prevClosing,
-          handover_variance: handoverVariance,
-          status: 'open',
-          opened_at: new Date().toISOString(),
-        });
+        // BUG-05 FIX: Never generate fictitious Date.now() mock shift on failure.
+        // Keep modal open and display explicit retry alert to prevent orphaned transactions.
+        setShiftOpenError(data.error || 'Server rejected shift creation. Please retry.');
       }
-    } catch {
-      setActiveShift({
-        id: Date.now().toString(),
-        tenant_id: tenant.id,
-        staff_id: currentUser?.id,
-        opening_cash: openingAmt,
-        previous_closing_cash: prevClosing,
-        handover_variance: handoverVariance,
-        status: 'open',
-        opened_at: new Date().toISOString(),
-      });
+    } catch (err: any) {
+      // BUG-05 FIX: Never generate fictitious mock shift on network failure.
+      setShiftOpenError(`Network error connecting to shift server: ${err?.message || 'Check connection and retry'}`);
+    } finally {
+      setShiftOpening(false);
     }
-    setShowOpenShiftModal(false);
   };
 
   const fetchPendingOrdersCount = async () => {
@@ -246,20 +263,7 @@ export default function TenantAppPage({ params }: PageProps) {
     }
   }, [tenant?.id, currentUser?.username]);
 
-  const refreshItems = async () => {
-    if (!tenant?.id) return;
-    if (typeof window !== 'undefined' && !navigator.onLine) return;
-    try {
-      const itemsRes = await fetch(`/api/items?tenant_id=${tenant.id}`);
-      if (!itemsRes.ok) return;
-      const itemsData = await itemsRes.json();
-      if (itemsData && itemsData.success) {
-        setItems(itemsData.items || []);
-      }
-    } catch {
-      // Silently ignore transient offline fetch failures
-    }
-  };
+
 
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
 
@@ -419,7 +423,10 @@ export default function TenantAppPage({ params }: PageProps) {
         slug={tenant.slug}
         todaySales={totalSales}
         auditLogs={auditLogs}
-        onLogout={() => {
+        onLogout={async () => {
+          try {
+            await fetch('/api/auth/logout', { method: 'POST' });
+          } catch {}
           if (currentUser?.role === 'ceo') {
             setCurrentUser(null);
           } else {
@@ -436,9 +443,10 @@ export default function TenantAppPage({ params }: PageProps) {
     { id: 'inventory',       label: 'Inventory',         icon: Boxes },
     { id: 'purchases',       label: 'Purchases',         icon: ShoppingBag },
     { id: 'sales',           label: 'Sales',             icon: TrendingUp },
-    { id: 'customers',       label: 'Customers',         icon: Users },
-    { id: 'tokens',          label: 'Tokens',            icon: Coins },
-    { id: 'orders',          label: 'Branch Orders',     icon: PackagePlus, badgeCount: pendingOrdersCount },
+    { id: 'customers',        label: 'Customers',         icon: Users },
+    { id: 'tokens',           label: 'Tokens',            icon: Coins },
+    { id: 'token_management', label: 'Token Config',      icon: Sliders },
+    { id: 'orders',           label: 'Branch Orders',     icon: PackagePlus, badgeCount: pendingOrdersCount },
     { id: 'hold_invoices',   label: 'Hold Invoices',     icon: PauseCircle },
     { id: 'credit_recovery', label: 'Credit & Recovery', icon: Scale },
     { id: 'day_close',       label: 'Day Close',         icon: CalendarCheck },
@@ -561,7 +569,7 @@ export default function TenantAppPage({ params }: PageProps) {
                   </span>
                 </div>
                 <button
-                  onClick={() => setCurrentUser(null)}
+                  onClick={handleLogout}
                   style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', padding: 0 }}
                   title="Logout Session"
                 >
@@ -574,7 +582,7 @@ export default function TenantAppPage({ params }: PageProps) {
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
               <span style={{ width: '8px', height: '8px', background: '#16a34a', borderRadius: '50%' }} title="Terminal Online" />
               <button
-                onClick={() => setCurrentUser(null)}
+                onClick={handleLogout}
                 style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '4px' }}
                 title="Logout"
               >
@@ -756,6 +764,12 @@ export default function TenantAppPage({ params }: PageProps) {
               onNavigateToPos={() => setActiveTab('pos')}
             />
           )}
+          {activeTab === 'token_management' && (
+            <TokenManagementView
+              tenantId={tenant.id}
+              tenantName={tenant.name}
+            />
+          )}
           {(activeTab === 'credit_recovery' || activeTab === 'credit') && (
             <ClientCreditRecovery
               tenantId={tenant.id}
@@ -776,7 +790,7 @@ export default function TenantAppPage({ params }: PageProps) {
               totalSales={totalSales}
               onAddExpense={exp => setExpenses(p => [exp, ...p])}
               onShiftClosed={closedShift => {
-                setActiveShift(null);
+                setActiveShift(closedShift as any);
               }}
               onLogout={() => {
                 setCurrentUser(null);
@@ -875,15 +889,43 @@ export default function TenantAppPage({ params }: PageProps) {
                 </div>
               )}
 
-              {isShort && !isFirstShift && openingCashInput !== '' && (
-                <div style={{ marginBottom: '1rem', padding: '8px 12px', background: 'rgba(239,68,68,0.06)', borderRadius: 'var(--radius-sm)', fontSize: '11px', color: '#DC2626', border: '1px solid rgba(239,68,68,0.2)' }}>
-                  ⚠️ Yeh Rs. {Math.abs(liveVariance).toLocaleString()} ka farq CEO report mein <strong>Handover Variance</strong> ke tor par record hoga.
+              {shiftOpenError && (
+                <div style={{
+                  marginBottom: '1rem',
+                  padding: '10px 12px',
+                  background: '#FEF2F2',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: '12px',
+                  color: '#991B1B',
+                  border: '1px solid #FCA5A5',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: 18, color: '#DC2626' }}>error</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700 }}>Shift Open Failed</div>
+                    <div>{shiftOpenError}</div>
+                  </div>
                 </div>
               )}
 
-              <button onClick={handleOpenShift} className="btn btn-primary btn-lg btn-full">
-                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>lock_open</span>
-                {isShort && !isFirstShift ? `Shift Open Karo (${Math.abs(liveVariance).toLocaleString()} short noted)` : 'Shift Open & POS Unlock'}
+              <button
+                onClick={handleOpenShift}
+                disabled={shiftOpening}
+                className="btn btn-primary btn-lg btn-full"
+                style={{ opacity: shiftOpening ? 0.7 : 1, cursor: shiftOpening ? 'not-allowed' : 'pointer' }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+                  {shiftOpening ? 'sync' : 'lock_open'}
+                </span>
+                {shiftOpening
+                  ? 'Connecting to Server...'
+                  : shiftOpenError
+                  ? 'Retry Opening Shift'
+                  : isShort && !isFirstShift
+                  ? `Shift Open Karo (${Math.abs(liveVariance).toLocaleString()} short noted)`
+                  : 'Shift Open & POS Unlock'}
               </button>
             </div>
           </div>

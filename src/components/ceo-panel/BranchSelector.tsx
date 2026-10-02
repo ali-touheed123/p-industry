@@ -8,9 +8,10 @@ import { ChevronRight, ShieldCheck, MapPin } from 'lucide-react';
 interface BranchSelectorProps {
   branches: Branch[];
   onSelectBranch: (branch: Branch) => void;
+  onLogout?: () => void;
 }
 
-export const BranchSelector: React.FC<BranchSelectorProps> = ({ branches, onSelectBranch }) => {
+export const BranchSelector: React.FC<BranchSelectorProps> = ({ branches, onSelectBranch, onLogout }) => {
   return (
     <div
       id="branch-selector-screen"
@@ -42,6 +43,28 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({ branches, onSele
               <span style={{ width: '8px', height: '8px', borderRadius: '9999px', backgroundColor: '#34D399' }} />
               <span>{branches.length} Operational Hubs Online</span>
             </div>
+            {onLogout && (
+              <button
+                type="button"
+                onClick={onLogout}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '6px 14px',
+                  borderRadius: '6px',
+                  border: '1px solid #CBD5E1',
+                  backgroundColor: '#FFFFFF',
+                  color: '#475569',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+                title="Logout Session"
+              >
+                Logout
+              </button>
+            )}
           </div>
         </div>
       </header>

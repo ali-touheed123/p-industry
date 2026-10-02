@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
-import { Client, Item } from '@/types';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { Client, Brand, BrandSeries, SeriesTokenConfig } from '@/types';
 import {
   Ticket,
   Search,
@@ -15,8 +15,44 @@ import {
   ArrowRight,
   Receipt,
   FileText,
-  Package,
+  Plus,
+  Trash2,
+  Layers,
+  Building2,
+  Tag,
+  DollarSign,
 } from 'lucide-react';
+
+interface RedemptionLine {
+  id: string;
+  brandId: string;
+  brandName: string;
+  seriesId: string;
+  seriesName: string;
+  unitName: string;
+  tokenValue: number;
+  quantity: number;
+  lineTotal: number;
+}
+
+interface CompletedRedemption {
+  id: string;
+  redemptionNo: string;
+  clientName: string;
+  totalTokens: number;
+  totalAmount: number;
+  date: string;
+  notes?: string;
+  shiftId?: string;
+  items: Array<{
+    brandName: string;
+    seriesName: string;
+    unitName: string;
+    tokenValue: number;
+    quantity: number;
+    lineTotal: number;
+  }>;
+}
 
 interface Props {
   isOpen: boolean;
@@ -26,7 +62,7 @@ interface Props {
   shiftId?: string;
   staffName?: string;
   clients?: Client[];
-  items?: Item[];
+  items?: any[];
   onRedeemed?: () => void;
 }
 
@@ -38,49 +74,42 @@ export default function TokenRedemption({
   shiftId,
   staffName = 'Cashier',
   clients = [],
-  items = [],
+  items,
   onRedeemed,
 }: Props) {
+  // ── Customer Selection State ─────────────────────────────────────────────
   const [customerMode, setCustomerMode] = useState<'registered' | 'walkin'>('registered');
   const [clientSearch, setClientSearch] = useState<string>('');
   const [selectedClientId, setSelectedClientId] = useState<string>('');
   const [walkinName, setWalkinName] = useState<string>('');
+  const [showClientDropdown, setShowClientDropdown] = useState<boolean>(false);
 
-  // ── Item selector state ──────────────────────────────────────────────────
-  const [itemSearch, setItemSearch] = useState<string>('');
-  const [selectedItemId, setSelectedItemId] = useState<string>('');
-  const [itemRedeemableBalance, setItemRedeemableBalance] = useState<number | null>(null);
-  const [loadingItemBalance, setLoadingItemBalance] = useState<boolean>(false);
+  // ── Brand / Series / Unit Hierarchy State ────────────────────────────────
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [loadingBrands, setLoadingBrands] = useState<boolean>(false);
+  const [selectedBrandId, setSelectedBrandId] = useState<string>('');
 
-  const [redeemAmount, setRedeemAmount] = useState<string>('');
+  const [seriesList, setSeriesList] = useState<BrandSeries[]>([]);
+  const [loadingSeries, setLoadingSeries] = useState<boolean>(false);
+  const [selectedSeriesId, setSelectedSeriesId] = useState<string>('');
+
+  const [selectedUnitName, setSelectedUnitName] = useState<string>('');
+  const [lineQuantity, setLineQuantity] = useState<number>(1);
+
+  // ── Redemption Lines Table ───────────────────────────────────────────────
+  const [lines, setLines] = useState<RedemptionLine[]>([]);
   const [notes, setNotes] = useState<string>('');
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Loose / External Brand Token State
-  const [isLooseToken, setIsLooseToken] = useState<boolean>(false);
-  const [looseBrand, setLooseBrand] = useState<string>('Master Paints');
-  const [looseItemName, setLooseItemName] = useState<string>('');
-  const [looseTokenCount, setLooseTokenCount] = useState<number>(1);
-  const [looseUnitValue, setLooseUnitValue] = useState<string>('500');
+  // ── Success State ────────────────────────────────────────────────────────
+  const [completedRedemption, setCompletedRedemption] = useState<CompletedRedemption | null>(null);
 
-  // Success Voucher State
-  const [completedTxn, setCompletedTxn] = useState<{
-    id: string;
-    clientName: string;
-    itemName: string;
-    amount: number;
-    remainingBalance: number;
-    date: string;
-    notes?: string;
-  } | null>(null);
-
-  // ── Computed: selected client ────────────────────────────────────────────
+  // ── Customer Resolution ──────────────────────────────────────────────────
   const selectedClient = useMemo(() => {
     return clients.find((c) => c.id === selectedClientId) || null;
   }, [clients, selectedClientId]);
 
-  // Filtered clients for searchable dropdown
   const filteredClients = useMemo(() => {
     if (!clientSearch.trim()) return clients.slice(0, 15);
     const q = clientSearch.toLowerCase();
@@ -94,237 +123,404 @@ export default function TokenRedemption({
       .slice(0, 15);
   }, [clients, clientSearch]);
 
-  // ── Computed: selected item ──────────────────────────────────────────────
-  const selectedItem = useMemo(() => {
-    return items.find((it) => it.id === selectedItemId) || null;
-  }, [items, selectedItemId]);
-
-  // Filtered items — default view shows token-enabled items first
-  const filteredItems = useMemo(() => {
-    if (!itemSearch.trim()) return items.filter((it) => it.has_token).slice(0, 15);
-    const q = itemSearch.toLowerCase();
-    return items
-      .filter(
-        (it) =>
-          it.name.toLowerCase().includes(q) ||
-          (it.brand && it.brand.toLowerCase().includes(q)) ||
-          (it.code && it.code.toLowerCase().includes(q))
-      )
-      .slice(0, 15);
-  }, [items, itemSearch]);
-
-  const clientTokenBalance = Number((selectedClient as any)?.token_balance || 0);
-
-  // Effective cap: if loose token, cap is client balance (if registered); otherwise check item redeemable balance
-  const effectiveCap: number | undefined =
-    isLooseToken
-      ? customerMode === 'registered' && selectedClient
-        ? clientTokenBalance
-        : undefined
-      : itemRedeemableBalance !== null
-      ? customerMode === 'registered' && selectedClient
-        ? Math.min(itemRedeemableBalance, clientTokenBalance)
-        : itemRedeemableBalance
-      : undefined;
-
-  // NaN-safe parse: handles '', '-', '5.' without showing NaN anywhere
-  const parsedRedeemAmount =
-    redeemAmount === '' || redeemAmount === '-' ? 0 : parseFloat(redeemAmount) || 0;
-
-  const remainingBalanceAfter =
-    customerMode === 'registered' ? Math.max(0, clientTokenBalance - parsedRedeemAmount) : 0;
-
-  const amountExceedsCap =
-    effectiveCap !== undefined && parsedRedeemAmount > 0 && parsedRedeemAmount > effectiveCap;
-
-  const isSubmitDisabled =
-    submitting ||
-    parsedRedeemAmount <= 0 ||
-    amountExceedsCap ||
-    (!isLooseToken && (!selectedItemId || loadingItemBalance)) ||
-    (customerMode === 'registered' && !selectedClientId);
-
-  // ── Fetch per-item redeemable balance from server ────────────────────────
-  useEffect(() => {
-    if (!selectedItemId || !tenantId) {
-      setItemRedeemableBalance(null);
-      return;
-    }
-    setLoadingItemBalance(true);
-    fetch(`/api/tokens?tenant_id=${tenantId}&item_id=${selectedItemId}&summary=redeemable`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success) {
-          setItemRedeemableBalance(Number(data.redeemable_balance ?? 0));
-        } else {
-          setItemRedeemableBalance(0);
+  // ── Fetch Brands on open ─────────────────────────────────────────────────
+  const fetchBrands = useCallback(async () => {
+    if (!tenantId) return;
+    setLoadingBrands(true);
+    try {
+      const res = await fetch(`/api/brands?tenant_id=${tenantId}`);
+      const data = await res.json();
+      if (data.success) {
+        const active = (data.brands || []).filter((b: Brand) => b.status === 'active');
+        setBrands(active);
+        if (active.length > 0 && !selectedBrandId) {
+          setSelectedBrandId(active[0].id);
         }
-      })
-      .catch(() => setItemRedeemableBalance(0))
-      .finally(() => setLoadingItemBalance(false));
-  }, [selectedItemId, tenantId]);
+      }
+    } catch (err) {
+      console.error('Failed to fetch brands for token redemption:', err);
+    } finally {
+      setLoadingBrands(false);
+    }
+  }, [tenantId, selectedBrandId]);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (isOpen) {
+      fetchBrands();
+    }
+  }, [isOpen, fetchBrands]);
 
-  // ── Handlers ─────────────────────────────────────────────────────────────
-  const handleSelectClient = (client: Client) => {
-    setSelectedClientId(client.id);
-    setClientSearch(client.name);
+  // ── Fetch Series when selected Brand changes ─────────────────────────────
+  const fetchSeries = useCallback(async (brandId: string) => {
+    if (!tenantId || !brandId) {
+      setSeriesList([]);
+      setSelectedSeriesId('');
+      setSelectedUnitName('');
+      return;
+    }
+    setLoadingSeries(true);
+    try {
+      const res = await fetch(`/api/brand-series?tenant_id=${tenantId}&brand_id=${brandId}`);
+      const data = await res.json();
+      if (data.success) {
+        const active = (data.series || []).filter((s: BrandSeries) => s.status === 'active');
+        setSeriesList(active);
+        if (active.length > 0) {
+          setSelectedSeriesId(active[0].id);
+        } else {
+          setSelectedSeriesId('');
+          setSelectedUnitName('');
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch series for brand:', err);
+    } finally {
+      setLoadingSeries(false);
+    }
+  }, [tenantId]);
+
+  useEffect(() => {
+    if (selectedBrandId) {
+      fetchSeries(selectedBrandId);
+    }
+  }, [selectedBrandId, fetchSeries]);
+
+  // ── Selected Series & Available Enabled Units ─────────────────────────────
+  const currentSeries = useMemo(() => {
+    return seriesList.find((s) => s.id === selectedSeriesId) || null;
+  }, [seriesList, selectedSeriesId]);
+
+  const availableUnits = useMemo(() => {
+    if (!currentSeries || !currentSeries.series_token_configs) return [];
+    return currentSeries.series_token_configs.filter(
+      (c: SeriesTokenConfig) => Boolean(c.is_enabled) && Number(c.token_value) > 0
+    );
+  }, [currentSeries]);
+
+  // Auto-select first available configured unit when series changes
+  useEffect(() => {
+    if (availableUnits.length > 0) {
+      const existing = availableUnits.find((u) => u.unit_name === selectedUnitName);
+      if (!existing) {
+        setSelectedUnitName(availableUnits[0].unit_name);
+      }
+    } else {
+      setSelectedUnitName('');
+    }
+  }, [availableUnits, selectedUnitName]);
+
+  // Read-only Token Value for current selection
+  const currentConfig = useMemo(() => {
+    return availableUnits.find((u) => u.unit_name === selectedUnitName) || null;
+  }, [availableUnits, selectedUnitName]);
+
+  const currentTokenValue = currentConfig ? Number(currentConfig.token_value) : 0;
+  const currentLineTotal = currentTokenValue * Math.max(1, lineQuantity);
+
+  // ── Totals ───────────────────────────────────────────────────────────────
+  const totalTokens = useMemo(() => lines.reduce((s, l) => s + l.quantity, 0), [lines]);
+  const totalAmount = useMemo(() => lines.reduce((s, l) => s + l.lineTotal, 0), [lines]);
+
+  // ── Add Line to Redemption ───────────────────────────────────────────────
+  const handleAddLine = () => {
     setErrorMsg(null);
+    if (!selectedBrandId || !selectedSeriesId || !selectedUnitName || currentTokenValue <= 0) {
+      setErrorMsg('Please select a valid Brand, Series, and configured Unit.');
+      return;
+    }
+    const qty = Math.floor(Number(lineQuantity) || 0);
+    if (qty <= 0) {
+      setErrorMsg('Quantity must be at least 1.');
+      return;
+    }
+
+    const currentBrand = brands.find((b) => b.id === selectedBrandId);
+    if (!currentBrand || !currentSeries || !currentConfig) return;
+
+    // Check if matching Brand + Series + Unit already exists in lines
+    const existingIdx = lines.findIndex(
+      (l) => l.brandId === currentBrand.id && l.seriesId === currentSeries.id && l.unitName === currentConfig.unit_name
+    );
+
+    if (existingIdx >= 0) {
+      // Increment existing line's quantity
+      const updated = [...lines];
+      const ex = updated[existingIdx];
+      const newQty = ex.quantity + qty;
+      updated[existingIdx] = {
+        ...ex,
+        quantity: newQty,
+        lineTotal: ex.tokenValue * newQty,
+      };
+      setLines(updated);
+    } else {
+      // Add new line
+      const newLine: RedemptionLine = {
+        id: `line-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        brandId: currentBrand.id,
+        brandName: currentBrand.name,
+        seriesId: currentSeries.id,
+        seriesName: currentSeries.name,
+        unitName: currentConfig.unit_name,
+        tokenValue: currentTokenValue,
+        quantity: qty,
+        lineTotal: currentTokenValue * qty,
+      };
+      setLines((prev) => [...prev, newLine]);
+    }
+
+    // Reset line quantity to 1 for quick next add
+    setLineQuantity(1);
   };
 
-  const handleSelectItem = (item: Item) => {
-    setSelectedItemId(item.id);
-    setItemSearch(item.name + (item.brand ? ` — ${item.brand}` : ''));
-    setRedeemAmount('');
-    setErrorMsg(null);
+  const handleUpdateLineQuantity = (lineId: string, newQty: number) => {
+    const qty = Math.floor(newQty);
+    if (qty <= 0) {
+      handleRemoveLine(lineId);
+      return;
+    }
+    setLines((prev) =>
+      prev.map((l) => (l.id === lineId ? { ...l, quantity: qty, lineTotal: l.tokenValue * qty } : l))
+    );
   };
 
-  const handleRedeem = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg(null);
+  const handleRemoveLine = (lineId: string) => {
+    setLines((prev) => prev.filter((l) => l.id !== lineId));
+  };
 
+  // ── Submit Atomic Redemption ─────────────────────────────────────────────
+  const handleSubmit = async () => {
+    setErrorMsg(null);
     if (!tenantId) {
-      setErrorMsg('Tenant ID missing.');
+      setErrorMsg('Tenant ID is required.');
       return;
     }
-
-    // Item is mandatory if not loose token
-    if (!isLooseToken && (!selectedItemId || !selectedItem)) {
-      setErrorMsg('Please select the paint item whose token is being redeemed, or toggle "Accept Loose / External Brand Token".');
+    if (lines.length === 0) {
+      setErrorMsg('Please add at least one token redemption line.');
       return;
     }
-
-    if (parsedRedeemAmount <= 0) {
-      setErrorMsg('Please enter a valid redemption amount greater than 0.');
+    if (totalAmount <= 0) {
+      setErrorMsg('Total payout amount must be greater than zero.');
       return;
     }
-
-    // Per-item redeemable balance check (client-side guard — skipped if loose/external)
-    if (!isLooseToken && itemRedeemableBalance !== null) {
-      if (itemRedeemableBalance <= 0) {
-        setErrorMsg(`All tokens for "${selectedItem?.name}" have already been redeemed. Toggle "Accept Loose / External Brand Token" if accepting an older or non-system token.`);
-        return;
-      }
-      if (parsedRedeemAmount > itemRedeemableBalance) {
-        setErrorMsg(
-          `Only Rs. ${itemRedeemableBalance.toLocaleString()} left to redeem for "${selectedItem?.name}".`
-        );
-        return;
-      }
-    }
-
-    if (customerMode === 'registered') {
-      if (!selectedClient) {
-        setErrorMsg('Please select a registered customer.');
-        return;
-      }
-      if (parsedRedeemAmount > clientTokenBalance) {
-        setErrorMsg(
-          `Redemption amount (Rs. ${parsedRedeemAmount.toLocaleString()}) exceeds customer balance (Rs. ${clientTokenBalance.toLocaleString()}).`
-        );
-        return;
-      }
+    if (customerMode === 'registered' && !selectedClientId) {
+      setErrorMsg('Please select a registered customer/contractor, or switch to Walk-in Customer.');
+      return;
     }
 
     setSubmitting(true);
-
     try {
-      const resolvedItemName = isLooseToken
-        ? (looseItemName.trim() || `${looseBrand} Token`)
-        : selectedItem!.name;
-      const resolvedBrand = isLooseToken ? looseBrand : (selectedItem?.brand || null);
-
       const payload = {
-        type: 'redeemed',
         tenant_id: tenantId,
-        client_id: customerMode === 'registered' ? selectedClient?.id : null,
+        client_id: customerMode === 'registered' ? selectedClientId : null,
         client_name:
           customerMode === 'registered'
-            ? selectedClient?.name
+            ? selectedClient?.name || 'Registered Customer'
             : walkinName.trim() || 'Walk-in Customer',
-        item_id: isLooseToken ? (selectedItemId || null) : selectedItemId,
-        item_name: resolvedItemName,
-        brand: resolvedBrand,
-        redeemed_amount: parsedRedeemAmount,
-        token_count: isLooseToken ? Math.max(1, looseTokenCount) : 1,
-        unit_token_value: isLooseToken ? (parseFloat(looseUnitValue) || (parsedRedeemAmount / looseTokenCount)) : parsedRedeemAmount,
-        allow_external: isLooseToken,
-        is_external: isLooseToken,
         shift_id: shiftId || null,
-        notes: notes.trim()
-          ? `${notes.trim()}${isLooseToken ? ' (Loose / External Token)' : ''}`
-          : (isLooseToken ? 'Loose / External Token' : undefined),
+        created_by: staffName,
+        notes: notes.trim() || null,
+        payout_method: 'cash',
+        lines: lines.map((l) => ({
+          brand_id: l.brandId,
+          brand_name: l.brandName,
+          series_id: l.seriesId,
+          series_name: l.seriesName,
+          unit_name: l.unitName,
+          quantity: l.quantity,
+        })),
       };
 
-      const res = await fetch('/api/tokens', {
+      const res = await fetch('/api/token-redemptions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
       const data = await res.json();
-
-      if (!data.success) {
-        setErrorMsg(data.error || 'Failed to redeem token');
-        setSubmitting(false);
-        return;
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to process token redemption');
       }
 
-      setCompletedTxn({
-        id: data.transaction?.id || 'TXN-' + Date.now(),
-        clientName:
-          customerMode === 'registered'
-            ? selectedClient?.name || 'Customer'
-            : walkinName.trim() || 'Walk-in Customer',
-        itemName: resolvedItemName,
-        amount: parsedRedeemAmount,
-        remainingBalance: data.remaining_balance ?? remainingBalanceAfter,
-        date: new Date().toLocaleString(),
-        notes: notes.trim() || undefined,
+      // Success
+      setCompletedRedemption({
+        id: data.redemption?.id || data.redemption_id,
+        redemptionNo: data.redemption_no || data.redemption?.redemption_no || 'RDM-CONFIRMED',
+        clientName: payload.client_name,
+        totalTokens: data.total_tokens || totalTokens,
+        totalAmount: data.total_amount || totalAmount,
+        date: new Date().toLocaleString('en-PK', {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        }),
+        notes: payload.notes || undefined,
+        shiftId: shiftId || undefined,
+        items: lines.map((l) => ({
+          brandName: l.brandName,
+          seriesName: l.seriesName,
+          unitName: l.unitName,
+          tokenValue: l.tokenValue,
+          quantity: l.quantity,
+          lineTotal: l.lineTotal,
+        })),
       });
 
-      onRedeemed?.();
+      if (onRedeemed) {
+        onRedeemed();
+      }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Network error processing redemption');
+      console.error('Token redemption error:', err);
+      setErrorMsg(err.message || 'Error executing atomic token redemption');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handlePrintVoucher = () => {
-    window.print();
+  // ── Thermal Slip Printing ─────────────────────────────────────────────────
+  const handlePrintSlip = () => {
+    if (!completedRedemption) return;
+    const slipEl = document.getElementById('token-redemption-slip');
+    if (!slipEl) return;
+
+    const printWin = window.open('', '_blank', 'width=380,height=600');
+    if (!printWin) {
+      window.print();
+      return;
+    }
+
+    printWin.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Redemption Voucher - ${completedRedemption.redemptionNo}</title>
+          <style>
+            @page { margin: 0; size: 80mm auto; }
+            body {
+              font-family: 'Courier New', Courier, monospace;
+              width: 72mm;
+              margin: 0 auto;
+              padding: 10px 4px;
+              color: #000;
+              font-size: 11px;
+            }
+            .center { text-align: center; }
+            .right { text-align: right; }
+            .bold { font-weight: bold; }
+            .divider { border-top: 1px dashed #000; margin: 6px 0; }
+            .double-divider { border-top: 2px solid #000; margin: 8px 0; }
+            table { width: 100%; border-collapse: collapse; margin: 4px 0; }
+            th, td { padding: 2px 0; font-size: 10px; }
+            .total-row { font-size: 13px; font-weight: bold; }
+          </style>
+        </head>
+        <body>
+          <div class="center bold" style="font-size: 15px;">${tenantName}</div>
+          <div class="center">TOKEN CASHOUT VOUCHER</div>
+          <div class="center" style="font-size: 9px;">Cash Paid From Drawer</div>
+          <div class="divider"></div>
+          <div>Voucher #: ${completedRedemption.redemptionNo}</div>
+          <div>Date: ${completedRedemption.date}</div>
+          <div>Customer: ${completedRedemption.clientName}</div>
+          <div>Cashier: ${staffName}</div>
+          ${completedRedemption.shiftId ? `<div>Shift ID: #${completedRedemption.shiftId.slice(0, 8)}</div>` : ''}
+          <div class="divider"></div>
+          <table>
+            <thead>
+              <tr>
+                <th style="text-align: left;">Item / Unit</th>
+                <th class="right">Qty</th>
+                <th class="right">Val</th>
+                <th class="right">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${completedRedemption.items
+                .map(
+                  (it) => `
+                <tr>
+                  <td>${it.brandName} ${it.seriesName}<br/><span style="font-size:9px;color:#333;">(${it.unitName})</span></td>
+                  <td class="right">${it.quantity}</td>
+                  <td class="right">${it.tokenValue}</td>
+                  <td class="right">${it.lineTotal.toLocaleString()}</td>
+                </tr>
+              `
+                )
+                .join('')}
+            </tbody>
+          </table>
+          <div class="divider"></div>
+          <table>
+            <tr>
+              <td>Total Tokens Redeemed:</td>
+              <td class="right bold">${completedRedemption.totalTokens} Tokens</td>
+            </tr>
+            <tr class="total-row">
+              <td>CASH PAID OUT:</td>
+              <td class="right">Rs. ${completedRedemption.totalAmount.toLocaleString()}</td>
+            </tr>
+          </table>
+          <div class="double-divider"></div>
+          <div class="center" style="font-size: 9px;">Physical Tokens Deposited Into Safe</div>
+          <div class="center" style="font-size: 9px; margin-top: 4px;">Powered by Pyntflow ERP</div>
+          <script>
+            window.onload = function() { window.print(); window.close(); }
+          </script>
+        </body>
+      </html>
+    `);
+    printWin.document.close();
   };
 
-  const handleResetForNew = () => {
-    setCompletedTxn(null);
-    setSelectedClientId('');
-    setClientSearch('');
-    setWalkinName('');
-    setItemSearch('');
-    setSelectedItemId('');
-    setItemRedeemableBalance(null);
-    setRedeemAmount('');
+  const resetForm = () => {
+    setLines([]);
     setNotes('');
+    setLineQuantity(1);
+    setSelectedClientId('');
+    setWalkinName('');
+    setClientSearch('');
     setErrorMsg(null);
+    setCompletedRedemption(null);
   };
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  if (!isOpen) return null;
+
   return (
-    <div className="pos-modal-overlay" style={{ zIndex: 100 }}>
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9999,
+        background: 'rgba(15, 23, 42, 0.75)',
+        backdropFilter: 'blur(4px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '1rem',
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !submitting) {
+          onClose();
+        }
+      }}
+    >
       <div
-        className="pos-modal-card"
         style={{
-          maxWidth: '540px',
-          borderRadius: '12px',
+          background: '#FFFFFF',
+          borderRadius: '16px',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+          width: '100%',
+          maxWidth: '820px',
+          maxHeight: '92vh',
+          display: 'flex',
+          flexDirection: 'column',
           overflow: 'hidden',
-          boxShadow: '0 20px 50px rgba(0,0,0,0.35)',
+          border: '1px solid #E2E8F0',
         }}
       >
         {/* Header */}
         <div
           style={{
-            padding: '1rem 1.25rem',
+            padding: '16px 20px',
             background: 'linear-gradient(135deg, #0F172A 0%, #1E293B 100%)',
             color: '#FFFFFF',
             display: 'flex',
@@ -333,898 +529,927 @@ export default function TokenRedemption({
             borderBottom: '1px solid #334155',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div
               style={{
-                width: 36,
-                height: 36,
-                borderRadius: '8px',
-                background: '#F59E0B',
+                width: '40px',
+                height: '40px',
+                borderRadius: '10px',
+                background: 'rgba(217, 119, 6, 0.2)',
+                border: '1px solid rgba(245, 158, 11, 0.4)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: '#0F172A',
+                color: '#F59E0B',
               }}
             >
-              <Ticket style={{ width: 20, height: 20 }} />
+              <Coins style={{ width: 22, height: 22 }} />
             </div>
             <div>
-              <h3
-                style={{
-                  fontSize: '14px',
-                  fontWeight: 800,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  margin: 0,
-                }}
-              >
-                Paint Token Redemption
-              </h3>
-              <p
-                style={{
-                  fontSize: '11px',
-                  color: '#94A3B8',
-                  margin: 0,
-                  fontFamily: 'JetBrains Mono, monospace',
-                }}
-              >
-                Cash Payout for Returned Paint Tokens
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h3 style={{ fontSize: '16px', fontWeight: 800, margin: 0, letterSpacing: '0.02em' }}>
+                  Multi-Line Token Redemption
+                </h3>
+                <span
+                  style={{
+                    background: '#10B981',
+                    color: '#FFFFFF',
+                    fontSize: '10px',
+                    fontWeight: 800,
+                    padding: '2px 7px',
+                    borderRadius: '4px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                  }}
+                >
+                  CASH ONLY
+                </span>
+              </div>
+              <p style={{ fontSize: '11px', color: '#94A3B8', margin: '2px 0 0', fontFamily: 'JetBrains Mono, monospace' }}>
+                Brand → Series → Unit → Quantity · Authoritative Payout From Drawer
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
+            disabled={submitting}
             style={{
               background: 'transparent',
               border: 'none',
               color: '#94A3B8',
-              cursor: 'pointer',
-              padding: '4px',
-              borderRadius: '6px',
+              cursor: submitting ? 'not-allowed' : 'pointer',
+              padding: '6px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
-            <X style={{ width: 18, height: 18 }} />
+            <X style={{ width: 20, height: 20 }} />
           </button>
         </div>
 
-        {completedTxn ? (
+        {completedRedemption ? (
           /* ── SUCCESS RECEIPT / VOUCHER VIEW ── */
-          <div style={{ padding: '1.5rem', background: '#F8FAFC' }}>
+          <div style={{ padding: '24px', overflowY: 'auto', background: '#F8FAFC' }}>
             <div
               style={{
                 textAlign: 'center',
-                marginBottom: '1rem',
-                padding: '12px',
+                marginBottom: '16px',
+                padding: '16px',
                 background: '#ECFDF5',
-                borderRadius: '8px',
+                borderRadius: '12px',
                 border: '1px solid #A7F3D0',
               }}
             >
-              <CheckCircle2
-                style={{ width: 32, height: 32, color: '#059669', margin: '0 auto 6px' }}
-              />
-              <h4 style={{ margin: 0, color: '#065F46', fontWeight: 800, fontSize: '14px' }}>
-                Token Payout Successful!
+              <CheckCircle2 style={{ width: 36, height: 36, color: '#059669', margin: '0 auto 8px' }} />
+              <h4 style={{ margin: 0, color: '#065F46', fontWeight: 800, fontSize: '16px' }}>
+                Token Cash Payout Complete!
               </h4>
-              <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#047857' }}>
-                Cash payment of Rs. {completedTxn.amount.toLocaleString()} recorded to shift
+              <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#047857', fontWeight: 600 }}>
+                Rs. {completedRedemption.totalAmount.toLocaleString()} paid in cash from active drawer
               </p>
             </div>
 
-            {/* Thermal Printable Voucher Slip */}
+            {/* Thermal Slip */}
             <div
-              id="token-payout-slip"
+              id="token-redemption-slip"
               style={{
                 background: '#FFFFFF',
                 border: '1px dashed #CBD5E1',
-                borderRadius: '8px',
-                padding: '16px',
+                borderRadius: '12px',
+                padding: '20px',
                 fontFamily: 'JetBrains Mono, monospace',
-                fontSize: '11px',
+                fontSize: '11.5px',
                 color: '#0F172A',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
+                maxWidth: '460px',
+                margin: '0 auto 20px',
               }}
             >
-              <div style={{ textAlign: 'center', borderBottom: '1px dashed #E2E8F0', paddingBottom: '8px' }}>
-                <p style={{ fontWeight: 800, fontSize: '13px', margin: 0 }}>{tenantName}</p>
-                <p style={{ fontSize: '10px', color: '#64748B', margin: '2px 0 0' }}>
-                  PAINT TOKEN CASHOUT VOUCHER
+              <div style={{ textAlign: 'center', borderBottom: '1px dashed #E2E8F0', paddingBottom: '10px' }}>
+                <p style={{ fontWeight: 800, fontSize: '15px', margin: 0 }}>{tenantName}</p>
+                <p style={{ fontSize: '11px', color: '#64748B', margin: '2px 0 0' }}>
+                  CUSTOMER TOKEN CASHOUT VOUCHER
                 </p>
-                <p style={{ fontSize: '9px', color: '#94A3B8', margin: '2px 0 0' }}>
-                  {completedTxn.date}
+                <p style={{ fontSize: '10px', color: '#94A3B8', margin: '2px 0 0' }}>
+                  {completedRedemption.date}
                 </p>
               </div>
 
-              <div style={{ padding: '10px 0', borderBottom: '1px dashed #E2E8F0', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+              <div style={{ padding: '12px 0', borderBottom: '1px dashed #E2E8F0', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748B' }}>Beneficiary:</span>
-                  <span style={{ fontWeight: 700 }}>{completedTxn.clientName}</span>
+                  <span style={{ color: '#64748B' }}>Voucher #:</span>
+                  <span style={{ fontWeight: 700 }}>{completedRedemption.redemptionNo}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748B' }}>Paint Item:</span>
-                  <span style={{ fontWeight: 700, textAlign: 'right', maxWidth: '200px' }}>{completedTxn.itemName}</span>
+                  <span style={{ color: '#64748B' }}>Beneficiary:</span>
+                  <span style={{ fontWeight: 700 }}>{completedRedemption.clientName}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: '#64748B' }}>Cashier:</span>
                   <span>{staffName}</span>
                 </div>
-                {shiftId && (
+                {completedRedemption.shiftId && (
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#64748B' }}>Shift:</span>
-                    <span style={{ fontSize: '10px' }}>{shiftId.slice(0, 8)}...</span>
+                    <span style={{ color: '#64748B' }}>Shift Linked:</span>
+                    <span>#{completedRedemption.shiftId.slice(0, 8)}</span>
                   </div>
                 )}
-                {completedTxn.notes && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#64748B' }}>Notes:</span>
-                    <span>{completedTxn.notes}</span>
-                  </div>
-                )}
-              </div>
-
-              <div style={{ padding: '10px 0', borderBottom: '1px dashed #E2E8F0', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 800, color: '#B45309' }}>
-                  <span>PAID OUT (CASH):</span>
-                  <span>Rs. {completedTxn.amount.toLocaleString()}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748B' }}>Payout Mode:</span>
+                  <span style={{ fontWeight: 800, color: '#059669' }}>CASH (DRAWER)</span>
                 </div>
-                {customerMode === 'registered' && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569', fontSize: '10px' }}>
-                    <span>Remaining Token Bal:</span>
-                    <span style={{ fontWeight: 700 }}>Rs. {completedTxn.remainingBalance.toLocaleString()}</span>
-                  </div>
-                )}
               </div>
 
-              <div style={{ paddingTop: '16px', display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: '#94A3B8' }}>
-                <div>Cashier Sig: __________</div>
-                <div>Customer Sig: __________</div>
+              <div style={{ padding: '10px 0', borderBottom: '1px dashed #E2E8F0' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                  <thead>
+                    <tr style={{ color: '#64748B', borderBottom: '1px dotted #CBD5E1' }}>
+                      <th style={{ textAlign: 'left', paddingBottom: '4px' }}>Token Line</th>
+                      <th style={{ textAlign: 'right', paddingBottom: '4px' }}>Qty</th>
+                      <th style={{ textAlign: 'right', paddingBottom: '4px' }}>Val</th>
+                      <th style={{ textAlign: 'right', paddingBottom: '4px' }}>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {completedRedemption.items.map((it, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px dotted #F1F5F9' }}>
+                        <td style={{ padding: '4px 0' }}>
+                          <span style={{ fontWeight: 700 }}>{it.brandName}</span> {it.seriesName}
+                          <div style={{ fontSize: '9.5px', color: '#64748B' }}>Unit: {it.unitName}</div>
+                        </td>
+                        <td style={{ textAlign: 'right', padding: '4px 0' }}>{it.quantity}</td>
+                        <td style={{ textAlign: 'right', padding: '4px 0' }}>{it.tokenValue}</td>
+                        <td style={{ textAlign: 'right', padding: '4px 0', fontWeight: 700 }}>
+                          Rs. {it.lineTotal.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ paddingTop: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <span style={{ color: '#64748B' }}>Total Tokens:</span>
+                  <span style={{ fontWeight: 700 }}>{completedRedemption.totalTokens} Tokens</span>
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    fontSize: '15px',
+                    fontWeight: 800,
+                    color: '#059669',
+                    marginTop: '6px',
+                    paddingTop: '6px',
+                    borderTop: '2px solid #0F172A',
+                  }}
+                >
+                  <span>CASH DISBURSED:</span>
+                  <span>Rs. {completedRedemption.totalAmount.toLocaleString()}</span>
+                </div>
               </div>
             </div>
 
-            {/* Action buttons */}
-            <div style={{ display: 'flex', gap: '10px', marginTop: '1.25rem' }}>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', maxWidth: '460px', margin: '0 auto' }}>
               <button
                 type="button"
-                onClick={handlePrintVoucher}
+                onClick={handlePrintSlip}
                 style={{
                   flex: 1,
-                  padding: '10px',
-                  background: '#0F172A',
-                  color: '#FFFFFF',
-                  borderRadius: '8px',
-                  border: 'none',
-                  fontWeight: 700,
-                  fontSize: '12px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '6px',
+                  gap: '8px',
+                  padding: '10px 16px',
+                  background: '#0F172A',
+                  color: '#FFFFFF',
+                  borderRadius: '10px',
+                  fontWeight: 700,
+                  fontSize: '13px',
+                  border: 'none',
                   cursor: 'pointer',
                 }}
               >
-                <Printer style={{ width: 15, height: 15 }} />
-                Print Voucher
+                <Printer style={{ width: 16, height: 16 }} />
+                Print Voucher Slip
               </button>
               <button
                 type="button"
-                onClick={handleResetForNew}
+                onClick={() => {
+                  resetForm();
+                  onClose();
+                }}
                 style={{
                   flex: 1,
-                  padding: '10px',
-                  background: '#F1F5F9',
-                  color: '#0F172A',
-                  borderRadius: '8px',
-                  border: '1px solid #CBD5E1',
+                  padding: '10px 16px',
+                  background: '#E2E8F0',
+                  color: '#334155',
+                  borderRadius: '10px',
                   fontWeight: 700,
-                  fontSize: '12px',
+                  fontSize: '13px',
+                  border: 'none',
                   cursor: 'pointer',
                 }}
               >
-                New Redemption
+                Close & Return
               </button>
             </div>
           </div>
         ) : (
-          /* ── REDEMPTION FORM VIEW ── */
-          <form onSubmit={handleRedeem} style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            {errorMsg && (
-              <div
-                style={{
-                  padding: '10px 12px',
-                  background: '#FEF2F2',
-                  border: '1px solid #FECACA',
-                  borderRadius: '8px',
-                  color: '#DC2626',
-                  fontSize: '11.5px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  fontWeight: 600,
-                }}
-              >
-                <AlertCircle style={{ width: 16, height: 16, flexShrink: 0 }} />
-                <span>{errorMsg}</span>
-              </div>
-            )}
-
-            {/* Mode Selector (Registered Client vs Walk-in) */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setCustomerMode('registered');
-                  setErrorMsg(null);
-                }}
-                style={{
-                  padding: '10px',
-                  borderRadius: '8px',
-                  fontWeight: 700,
-                  fontSize: '12px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '6px',
-                  border:
-                    customerMode === 'registered' ? '2px solid #F59E0B' : '1px solid #E2E8F0',
-                  background: customerMode === 'registered' ? '#FEF3C7' : '#FFFFFF',
-                  color: customerMode === 'registered' ? '#92400E' : '#64748B',
-                }}
-              >
-                <Users style={{ width: 15, height: 15 }} />
-                Registered Customer
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setCustomerMode('walkin');
-                  setErrorMsg(null);
-                }}
-                style={{
-                  padding: '10px',
-                  borderRadius: '8px',
-                  fontWeight: 700,
-                  fontSize: '12px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '6px',
-                  border:
-                    customerMode === 'walkin' ? '2px solid #F59E0B' : '1px solid #E2E8F0',
-                  background: customerMode === 'walkin' ? '#FEF3C7' : '#FFFFFF',
-                  color: customerMode === 'walkin' ? '#92400E' : '#64748B',
-                }}
-              >
-                <User style={{ width: 15, height: 15 }} />
-                Walk-in Customer
-              </button>
-            </div>
-
-            {/* Registered Customer Selection */}
-            {customerMode === 'registered' ? (
-              <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '12px' }}>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
-                  Select Customer (with Token Balance)
-                </label>
-                <div style={{ position: 'relative', marginBottom: '8px' }}>
-                  <Search
-                    style={{
-                      position: 'absolute',
-                      left: '10px',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      width: 14,
-                      height: 14,
-                      color: '#94A3B8',
-                    }}
-                  />
-                  <input
-                    type="text"
-                    value={clientSearch}
-                    onChange={(e) => {
-                      setClientSearch(e.target.value);
-                      if (selectedClientId) setSelectedClientId('');
-                    }}
-                    placeholder="Search client by name or phone..."
-                    className="pos-text-input"
-                    style={{ paddingLeft: '32px', fontSize: '12px' }}
-                  />
-                </div>
-
-                {/* Dropdown search suggestions */}
-                {!selectedClientId && clientSearch.trim().length > 0 && (
-                  <div
-                    style={{
-                      maxHeight: '160px',
-                      overflowY: 'auto',
-                      border: '1px solid #CBD5E1',
-                      borderRadius: '6px',
-                      background: '#FFFFFF',
-                      marginBottom: '8px',
-                    }}
-                  >
-                    {filteredClients.length === 0 ? (
-                      <div style={{ padding: '8px', fontSize: '11px', color: '#94A3B8', textAlign: 'center' }}>
-                        No clients found
-                      </div>
-                    ) : (
-                      filteredClients.map((client) => (
-                        <div
-                          key={client.id}
-                          onClick={() => handleSelectClient(client)}
-                          style={{
-                            padding: '8px 10px',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            borderBottom: '1px solid #F1F5F9',
-                            fontSize: '11.5px',
-                          }}
-                          onMouseEnter={(e) => (e.currentTarget.style.background = '#F8FAFC')}
-                          onMouseLeave={(e) => (e.currentTarget.style.background = '#FFFFFF')}
-                        >
-                          <div>
-                            <span style={{ fontWeight: 700, color: '#0F172A' }}>{client.name}</span>
-                            {client.phone && (
-                              <span style={{ color: '#64748B', marginLeft: '6px', fontSize: '10.5px' }}>
-                                ({client.phone})
-                              </span>
-                            )}
-                          </div>
-                          <span
-                            style={{
-                              fontFamily: 'JetBrains Mono, monospace',
-                              fontWeight: 700,
-                              color: Number((client as any).token_balance || 0) > 0 ? '#D97706' : '#94A3B8',
-                              background: Number((client as any).token_balance || 0) > 0 ? '#FEF3C7' : '#F1F5F9',
-                              padding: '2px 6px',
-                              borderRadius: '4px',
-                              fontSize: '10.5px',
-                            }}
-                          >
-                            🎫 Rs. {Number((client as any).token_balance || 0).toLocaleString()}
-                          </span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
-
-                {/* Selected Client Card */}
-                {selectedClient && (
-                  <div
-                    style={{
-                      background: '#FEF3C7',
-                      border: '1px solid #FDE68A',
-                      borderRadius: '8px',
-                      padding: '10px 12px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 800, color: '#92400E', fontSize: '13px' }}>
-                        {selectedClient.name}
-                      </div>
-                      <div style={{ fontSize: '10.5px', color: '#B45309' }}>
-                        {selectedClient.phone || 'No phone'} · {selectedClient.city || 'Local'}
-                      </div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '10px', color: '#92400E', textTransform: 'uppercase', fontWeight: 700 }}>
-                        Current Token Bal
-                      </div>
-                      <div
-                        style={{
-                          fontSize: '16px',
-                          fontWeight: 800,
-                          fontFamily: 'JetBrains Mono, monospace',
-                          color: '#B45309',
-                        }}
-                      >
-                        Rs. {clientTokenBalance.toLocaleString()}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              /* Walk-in Customer Input */
-              <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '12px' }}>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
-                  Walk-in Beneficiary / Painter Name (Optional)
-                </label>
-                <input
-                  type="text"
-                  value={walkinName}
-                  onChange={(e) => setWalkinName(e.target.value)}
-                  placeholder="e.g. Master Aslam (Painter) or Cash Walk-in"
-                  className="pos-text-input"
-                  style={{ fontSize: '12px' }}
-                />
-              </div>
-            )}
-
-            {/* ── Loose / External Brand Token Toggle ── */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '10px 14px',
-                background: isLooseToken ? '#EFF6FF' : '#F8FAFC',
-                border: `1px solid ${isLooseToken ? '#93C5FD' : '#E2E8F0'}`,
-                borderRadius: '8px',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-              }}
-              onClick={() => {
-                const next = !isLooseToken;
-                setIsLooseToken(next);
-                if (next) {
-                  const autoAmt = (looseTokenCount * (parseFloat(looseUnitValue) || 500)).toString();
-                  setRedeemAmount(autoAmt);
-                  setErrorMsg(null);
-                }
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Ticket style={{ width: 16, height: 16, color: isLooseToken ? '#2563EB' : '#64748B' }} />
-                <div>
-                  <div style={{ fontSize: '11.5px', fontWeight: 700, color: isLooseToken ? '#1E40AF' : '#1E293B' }}>
-                    Accept Loose / External Brand Token
-                  </div>
-                  <div style={{ fontSize: '10px', color: isLooseToken ? '#3B82F6' : '#64748B' }}>
-                    Accept tokens from previous stock or company promos without POS sales history
-                  </div>
-                </div>
-              </div>
-              <input
-                type="checkbox"
-                checked={isLooseToken}
-                onChange={(e) => {
-                  e.stopPropagation();
-                  setIsLooseToken(e.target.checked);
-                  if (e.target.checked) {
-                    const autoAmt = (looseTokenCount * (parseFloat(looseUnitValue) || 500)).toString();
-                    setRedeemAmount(autoAmt);
-                    setErrorMsg(null);
-                  }
-                }}
-                style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#2563EB' }}
-              />
-            </div>
-
-            {isLooseToken ? (
-              /* ── Loose Token Details (Brand, Count, Unit Value) ── */
-              <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                  <div>
-                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#1E3A8A', display: 'block', marginBottom: '4px' }}>
-                      Paint Brand *
-                    </label>
-                    <select
-                      value={looseBrand}
-                      onChange={(e) => setLooseBrand(e.target.value)}
-                      className="pos-text-input"
-                      style={{ fontSize: '12px', background: '#FFFFFF' }}
-                    >
-                      {['Master Paints', 'Berger Paints', 'Dulux / AkzoNobel', 'Nippon Paint', 'Brighto Paints', 'Diamond Paints', 'Happilac Paints', 'Jotun Paints', 'Gobies Paints', 'General / Other'].map((b) => (
-                        <option key={b} value={b}>{b}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#1E3A8A', display: 'block', marginBottom: '4px' }}>
-                      Token Count *
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={looseTokenCount}
-                      onChange={(e) => {
-                        const count = Math.max(1, parseInt(e.target.value) || 1);
-                        setLooseTokenCount(count);
-                        const autoAmt = (count * (parseFloat(looseUnitValue) || 0)).toString();
-                        setRedeemAmount(autoAmt);
-                      }}
-                      className="pos-text-input"
-                      style={{ fontSize: '12px', background: '#FFFFFF' }}
-                    />
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                  <div>
-                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#1E3A8A', display: 'block', marginBottom: '4px' }}>
-                      Value Per Token (Rs.) *
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={looseUnitValue}
-                      onChange={(e) => {
-                        setLooseUnitValue(e.target.value);
-                        const autoAmt = (looseTokenCount * (parseFloat(e.target.value) || 0)).toString();
-                        setRedeemAmount(autoAmt);
-                      }}
-                      className="pos-text-input"
-                      style={{ fontSize: '12px', background: '#FFFFFF' }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '11px', fontWeight: 700, color: '#1E3A8A', display: 'block', marginBottom: '4px' }}>
-                      Token Description / Campaign
-                    </label>
-                    <input
-                      type="text"
-                      value={looseItemName}
-                      onChange={(e) => setLooseItemName(e.target.value)}
-                      placeholder="e.g. Weathercoat 16L Token"
-                      className="pos-text-input"
-                      style={{ fontSize: '12px', background: '#FFFFFF' }}
-                    />
-                  </div>
-                </div>
-              </div>
-            ) : (
-              /* ── Paint Item Selector (standard POS linked) ── */
-              <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '12px' }}>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
-                  Select Paint / Item Being Redeemed *
-                </label>
-                <div style={{ position: 'relative', marginBottom: '8px' }}>
-                  <Package
-                    style={{
-                      position: 'absolute',
-                      left: '10px',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      width: 14,
-                      height: 14,
-                      color: '#94A3B8',
-                    }}
-                  />
-                  <input
-                    type="text"
-                    value={itemSearch}
-                    onChange={(e) => {
-                      setItemSearch(e.target.value);
-                      if (selectedItemId) {
-                        setSelectedItemId('');
-                        setItemRedeemableBalance(null);
-                      }
-                    }}
-                    placeholder="Search paint by name, brand, or code..."
-                    className="pos-text-input"
-                    style={{ paddingLeft: '32px', fontSize: '12px' }}
-                  />
-                </div>
-
-                {/* Item dropdown suggestions */}
-                {!selectedItemId && (
-                  <div
-                    style={{
-                      maxHeight: '160px',
-                      overflowY: 'auto',
-                      border: '1px solid #CBD5E1',
-                      borderRadius: '6px',
-                      background: '#FFFFFF',
-                      marginBottom: '8px',
-                    }}
-                  >
-                    {filteredItems.length === 0 ? (
-                      <div style={{ padding: '8px', fontSize: '11px', color: '#94A3B8', textAlign: 'center' }}>
-                        {itemSearch.trim() ? 'No items found' : 'No token-enabled items — type to search all products'}
-                      </div>
-                    ) : (
-                      filteredItems.map((item) => (
-                        <div
-                          key={item.id}
-                          onClick={() => handleSelectItem(item)}
-                          style={{
-                            padding: '8px 10px',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            borderBottom: '1px solid #F1F5F9',
-                            fontSize: '11.5px',
-                          }}
-                          onMouseEnter={(e) => (e.currentTarget.style.background = '#F8FAFC')}
-                          onMouseLeave={(e) => (e.currentTarget.style.background = '#FFFFFF')}
-                        >
-                          <div>
-                            <span style={{ fontWeight: 700, color: '#0F172A' }}>{item.name}</span>
-                            {item.brand && (
-                              <span style={{ color: '#64748B', marginLeft: '6px', fontSize: '10.5px' }}>
-                                {item.brand}
-                              </span>
-                            )}
-                            <span style={{ color: '#94A3B8', marginLeft: '6px', fontSize: '10px', fontFamily: 'JetBrains Mono, monospace' }}>
-                              {item.code}
-                            </span>
-                          </div>
-                          {item.has_token && (
-                            <span
-                              style={{
-                                fontSize: '10px',
-                                fontWeight: 700,
-                                background: '#FEF3C7',
-                                color: '#92400E',
-                                padding: '2px 6px',
-                                borderRadius: '4px',
-                                border: '1px solid #FDE68A',
-                              }}
-                            >
-                              🎫 Token
-                            </span>
-                          )}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
-
-                {/* Selected Item Card */}
-                {selectedItem && (
-                  <div
-                    style={{
-                      background: selectedItemId ? '#FFFBEB' : '#F8FAFC',
-                      border: `1px solid ${selectedItemId ? '#FDE68A' : '#E2E8F0'}`,
-                      borderRadius: '8px',
-                      padding: '10px 12px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 800, color: '#92400E', fontSize: '13px' }}>
-                        {selectedItem.name}
-                      </div>
-                      <div style={{ fontSize: '10.5px', color: '#B45309' }}>
-                        {selectedItem.brand || 'No brand'} · {selectedItem.code}
-                      </div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '10px', color: '#92400E', textTransform: 'uppercase', fontWeight: 700 }}>
-                        Redeemable Pool
-                      </div>
-                      <div
-                        style={{
-                          fontSize: '15px',
-                          fontWeight: 800,
-                          fontFamily: 'JetBrains Mono, monospace',
-                          color: loadingItemBalance
-                            ? '#94A3B8'
-                            : (itemRedeemableBalance ?? 0) > 0
-                            ? '#B45309'
-                            : '#DC2626',
-                        }}
-                      >
-                        {loadingItemBalance
-                          ? 'Loading...'
-                          : itemRedeemableBalance !== null
-                          ? `Rs. ${itemRedeemableBalance.toLocaleString()}`
-                          : '—'}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Redeem Amount Input & Quick Chips */}
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                <label style={{ fontWeight: 700, color: '#334155', fontSize: '12px' }}>
-                  Redeem Amount to Pay Out (Rs.) *
-                </label>
-                {effectiveCap !== undefined && effectiveCap > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setRedeemAmount(effectiveCap.toString())}
-                    style={{
-                      fontSize: '11px',
-                      fontFamily: 'JetBrains Mono, monospace',
-                      color: '#F97316',
-                      fontWeight: 700,
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      textDecoration: 'underline',
-                    }}
-                  >
-                    Max (Rs. {effectiveCap.toLocaleString()})
-                  </button>
-                )}
-              </div>
-
-              <div style={{ position: 'relative' }}>
-                <span
-                  style={{
-                    position: 'absolute',
-                    left: '12px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    fontWeight: 700,
-                    color: '#64748B',
-                    fontFamily: 'JetBrains Mono, monospace',
-                  }}
-                >
-                  Rs.
-                </span>
-                <input
-                  type="number"
-                  min="0"
-                  max={effectiveCap}
-                  required
-                  value={redeemAmount}
-                  onChange={(e) => setRedeemAmount(e.target.value)}
-                  onKeyDown={(e) => {
-                    // Block minus sign and exponential notation (e/E)
-                    if (e.key === '-' || e.key === 'e' || e.key === 'E') {
-                      e.preventDefault();
-                    }
-                  }}
-                  placeholder="0.00"
-                  className="pos-text-input"
-                  style={{
-                    paddingLeft: '45px',
-                    fontSize: '16px',
-                    fontWeight: 800,
-                    fontFamily: 'JetBrains Mono, monospace',
-                    color: amountExceedsCap ? '#DC2626' : '#0F172A',
-                    borderColor: amountExceedsCap ? '#FECACA' : '#F59E0B',
-                  }}
-                  autoFocus
-                />
-              </div>
-
-              {/* Live cap warning */}
-              {amountExceedsCap && effectiveCap !== undefined && (
+          /* ── REDEMPTION BUILDER FORM ── */
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflowY: 'auto' }}>
+            <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {/* Error Message */}
+              {errorMsg && (
                 <div
                   style={{
-                    marginTop: '5px',
-                    padding: '6px 10px',
+                    padding: '10px 14px',
                     background: '#FEF2F2',
-                    border: '1px solid #FECACA',
-                    borderRadius: '6px',
-                    fontSize: '11px',
-                    color: '#DC2626',
-                    fontWeight: 600,
+                    border: '1px solid #FCA5A5',
+                    borderRadius: '8px',
+                    color: '#991B1B',
+                    fontSize: '12px',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '6px',
+                    gap: '8px',
                   }}
                 >
-                  <AlertCircle style={{ width: 13, height: 13, flexShrink: 0 }} />
-                  Max redeemable: Rs. {effectiveCap.toLocaleString()}
-                  {selectedItem && ` for "${selectedItem.name}"`}
+                  <AlertCircle style={{ width: 16, height: 16, flexShrink: 0 }} />
+                  <span>{errorMsg}</span>
                 </div>
               )}
 
-              {/* Quick preset amount chips — clamp to effectiveCap */}
-              <div style={{ display: 'flex', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
-                {[200, 500, 1000, 1500, 2000].map((amt) => {
-                  const cappedAmt = effectiveCap !== undefined ? Math.min(amt, effectiveCap) : amt;
-                  const isDisabled = effectiveCap !== undefined && effectiveCap <= 0;
-                  return (
+              {/* 1. Customer Mode Selector */}
+              <div style={{ background: '#F8FAFC', padding: '12px 14px', borderRadius: '10px', border: '1px solid #E2E8F0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 800, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    1. Customer / Beneficiary
+                  </span>
+                  <div style={{ display: 'flex', background: '#E2E8F0', padding: '2px', borderRadius: '8px' }}>
                     <button
-                      key={amt}
                       type="button"
-                      disabled={isDisabled}
-                      onClick={() => setRedeemAmount(cappedAmt.toString())}
+                      onClick={() => setCustomerMode('registered')}
                       style={{
-                        padding: '4px 8px',
+                        padding: '4px 10px',
                         fontSize: '11px',
-                        fontFamily: 'JetBrains Mono, monospace',
-                        fontWeight: 600,
-                        background: isDisabled ? '#F8FAFC' : '#F1F5F9',
-                        border: '1px solid #CBD5E1',
-                        borderRadius: '4px',
-                        color: isDisabled ? '#CBD5E1' : '#334155',
-                        cursor: isDisabled ? 'not-allowed' : 'pointer',
-                        opacity: isDisabled ? 0.5 : 1,
+                        fontWeight: 700,
+                        borderRadius: '6px',
+                        border: 'none',
+                        cursor: 'pointer',
+                        background: customerMode === 'registered' ? '#FFFFFF' : 'transparent',
+                        color: customerMode === 'registered' ? '#0F172A' : '#64748B',
+                        boxShadow: customerMode === 'registered' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
                       }}
                     >
-                      Rs. {cappedAmt.toLocaleString()}
+                      Registered Contractor / Customer
                     </button>
-                  );
-                })}
-              </div>
-            </div>
+                    <button
+                      type="button"
+                      onClick={() => setCustomerMode('walkin')}
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        borderRadius: '6px',
+                        border: 'none',
+                        cursor: 'pointer',
+                        background: customerMode === 'walkin' ? '#FFFFFF' : 'transparent',
+                        color: customerMode === 'walkin' ? '#0F172A' : '#64748B',
+                        boxShadow: customerMode === 'walkin' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                      }}
+                    >
+                      Walk-in Customer
+                    </button>
+                  </div>
+                </div>
 
-            {/* Remaining Balance Indicator for Registered Customers */}
-            {customerMode === 'registered' && selectedClient && parsedRedeemAmount > 0 && (
+                {customerMode === 'registered' ? (
+                  <div style={{ position: 'relative' }}>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <div style={{ position: 'relative', flex: 1 }}>
+                        <Search
+                          style={{
+                            position: 'absolute',
+                            left: '10px',
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            width: 14,
+                            height: 14,
+                            color: '#94A3B8',
+                          }}
+                        />
+                        <input
+                          type="text"
+                          value={clientSearch}
+                          onFocus={() => setShowClientDropdown(true)}
+                          onChange={(e) => {
+                            setClientSearch(e.target.value);
+                            setShowClientDropdown(true);
+                          }}
+                          placeholder={selectedClient ? selectedClient.name : 'Search contractor by name or phone...'}
+                          style={{
+                            width: '100%',
+                            padding: '7px 10px 7px 32px',
+                            fontSize: '12px',
+                            border: '1px solid #CBD5E1',
+                            borderRadius: '8px',
+                            outline: 'none',
+                          }}
+                        />
+                      </div>
+                      {selectedClient && (
+                        <div
+                          style={{
+                            background: '#EFF6FF',
+                            border: '1px solid #BFDBFE',
+                            color: '#1D4ED8',
+                            borderRadius: '8px',
+                            padding: '6px 12px',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                        >
+                          <User style={{ width: 14, height: 14 }} />
+                          <span>{selectedClient.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedClientId('');
+                              setClientSearch('');
+                            }}
+                            style={{ background: 'none', border: 'none', color: '#60A5FA', cursor: 'pointer', padding: 0 }}
+                          >
+                            <X style={{ width: 14, height: 14 }} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {showClientDropdown && !selectedClientId && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: '100%',
+                          left: 0,
+                          right: 0,
+                          zIndex: 50,
+                          background: '#FFFFFF',
+                          border: '1px solid #E2E8F0',
+                          borderRadius: '8px',
+                          boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
+                          marginTop: '4px',
+                          maxHeight: '160px',
+                          overflowY: 'auto',
+                        }}
+                      >
+                        {filteredClients.length === 0 ? (
+                          <div style={{ padding: '8px 12px', fontSize: '11px', color: '#94A3B8' }}>No customers found</div>
+                        ) : (
+                          filteredClients.map((c) => (
+                            <div
+                              key={c.id}
+                              onClick={() => {
+                                setSelectedClientId(c.id);
+                                setClientSearch(c.name);
+                                setShowClientDropdown(false);
+                              }}
+                              style={{
+                                padding: '8px 12px',
+                                fontSize: '12px',
+                                borderBottom: '1px solid #F1F5F9',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.background = '#F8FAFC')}
+                              onMouseLeave={(e) => (e.currentTarget.style.background = '#FFFFFF')}
+                            >
+                              <span style={{ fontWeight: 600, color: '#0F172A' }}>{c.name}</span>
+                              <span style={{ color: '#64748B', fontSize: '11px' }}>{c.phone || c.city || 'Contractor'}</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <input
+                      type="text"
+                      value={walkinName}
+                      onChange={(e) => setWalkinName(e.target.value)}
+                      placeholder="Walk-in Customer Name (Defaults to 'Walk-in Customer')"
+                      style={{
+                        width: '100%',
+                        padding: '7px 10px',
+                        fontSize: '12px',
+                        border: '1px solid #CBD5E1',
+                        borderRadius: '8px',
+                        outline: 'none',
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* 2. Token Selector Row: Brand → Series → Unit → Quantity */}
               <div
                 style={{
+                  background: '#FFFBEB',
+                  border: '1px solid #FDE68A',
+                  padding: '14px',
+                  borderRadius: '12px',
                   display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  background: '#F1F5F9',
-                  padding: '8px 12px',
-                  borderRadius: '6px',
-                  fontSize: '11px',
-                  fontFamily: 'JetBrains Mono, monospace',
+                  flexDirection: 'column',
+                  gap: '12px',
                 }}
               >
-                <span style={{ color: '#64748B' }}>Remaining Balance After Payout:</span>
-                <span style={{ fontWeight: 800, color: remainingBalanceAfter >= 0 ? '#0F172A' : '#DC2626' }}>
-                  Rs. {remainingBalanceAfter.toLocaleString()}
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 800, color: '#92400E', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    2. Select Paint Token to Redeem
+                  </span>
+                  <span style={{ fontSize: '11px', color: '#B45309', fontWeight: 600 }}>
+                    Token value automatically loaded &amp; immutable
+                  </span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
+                  {/* Brand */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#78350F', marginBottom: '4px' }}>
+                      Brand
+                    </label>
+                    <select
+                      value={selectedBrandId}
+                      onChange={(e) => setSelectedBrandId(e.target.value)}
+                      disabled={loadingBrands}
+                      style={{
+                        width: '100%',
+                        padding: '8px 10px',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        border: '1px solid #FCD34D',
+                        borderRadius: '8px',
+                        background: '#FFFFFF',
+                        color: '#0F172A',
+                      }}
+                    >
+                      {brands.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Series */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#78350F', marginBottom: '4px' }}>
+                      Series
+                    </label>
+                    <select
+                      value={selectedSeriesId}
+                      onChange={(e) => setSelectedSeriesId(e.target.value)}
+                      disabled={loadingSeries || seriesList.length === 0}
+                      style={{
+                        width: '100%',
+                        padding: '8px 10px',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        border: '1px solid #FCD34D',
+                        borderRadius: '8px',
+                        background: '#FFFFFF',
+                        color: '#0F172A',
+                      }}
+                    >
+                      {seriesList.length === 0 ? (
+                        <option value="">No series available</option>
+                      ) : (
+                        seriesList.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+
+                  {/* Unit */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#78350F', marginBottom: '4px' }}>
+                      Pack Unit
+                    </label>
+                    <select
+                      value={selectedUnitName}
+                      onChange={(e) => setSelectedUnitName(e.target.value)}
+                      disabled={availableUnits.length === 0}
+                      style={{
+                        width: '100%',
+                        padding: '8px 10px',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        border: '1px solid #FCD34D',
+                        borderRadius: '8px',
+                        background: '#FFFFFF',
+                        color: '#0F172A',
+                      }}
+                    >
+                      {availableUnits.length === 0 ? (
+                        <option value="">No configured unit</option>
+                      ) : (
+                        availableUnits.map((u) => (
+                          <option key={u.id || u.unit_name} value={u.unit_name}>
+                            {u.unit_name}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+
+                  {/* Token Value (READ ONLY) */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#78350F', marginBottom: '4px' }}>
+                      Token Value (Configured)
+                    </label>
+                    <div
+                      style={{
+                        padding: '8px 10px',
+                        fontSize: '12px',
+                        fontWeight: 800,
+                        fontFamily: 'JetBrains Mono, monospace',
+                        background: '#FEF3C7',
+                        border: '1px solid #FDE68A',
+                        borderRadius: '8px',
+                        color: '#92400E',
+                        height: '37px',
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}
+                    >
+                      {currentTokenValue > 0 ? `Rs. ${currentTokenValue.toLocaleString()}` : '—'}
+                    </div>
+                  </div>
+
+                  {/* Quantity */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#78350F', marginBottom: '4px' }}>
+                      Quantity
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={lineQuantity}
+                      onChange={(e) => setLineQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                      style={{
+                        width: '100%',
+                        padding: '7px 10px',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        fontFamily: 'JetBrains Mono, monospace',
+                        border: '1px solid #FCD34D',
+                        borderRadius: '8px',
+                        background: '#FFFFFF',
+                        color: '#0F172A',
+                        height: '37px',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Line Total & Add Line Button */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '4px' }}>
+                  <div style={{ fontSize: '12px', color: '#92400E' }}>
+                    Line Total:{' '}
+                    <span style={{ fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: '#B45309' }}>
+                      Rs. {currentLineTotal.toLocaleString()}
+                    </span>{' '}
+                    <span style={{ fontSize: '11px', color: '#78350F' }}>
+                      ({lineQuantity} × Rs. {currentTokenValue})
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleAddLine}
+                    disabled={currentTokenValue <= 0 || availableUnits.length === 0}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '8px 16px',
+                      background: currentTokenValue > 0 ? '#D97706' : '#CBD5E1',
+                      color: '#FFFFFF',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      fontWeight: 800,
+                      border: 'none',
+                      cursor: currentTokenValue > 0 ? 'pointer' : 'not-allowed',
+                      boxShadow: currentTokenValue > 0 ? '0 2px 4px rgba(217, 119, 6, 0.2)' : 'none',
+                    }}
+                  >
+                    <Plus style={{ width: 14, height: 14 }} />
+                    Add Token Line
+                  </button>
+                </div>
               </div>
-            )}
 
-            {/* Cashier Notes */}
-            <div>
-              <label style={{ fontWeight: 700, color: '#334155', fontSize: '11px', display: 'block', marginBottom: '4px' }}>
-                Transaction Notes (Optional)
-              </label>
-              <input
-                type="text"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="e.g. 5 Berger drum tokens returned by painter"
-                className="pos-text-input"
-                style={{ fontSize: '11.5px' }}
-              />
+              {/* 3. Multi-Line Redemption Items Table */}
+              <div style={{ border: '1px solid #E2E8F0', borderRadius: '12px', overflow: 'hidden' }}>
+                <div
+                  style={{
+                    padding: '10px 14px',
+                    background: '#F8FAFC',
+                    borderBottom: '1px solid #E2E8F0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <span style={{ fontSize: '12px', fontWeight: 800, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    3. Redemption Lines ({lines.length})
+                  </span>
+                  {lines.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setLines([])}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#EF4444',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Clear All
+                    </button>
+                  )}
+                </div>
+
+                {lines.length === 0 ? (
+                  <div style={{ padding: '24px', textAlign: 'center', color: '#94A3B8', fontSize: '12px' }}>
+                    No token lines added yet. Select a Brand, Series, and Unit above and click &quot;Add Token Line&quot;.
+                  </div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                    <thead>
+                      <tr style={{ background: '#F1F5F9', color: '#475569', fontSize: '11px', textTransform: 'uppercase' }}>
+                        <th style={{ padding: '8px 12px', textAlign: 'left' }}>#</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'left' }}>Brand</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'left' }}>Series</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'left' }}>Unit</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right' }}>Token Value</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'center' }}>Qty</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right' }}>Line Total</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'center', width: '40px' }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lines.map((l, idx) => (
+                        <tr key={l.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                          <td style={{ padding: '10px 12px', color: '#64748B', fontWeight: 700 }}>{idx + 1}</td>
+                          <td style={{ padding: '10px 12px', fontWeight: 700, color: '#0F172A' }}>{l.brandName}</td>
+                          <td style={{ padding: '10px 12px', color: '#334155' }}>{l.seriesName}</td>
+                          <td style={{ padding: '10px 12px' }}>
+                            <span
+                              style={{
+                                background: '#E2E8F0',
+                                color: '#1E293B',
+                                padding: '2px 7px',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                fontWeight: 700,
+                              }}
+                            >
+                              {l.unitName}
+                            </span>
+                          </td>
+                          <td
+                            style={{
+                              padding: '10px 12px',
+                              textAlign: 'right',
+                              fontFamily: 'JetBrains Mono, monospace',
+                              fontWeight: 600,
+                            }}
+                          >
+                            Rs. {l.tokenValue.toLocaleString()}
+                          </td>
+                          <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateLineQuantity(l.id, l.quantity - 1)}
+                                style={{
+                                  width: '24px',
+                                  height: '24px',
+                                  borderRadius: '4px',
+                                  border: '1px solid #CBD5E1',
+                                  background: '#FFFFFF',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontWeight: 700,
+                                }}
+                              >
+                                -
+                              </button>
+                              <span
+                                style={{
+                                  width: '32px',
+                                  textAlign: 'center',
+                                  fontFamily: 'JetBrains Mono, monospace',
+                                  fontWeight: 800,
+                                }}
+                              >
+                                {l.quantity}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateLineQuantity(l.id, l.quantity + 1)}
+                                style={{
+                                  width: '24px',
+                                  height: '24px',
+                                  borderRadius: '4px',
+                                  border: '1px solid #CBD5E1',
+                                  background: '#FFFFFF',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontWeight: 700,
+                                }}
+                              >
+                                +
+                              </button>
+                            </div>
+                          </td>
+                          <td
+                            style={{
+                              padding: '10px 12px',
+                              textAlign: 'right',
+                              fontFamily: 'JetBrains Mono, monospace',
+                              fontWeight: 800,
+                              color: '#059669',
+                            }}
+                          >
+                            Rs. {l.lineTotal.toLocaleString()}
+                          </td>
+                          <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveLine(l.id)}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: '#94A3B8',
+                                cursor: 'pointer',
+                                padding: '4px',
+                              }}
+                            >
+                              <Trash2 style={{ width: 15, height: 15 }} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {/* Optional Notes */}
+              <div>
+                <input
+                  type="text"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Optional reference / notes (e.g. 3x Gallons + 1x Drum returned by painter)"
+                  style={{
+                    width: '100%',
+                    padding: '7px 12px',
+                    fontSize: '12px',
+                    border: '1px solid #CBD5E1',
+                    borderRadius: '8px',
+                    outline: 'none',
+                  }}
+                />
+              </div>
             </div>
 
-            {/* Modal Actions */}
-            <div style={{ display: 'flex', gap: '8px', paddingTop: '10px', borderTop: '1px solid #E2E8F0' }}>
-              <button
-                type="button"
-                onClick={onClose}
-                style={{
-                  flex: 1,
-                  padding: '10px',
-                  background: '#F1F5F9',
-                  color: '#475569',
-                  fontWeight: 700,
-                  fontSize: '12px',
-                  borderRadius: '8px',
-                  border: '1px solid #CBD5E1',
-                  cursor: 'pointer',
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={isSubmitDisabled}
-                style={{
-                  flex: 2,
-                  padding: '10px',
-                  background: isSubmitDisabled
-                    ? '#94A3B8'
-                    : 'linear-gradient(135deg, #D97706 0%, #B45309 100%)',
-                  color: '#FFFFFF',
-                  fontWeight: 800,
-                  fontSize: '13px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  cursor: isSubmitDisabled ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '6px',
-                  boxShadow: isSubmitDisabled ? 'none' : '0 4px 12px rgba(217, 119, 6, 0.3)',
-                }}
-              >
-                <Coins style={{ width: 16, height: 16 }} />
-                {submitting
-                  ? 'Processing Payout...'
-                  : `Pay Out Cash Rs. ${parsedRedeemAmount > 0 ? parsedRedeemAmount.toLocaleString() : '—'}`}
-              </button>
+            {/* Sticky Footer Payout Summary */}
+            <div
+              style={{
+                marginTop: 'auto',
+                padding: '16px 20px',
+                background: '#F8FAFC',
+                borderTop: '1px solid #E2E8F0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '12px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#64748B', fontWeight: 600 }}>Total Tokens</div>
+                  <div style={{ fontSize: '18px', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: '#0F172A' }}>
+                    {totalTokens}{' '}
+                    <span style={{ fontSize: '12px', color: '#64748B', fontWeight: 500 }}>Tokens</span>
+                  </div>
+                </div>
+
+                <div style={{ height: '36px', width: '1px', background: '#CBD5E1' }} />
+
+                <div>
+                  <div style={{ fontSize: '11px', color: '#047857', fontWeight: 700 }}>Total Cash Payout</div>
+                  <div style={{ fontSize: '22px', fontWeight: 900, fontFamily: 'JetBrains Mono, monospace', color: '#059669' }}>
+                    Rs. {totalAmount.toLocaleString()}
+                  </div>
+                </div>
+
+                {shiftId ? (
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      background: '#ECFDF5',
+                      color: '#065F46',
+                      border: '1px solid #A7F3D0',
+                      padding: '3px 8px',
+                      borderRadius: '6px',
+                      fontWeight: 600,
+                    }}
+                  >
+                    Active Shift Linked
+                  </span>
+                ) : (
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      background: '#FEF3C7',
+                      color: '#92400E',
+                      border: '1px solid #FDE68A',
+                      padding: '3px 8px',
+                      borderRadius: '6px',
+                      fontWeight: 600,
+                    }}
+                  >
+                    No Active Shift
+                  </span>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  disabled={submitting}
+                  style={{
+                    padding: '10px 16px',
+                    borderRadius: '8px',
+                    border: '1px solid #CBD5E1',
+                    background: '#FFFFFF',
+                    color: '#475569',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    cursor: submitting ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSubmit}
+                  disabled={submitting || lines.length === 0 || totalAmount <= 0}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: lines.length > 0 && totalAmount > 0 ? '#059669' : '#94A3B8',
+                    color: '#FFFFFF',
+                    fontSize: '13px',
+                    fontWeight: 800,
+                    cursor: lines.length > 0 && totalAmount > 0 && !submitting ? 'pointer' : 'not-allowed',
+                    boxShadow: lines.length > 0 && totalAmount > 0 ? '0 2px 4px rgba(5, 150, 105, 0.25)' : 'none',
+                  }}
+                >
+                  <Coins style={{ width: 16, height: 16 }} />
+                  {submitting ? 'Processing Payout...' : `Confirm Cash Payout (Rs. ${totalAmount.toLocaleString()})`}
+                </button>
+              </div>
             </div>
-          </form>
+          </div>
         )}
       </div>
     </div>

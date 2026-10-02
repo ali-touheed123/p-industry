@@ -12,7 +12,7 @@ interface SalesViewProps {
 }
 
 type QuickFilter = 'Today' | 'Yesterday' | 'Last 7 Days' | 'This Month' | 'All Time';
-type PaymentFilter = 'All Modes' | 'Cash' | 'Credit' | 'Bank/Card';
+type PaymentFilter = 'All Modes' | 'Cash' | 'Credit' | 'Bank/Card' | 'Split';
 
 export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
   const todayIso = new Date().toISOString().split('T')[0];
@@ -42,9 +42,18 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
         if (isMounted && data.success && data.invoices) {
           const mapped: Invoice[] = data.invoices.map((inv: any) => {
             const rawItems = inv.invoice_items || inv.items || [];
-            let pMode: 'Cash' | 'Credit' | 'Bank/Card' = 'Cash';
+            let pMode: Invoice['paymentMode'] = 'Cash';
             if (inv.payment_type === 'credit') pMode = 'Credit';
+            // FIX CEO-07: 'split' was falling through to 'Cash' default — now correctly classified
+            else if (inv.payment_type === 'split') pMode = 'Split';
             else if (inv.payment_type === 'bank' || inv.payment_type === 'card' || inv.payment_type === 'cheque') pMode = 'Bank/Card';
+            // Auto-detect split: multiple payment channels present
+            else if (
+              (Number(inv.cash_paid || 0) > 0) &&
+              (Number(inv.card_paid || 0) > 0 || Number(inv.bank_paid || 0) > 0)
+            ) {
+              pMode = 'Split';
+            }
 
             const isReturn = (inv.status || '').toLowerCase() === 'return' || (inv.invoice_type || '').toLowerCase() === 'return';
             return {
@@ -68,6 +77,8 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
               itemsCount: rawItems.length,
               status: isReturn ? 'return' : (inv.status || 'Completed'),
               salesman: inv.created_by || 'Counter Staff',
+              shiftId: inv.shift_id || '',
+              register: inv.shift_id ? `Shift Register #${String(inv.shift_id).slice(-4)}` : (inv.created_by ? `${inv.created_by} POS Register` : 'Main Counter Register'),
               items: rawItems.map((it: any) => ({
                 code: it.item_code || it.code || '',
                 product: it.item_name || it.name || 'Product',
@@ -128,10 +139,21 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
     });
 
     const netSales = forwardSales.reduce((acc, inv) => acc + inv.netAmount, 0);
+    // FIX CEO-07: cashInflow now uses actual cash_paid field so split invoices
+    // don't inflate the cash figure with their full netAmount
     const cashInflow = forwardSales.reduce((acc, inv) => {
       const cp = Number(inv.cashPaid || 0);
       if (cp > 0) return acc + cp;
+      // Only count full amount as cash if explicitly a pure Cash invoice
       if (inv.paymentMode === 'Cash') return acc + inv.netAmount;
+      return acc;
+    }, 0);
+    // Bank/Card inflow: sum card_paid + bank_paid across all forward sales
+    const bankCardInflow = forwardSales.reduce((acc, inv) => {
+      const card = Number(inv.cardPaid || 0);
+      const bank = Number(inv.bankPaid || 0);
+      if (card > 0 || bank > 0) return acc + card + bank;
+      if (inv.paymentMode === 'Bank/Card') return acc + inv.netAmount;
       return acc;
     }, 0);
     const creditUdhaar = forwardSales.reduce((acc, inv) => {
@@ -149,6 +171,7 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
     return {
       netSales,
       cashInflow,
+      bankCardInflow,
       creditUdhaar,
       totalUnits,
       completedCount: forwardSales.length,
@@ -209,12 +232,12 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
         </div>
 
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Total Volume Sold</div>
-          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#0F172A', marginTop: '6px' }}>
-            {stats.totalUnits} <span style={{ fontSize: '12px', color: '#64748B', fontWeight: 400 }}>containers</span>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Bank / Card Inflow</div>
+          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#38BDF8', marginTop: '6px' }}>
+            {formatCurrency(stats.bankCardInflow)}
           </div>
           <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
-            Units &amp; Containers
+            Card POS &amp; bank transfers collected
           </div>
         </div>
       </div>
@@ -245,7 +268,7 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
 
           {/* Payment mode filter */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            {(['All Modes', 'Cash', 'Credit', 'Bank/Card'] as PaymentFilter[]).map((mode) => (
+            {(['All Modes', 'Cash', 'Credit', 'Bank/Card', 'Split'] as PaymentFilter[]).map((mode) => (
               <button
                 key={mode}
                 onClick={() => setPaymentFilter(mode)}

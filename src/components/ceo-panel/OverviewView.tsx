@@ -157,10 +157,12 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
         const salesInvs = dayInvs.filter((i) => (i.invoice_type || 'sales') !== 'return');
         const returnInvs = dayInvs.filter((i) => (i.invoice_type || 'sales') === 'return');
 
+        // grossSales = pre-discount subtotal of all forward invoices
         const grossSales = salesInvs.reduce((sum, i) => sum + Number(i.subtotal || i.net_total || 0), 0);
         const returnTotal = returnInvs.reduce((sum, i) => sum + Number(i.net_total || 0), 0);
+        // Include delivery charges and deductions via net_total
         const discounts = salesInvs.reduce((sum, i) => sum + Number(i.discount || 0), 0);
-        const netSales = Math.max(0, grossSales - returnTotal);
+        const netSales = Math.max(0, salesInvs.reduce((s, i) => s + Number(i.net_total || 0), 0) - returnTotal);
 
         // Real COGS calculation based on items sold
         let calculatedCogs = 0;
@@ -169,11 +171,18 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
           if (Array.isArray(rawItems) && rawItems.length > 0) {
             rawItems.forEach((it: any) => {
               const qty = Number(it.qty || 1);
-              const cost = itemsCostMap[it.item_id] || itemsCostMap[it.item_code] || (Number(it.unit_price || it.rate || 0) * 0.70);
+              const recordedCost = itemsCostMap[it.item_id] || itemsCostMap[it.item_code] || 0;
+              // FIX CEO-02: only use fallback when no cost_price exists in the catalogue.
+              // Use a conservative 60% benchmark (not 70%) to avoid COGS inflation on
+              // heavily-discounted items; prefer real cost data whenever available.
+              const cost = recordedCost > 0
+                ? recordedCost
+                : Number(it.unit_price || it.rate || 0) * 0.60;
               calculatedCogs += cost * qty;
             });
           } else {
-            calculatedCogs += Number(inv.net_total || 0) * 0.70;
+            // No line-items embedded — fall back to invoice-level estimate at 60%
+            calculatedCogs += Number(inv.net_total || 0) * 0.60;
           }
         });
 
@@ -183,7 +192,10 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
           if (Array.isArray(rawItems) && rawItems.length > 0) {
             rawItems.forEach((it: any) => {
               const qty = Number(it.qty || 1);
-              const cost = itemsCostMap[it.item_id] || itemsCostMap[it.item_code] || (Number(it.unit_price || it.rate || 0) * 0.70);
+              const recordedCost = itemsCostMap[it.item_id] || itemsCostMap[it.item_code] || 0;
+              const cost = recordedCost > 0
+                ? recordedCost
+                : Number(it.unit_price || it.rate || 0) * 0.60;
               calculatedCogs = Math.max(0, calculatedCogs - (cost * qty));
             });
           }
@@ -413,7 +425,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
                 <th style={{ textAlign: 'right' }}>Gross Sales</th>
                 <th style={{ textAlign: 'right' }}>Discounts</th>
                 <th style={{ textAlign: 'right' }}>Net Sales</th>
-                <th style={{ textAlign: 'right' }}>COGS (~70%)</th>
+                <th style={{ textAlign: 'right' }}>COGS (Cost)</th>
                 <th style={{ textAlign: 'right' }}>Gross Profit</th>
                 <th style={{ textAlign: 'right' }}>Expenses</th>
                 <th style={{ textAlign: 'right' }}>Net Profit</th>

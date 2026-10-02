@@ -75,6 +75,9 @@ export interface Item {
   name: string;
   category?: string;
   brand?: string;
+  brand_id?: string;
+  series_id?: string;
+  series_name?: string;
   unit: string;
   pack_size?: string;
   shade_code?: string;
@@ -163,36 +166,122 @@ export interface InvoiceItem {
   token_action?: 'keep' | 'remove';
 }
 
+export interface Brand {
+  id: string;
+  tenant_id: string;
+  name: string;
+  status: 'active' | 'inactive';
+  created_at: string;
+  updated_at: string;
+  brand_series?: BrandSeries[];
+}
+
+export interface BrandSeries {
+  id: string;
+  tenant_id: string;
+  brand_id: string;
+  name: string;
+  status: 'active' | 'inactive';
+  created_at: string;
+  updated_at: string;
+  brands?: Brand;
+  series_token_configs?: SeriesTokenConfig[];
+}
+
+export interface CustomUnit {
+  id: string;
+  tenant_id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface SeriesTokenConfig {
+  id: string;
+  tenant_id: string;
+  series_id: string;
+  unit_name: string;
+  is_enabled: boolean;
+  token_value: number;
+  is_drum_auto: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TokenRedemption {
+  id: string;
+  tenant_id: string;
+  redemption_no: string;
+  client_id?: string;
+  client_name: string;
+  total_tokens: number;
+  total_amount: number;
+  payout_method: 'cash';
+  shift_id?: string;
+  created_by?: string;
+  created_at: string;
+  items?: TokenRedemptionItem[];
+}
+
+export interface TokenRedemptionItem {
+  id: string;
+  redemption_id: string;
+  brand_id?: string;
+  brand_name: string;
+  series_id?: string;
+  series_name: string;
+  unit_name: string;
+  token_value: number;
+  quantity: number;
+  line_total: number;
+  created_at: string;
+}
+
 export interface TokenTransaction {
   id: string;
   tenant_id: string;
-  transaction_type: 'issued' | 'redeemed' | 'shop_retained' | 'opening_stock' | 'write_off';
+  // Canonical type field — use this; transaction_type is removed
+  type?: 'issued' | 'shop_retained' | 'redeemed' | 'opening_stock' | 'settle_vendor' | 'write_off' | 'used_purchase' | 'reversal';
   invoice_id?: string;
+  redemption_id?: string;
   client_id?: string;
   client_name?: string;
+  // 4-part identity — canonical fields
+  brand_id?: string;
+  brand_name?: string;
+  series_id?: string;
+  series_name?: string;
+  unit_name?: string;
+  token_value?: number;
+  quantity?: number;
+  remaining_quantity?: number;
+  total_amount?: number;
+  usage_status?: 'available' | 'settled' | 'used' | 'written_off' | 'reversed' | 'n_a' | null;
+  shift_id?: string;
+  notes?: string;
+  write_off_reason?: 'Damaged' | 'Lost' | 'Invalid' | 'Other' | string | null;
+  settled_vendor_name?: string;
+  used_against_purchase_id?: string | null;
+  used_against_voucher_id?: string | null;
+  used_date?: string | null;
+  parent_transaction_id?: string | null;
+  created_by?: string;
+  created_at: string;
+  // Legacy fields preserved for incremental compatibility until Task 6.6 components migrated
+  transaction_type?: string;
   item_id?: string;
   item_name?: string;
   brand?: string;
   category?: string;
-  token_value: number;
   token_count?: number;
   unit_token_value?: number;
   remaining_count?: number;
   is_external?: boolean;
   redeemed_amount?: number;
   remaining_balance?: number;
-  shift_id?: string;
-  notes?: string;
   claim_status?: 'pending' | 'claimed' | null;
   claimed_date?: string | null;
   claim_reference?: string | null;
-  usage_status?: 'available' | 'used' | 'written_off' | null;
-  write_off_reason?: string | null;
   settlement_type?: 'purchase' | 'voucher' | 'vendor_rep_cash' | 'vendor_rep_credit' | null;
-  parent_transaction_id?: string | null;
-  used_against_purchase_id?: string | null;
-  used_against_voucher_id?: string | null;
-  used_date?: string | null;
   purchases?: {
     id?: string;
     purchase_no?: string;
@@ -205,7 +294,6 @@ export interface TokenTransaction {
     party_name?: string;
     date?: string;
   } | null;
-  created_at: string;
 }
 
 export interface HeldInvoice {

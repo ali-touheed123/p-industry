@@ -195,8 +195,8 @@ export async function POST(req: NextRequest) {
         .single();
 
       if (client) {
-        // Receipt decreases client debt (balance)
-        const updatedBal = Math.max(0, (client.current_balance || 0) - totalSettlementAmount);
+        // Receipt decreases client debt (negative balance = advance / store credit)
+        const updatedBal = (Number(client.current_balance) || 0) - totalSettlementAmount;
         await supabaseAdmin
           .from('clients')
           .update({ current_balance: updatedBal })
@@ -210,8 +210,8 @@ export async function POST(req: NextRequest) {
         .single();
 
       if (supplier) {
-        // Payment decreases supplier payable (balance)
-        const updatedBal = Math.max(0, (supplier.current_balance || 0) - totalSettlementAmount);
+        // Payment decreases supplier payable (negative balance = advance / credit held with supplier)
+        const updatedBal = (Number(supplier.current_balance) || 0) - totalSettlementAmount;
         await supabaseAdmin
           .from('suppliers')
           .update({

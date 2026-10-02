@@ -58,15 +58,11 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
       if (!tenantId) return;
       setLoading(true);
       try {
-        let url = `/api/tokens?tenant_id=${tenantId}`;
-        if (startDate && activeDatePreset !== 'all') {
-          url += `&start_date=${startDate}`;
-        }
-        if (endDate && activeDatePreset !== 'all') {
-          url += `&end_date=${endDate}T23:59:59.999Z`;
-        }
-
-        const res = await fetch(url);
+        // FIX CEO-11: always fetch ALL tokens (no date filter) so the physical safe
+        // custody balance is never truncated by the period picker.
+        // Date filtering is applied client-side for the transaction table only.
+        const allTokensUrl = `/api/tokens?tenant_id=${tenantId}`;
+        const res = await fetch(allTokensUrl);
         const data = await res.json();
 
         if (isMounted && data.success && Array.isArray(data.transactions)) {
@@ -86,7 +82,7 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
     return () => {
       isMounted = false;
     };
-  }, [branch?.id, branch?.slug, startDate, endDate, activeDatePreset]);
+  }, [branch?.id, branch?.slug]);
 
   // Preset Selector
   const handlePresetSelect = (preset: 'today' | '7days' | 'month' | 'all') => {
@@ -108,9 +104,20 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
     }
   };
 
-  // Search Filtered Transactions
+  // FIX CEO-MOD-4: apply date filter CLIENT-SIDE using PKT-aware boundary.
+  // The old approach sent endDate + 'T23:59:59.999Z' (UTC) to the server which
+  // is 4:59:59 PKT — cutting off 5 hours of same-day PKT activity.
+  // We now filter locally using the local ISO date string comparison.
   const filteredTransactions = useMemo(() => {
     return transactions.filter((t) => {
+      // Date boundary: compare local YYYY-MM-DD from created_at
+      if (activeDatePreset !== 'all' && (startDate || endDate)) {
+        const txLocalDate = t.created_at
+          ? new Date(t.created_at).toLocaleDateString('en-CA') // yields YYYY-MM-DD in local tz
+          : '';
+        if (startDate && txLocalDate && txLocalDate < startDate) return false;
+        if (endDate && txLocalDate && txLocalDate > endDate) return false;
+      }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchClient = t.client_name?.toLowerCase().includes(q);
@@ -125,9 +132,11 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
       }
       return true;
     });
-  }, [transactions, searchQuery]);
+  }, [transactions, searchQuery, startDate, endDate, activeDatePreset]);
 
-  // Executive KPI Summary Metrics
+  // FIX CEO-11: physicalAssetValue and safe-custody metrics use the full unfiltered
+  // `transactions` array so they reflect the real safe balance at all times,
+  // regardless of which date period the user has selected in the toolbar.
   const metrics = useMemo(() => {
     let usableStockpileValue = 0;
     let usableStockpileCount = 0;
@@ -141,42 +150,35 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
     let customerIssuedValue = 0;
     let customerIssuedCount = 0;
 
-    // Discrete physical asset tracking
-    let physicalAssetValue = 0;    // remaining_count × unit_token_value for all unredeemed stockpile rows
-    let externalIntakeValue = 0;   // is_external loose tokens accepted
+    // Discrete physical asset tracking — always computed from ALL transactions (no date gate)
+    let physicalAssetValue = 0;
+    let externalIntakeValue = 0;
     let externalIntakeCount = 0;
-    let writeOffValue = 0;         // tokens written off (damaged/expired)
+    let writeOffValue = 0;
     let writeOffCount = 0;
     let openingStockValue = 0;
     let openingStockCount = 0;
 
-    filteredTransactions.forEach((t) => {
-      const val = Number(t.token_value || 0);
-      const isUsed = t.usage_status === 'used' || Boolean(t.used_against_purchase_id) || Boolean(t.used_against_voucher_id);
+    // Physical safe balance: iterate over ALL transactions (not just the date-filtered set)
+    transactions.forEach((t) => {
+      const txType = t.type || t.transaction_type;
+      const val = Number(t.total_amount ?? t.token_value ?? 0);
+      const isUsed = t.usage_status === 'used' || t.usage_status === 'settled' || Boolean(t.used_against_purchase_id) || Boolean(t.used_against_voucher_id);
       const isWrittenOff = t.usage_status === 'written_off';
 
-      // Discrete physical asset: use remaining_count * unit_token_value when available
       if (
-        (t.transaction_type === 'shop_retained' || t.transaction_type === 'opening_stock') &&
+        (txType === 'shop_retained' || txType === 'opening_stock' || txType === 'redeemed') &&
         !isUsed && !isWrittenOff
       ) {
-        const discreteVal = t.remaining_count != null && t.unit_token_value != null
-          ? (t.remaining_count as number) * (t.unit_token_value as number)
-          : val;
+        const discreteVal = t.remaining_quantity != null && t.token_value != null
+          ? Number(t.remaining_quantity) * Number(t.token_value)
+          : (t.remaining_count != null && t.unit_token_value != null
+            ? (t.remaining_count as number) * (t.unit_token_value as number)
+            : val);
         physicalAssetValue += discreteVal;
       }
 
-      if (t.transaction_type === 'shop_retained' || t.transaction_type === 'redeemed' || t.transaction_type === 'opening_stock') {
-        if (isUsed) {
-          usedStockpileValue += val;
-          usedStockpileCount += 1;
-        } else if (!isWrittenOff) {
-          usableStockpileValue += val;
-          usableStockpileCount += 1;
-        }
-      }
-
-      if (t.transaction_type === 'opening_stock' && !isUsed && !isWrittenOff) {
+      if (txType === 'opening_stock' && !isUsed && !isWrittenOff) {
         openingStockValue += val;
         openingStockCount += 1;
       }
@@ -186,15 +188,33 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
         externalIntakeCount += 1;
       }
 
-      if (isWrittenOff || t.transaction_type === 'write_off') {
+      if (isWrittenOff || txType === 'write_off') {
         writeOffValue += val;
         writeOffCount += 1;
       }
+    });
 
-      if (t.transaction_type === 'redeemed') {
-        customerRedeemedValue += Number(t.redeemed_amount || val || 0);
+    // Period-specific KPIs: iterate over filteredTransactions (date-gated)
+    filteredTransactions.forEach((t) => {
+      const txType = t.type || t.transaction_type;
+      const val = Number(t.total_amount ?? t.token_value ?? 0);
+      const isUsed = t.usage_status === 'used' || t.usage_status === 'settled' || Boolean(t.used_against_purchase_id) || Boolean(t.used_against_voucher_id);
+      const isWrittenOff = t.usage_status === 'written_off';
+
+      if (txType === 'shop_retained' || txType === 'redeemed' || txType === 'opening_stock') {
+        if (isUsed) {
+          usedStockpileValue += val;
+          usedStockpileCount += 1;
+        } else if (!isWrittenOff) {
+          usableStockpileValue += val;
+          usableStockpileCount += 1;
+        }
+      }
+
+      if (txType === 'redeemed') {
+        customerRedeemedValue += Number(t.total_amount ?? t.redeemed_amount ?? val);
         customerRedeemedCount += 1;
-      } else if (t.transaction_type === 'issued') {
+      } else if (txType === 'issued') {
         customerIssuedValue += val;
         customerIssuedCount += 1;
       }
@@ -218,27 +238,36 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
       openingStockCount,
       totalRecords: filteredTransactions.length,
     };
-  }, [filteredTransactions]);
+  }, [transactions, filteredTransactions]);
 
-  // Brand Breakdown for Usable Stockpile
+  // 4-Part Identity Breakdown for Usable Stockpile
   const brandBreakdown = useMemo(() => {
-    const map: Record<string, { brand: string; count: number; totalValue: number }> = {};
+    const map: Record<string, { brand: string; series: string; unit: string; tokenValue: number; count: number; totalValue: number }> = {};
 
     filteredTransactions
-      .filter(
-        (t) =>
-          (t.transaction_type === 'shop_retained' || t.transaction_type === 'redeemed') &&
+      .filter((t) => {
+        const txType = t.type || t.transaction_type;
+        return (
+          (txType === 'shop_retained' || txType === 'redeemed' || txType === 'opening_stock') &&
           t.usage_status !== 'used' &&
+          t.usage_status !== 'settled' &&
+          t.usage_status !== 'written_off' &&
           !t.used_against_purchase_id &&
           !t.used_against_voucher_id
-      )
+        );
+      })
       .forEach((t) => {
-        const b = t.brand || 'General';
-        if (!map[b]) {
-          map[b] = { brand: b, count: 0, totalValue: 0 };
+        const brand = t.brand_name || t.brand || 'General';
+        const series = t.series_name || 'Standard';
+        const unit = t.unit_name || '—';
+        const tv = Number(t.token_value) || 0;
+        const key = `${brand}|${series}|${unit}|${tv}`;
+        if (!map[key]) {
+          map[key] = { brand, series, unit, tokenValue: tv, count: 0, totalValue: 0 };
         }
-        map[b].count += 1;
-        map[b].totalValue += Number(t.token_value || 0);
+        const remQty = Number(t.remaining_quantity ?? t.remaining_count ?? t.quantity ?? t.token_count ?? 1);
+        map[key].count += remQty;
+        map[key].totalValue += remQty * tv;
       });
 
     return Object.values(map).sort((a, b) => b.totalValue - a.totalValue);
@@ -247,11 +276,12 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
   // Tab 1: Stockpile Transactions (Available / Used / Written Off)
   const stockpileData = useMemo(() => {
     return filteredTransactions.filter((t) => {
-      const isStockpileType = t.transaction_type === 'shop_retained' || t.transaction_type === 'opening_stock';
+      const txType = t.type || t.transaction_type;
+      const isStockpileType = txType === 'shop_retained' || txType === 'opening_stock' || txType === 'redeemed';
       if (!isStockpileType) return false;
       if (showExternalOnly && !t.is_external) return false;
       if (stockpileSubTab === 'written_off') return t.usage_status === 'written_off';
-      const isUsed = t.usage_status === 'used' || Boolean(t.used_against_purchase_id) || Boolean(t.used_against_voucher_id);
+      const isUsed = t.usage_status === 'used' || t.usage_status === 'settled' || Boolean(t.used_against_purchase_id) || Boolean(t.used_against_voucher_id);
       return stockpileSubTab === 'used' ? isUsed : (!isUsed && t.usage_status !== 'written_off');
     });
   }, [filteredTransactions, stockpileSubTab, showExternalOnly]);
@@ -259,9 +289,10 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
   // Tab 2: Customer Token Activity (Issued / Redeemed)
   const customerData = useMemo(() => {
     return filteredTransactions.filter((t) => {
-      if (t.transaction_type === 'shop_retained') return false;
-      if (customerFilter === 'issued') return t.transaction_type === 'issued';
-      if (customerFilter === 'redeemed') return t.transaction_type === 'redeemed';
+      const txType = t.type || t.transaction_type;
+      if (txType === 'shop_retained') return false;
+      if (customerFilter === 'issued') return txType === 'issued';
+      if (customerFilter === 'redeemed') return txType === 'redeemed';
       return true;
     });
   }, [filteredTransactions, customerFilter]);
@@ -299,13 +330,13 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
         `"${t.id}"`,
         `"${dateStr}"`,
         `"${timeStr}"`,
-        `"${t.transaction_type}"`,
+        `"${t.type || t.transaction_type}"`,
         `"${t.client_name || 'Walk-in'}"`,
         `"${t.item_name || '—'}"`,
-        `"${t.brand || '—'}"`,
-        `"${t.category || '—'}"`,
-        t.token_value || 0,
-        t.redeemed_amount || 0,
+        `"${t.brand_name || t.brand || '—'}"`,
+        `"${t.series_name || t.category || '—'}"`,
+        t.total_amount || t.token_value || 0,
+        t.total_amount || t.redeemed_amount || 0,
         `"${t.usage_status || 'available'}"`,
         `"${t.purchases?.purchase_no || t.used_against_purchase_id || '—'}"`,
         `"${t.purchases?.supplier_name || '—'}"`,
@@ -479,9 +510,9 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
             </span>
           </div>
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-            {brandBreakdown.map((item) => (
+            {brandBreakdown.map((item, idx) => (
               <div
-                key={item.brand}
+                key={`${item.brand}-${item.series}-${item.unit}-${item.tokenValue}-${idx}`}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -493,9 +524,10 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
                 }}
               >
                 <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#D97706' }} />
-                <span style={{ fontSize: '12px', fontWeight: 600, color: '#0F172A' }}>{item.brand}</span>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#0F172A' }}>{item.brand}</span>
+                <span style={{ fontSize: '11px', color: '#475569' }}>· {item.series} ({item.unit})</span>
                 <span className="ceo-font-mono" style={{ fontSize: '11px', color: '#64748B' }}>
-                  ({item.count} pcs)
+                  ({item.count} pcs @ Rs.{item.tokenValue.toLocaleString()})
                 </span>
                 <span className="ceo-font-mono" style={{ fontSize: '12px', fontWeight: 700, color: '#D97706' }}>
                   {formatCurrency(item.totalValue)}
@@ -712,9 +744,9 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
                 <tr>
                   <th>Date &amp; Time</th>
                   <th>Origin / Source</th>
-                  <th>Paint Product</th>
-                  <th>Brand</th>
-                  <th>Pack Size</th>
+                  <th>Brand &amp; Series</th>
+                  <th>Unit / Pack</th>
+                  <th style={{ textAlign: 'center' }}>Qty</th>
                   <th style={{ textAlign: 'right' }}>Token Value</th>
                   <th style={{ textAlign: 'center' }}>Stockpile Status</th>
                   <th>Applied Supplier PO</th>
@@ -726,7 +758,7 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
                   const createdDate = t.created_at ? new Date(t.created_at) : new Date();
                   const dateStr = createdDate.toISOString().split('T')[0];
                   const timeStr = createdDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                  const isUsed = t.usage_status === 'used' || Boolean(t.used_against_purchase_id) || Boolean(t.used_against_voucher_id);
+                  const isUsed = t.usage_status === 'used' || t.usage_status === 'settled' || Boolean(t.used_against_purchase_id) || Boolean(t.used_against_voucher_id);
 
                   return (
                     <tr key={t.id} onClick={() => setSelectedToken(t)} style={{ cursor: 'pointer' }}>
@@ -735,17 +767,22 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
                       </td>
                       <td>
                         <div style={{ fontWeight: 600, color: '#0F172A' }}>{t.client_name || 'Counter Sale (Shop Retained)'}</div>
-                        <div style={{ fontSize: '10px', color: t.transaction_type === 'redeemed' ? '#6366F1' : '#D97706' }}>
-                          {t.transaction_type === 'redeemed' ? 'Customer Redeemed' : 'POS Retained'}
+                        <div style={{ fontSize: '10px', color: (t.type || t.transaction_type) === 'redeemed' ? '#6366F1' : '#D97706' }}>
+                          {(t.type || t.transaction_type) === 'redeemed' ? 'Customer Redeemed' : (t.type || t.transaction_type) === 'opening_stock' ? 'Opening Stock' : 'POS Retained'}
                         </div>
                       </td>
-                      <td style={{ fontWeight: 600, color: '#0F172A' }}>{t.item_name || 'Paint Item'}</td>
+                      <td>
+                        <div style={{ fontWeight: 700, color: '#0F172A' }}>{t.brand_name || t.brand || 'General'}</div>
+                        <div style={{ fontSize: '11px', color: '#64748B' }}>{t.series_name || '—'}</div>
+                      </td>
                       <td>
                         <span style={{ fontSize: '11px', padding: '2px 6px', borderRadius: '4px', backgroundColor: '#F1F5F9', color: '#475569', fontWeight: 600 }}>
-                          {t.brand || 'General'}
+                          {t.unit_name || t.category || '—'}
                         </span>
                       </td>
-                      <td style={{ color: '#64748B', fontSize: '12px' }}>{t.category || '—'}</td>
+                      <td style={{ textAlign: 'center', fontFamily: 'JetBrains Mono, monospace', fontSize: '11.5px', fontWeight: 700, color: '#334155' }}>
+                        {Number(t.remaining_quantity ?? t.quantity ?? 1)}
+                      </td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: '#0F172A' }} className="ceo-font-mono">
                         {formatCurrency(Number(t.token_value || 0))}
                       </td>
@@ -801,8 +838,8 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
                   <th>Date &amp; Time</th>
                   <th>Action Type</th>
                   <th>Customer / Painter</th>
-                  <th>Paint Product</th>
-                  <th>Brand</th>
+                  <th>Brand &amp; Series</th>
+                  <th>Unit</th>
                   <th style={{ textAlign: 'right' }}>Token Value</th>
                   <th style={{ textAlign: 'right' }}>Redeemed Cash</th>
                   <th style={{ textAlign: 'center' }}>Stockpile Join Status</th>
@@ -814,7 +851,7 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
                   const createdDate = t.created_at ? new Date(t.created_at) : new Date();
                   const dateStr = createdDate.toISOString().split('T')[0];
                   const timeStr = createdDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                  const isRedeemed = t.transaction_type === 'redeemed';
+                  const isRedeemed = (t.type || t.transaction_type) === 'redeemed';
 
                   return (
                     <tr key={t.id} onClick={() => setSelectedToken(t)} style={{ cursor: 'pointer' }}>
@@ -839,10 +876,13 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
                         <div style={{ fontWeight: 600, color: '#0F172A' }}>{t.client_name || 'Walk-in Customer'}</div>
                         {t.notes && <div style={{ fontSize: '10px', color: '#64748B', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.notes}</div>}
                       </td>
-                      <td style={{ fontWeight: 600, color: '#0F172A' }}>{t.item_name || 'Paint Item'}</td>
+                      <td>
+                        <div style={{ fontWeight: 700, color: '#0F172A' }}>{t.brand_name || t.brand || 'General'}</div>
+                        <div style={{ fontSize: '11px', color: '#64748B' }}>{t.series_name || '—'}</div>
+                      </td>
                       <td>
                         <span style={{ fontSize: '11px', padding: '2px 6px', borderRadius: '4px', backgroundColor: '#F1F5F9', color: '#475569', fontWeight: 600 }}>
-                          {t.brand || 'General'}
+                          {t.unit_name || '—'}
                         </span>
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: '#0F172A' }} className="ceo-font-mono">
@@ -912,7 +952,7 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
                 <div style={{ padding: '12px', backgroundColor: '#FFFFFF', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
                   <div style={{ fontSize: '11px', color: '#64748B', fontWeight: 600 }}>Transaction Type</div>
                   <div style={{ fontSize: '14px', fontWeight: 700, color: '#0F172A', marginTop: '2px' }}>
-                    {selectedToken.transaction_type === 'shop_retained' ? 'Shop Retained (POS)' : selectedToken.transaction_type === 'redeemed' ? 'Customer Redeemed' : 'Customer Issued'}
+                    {(selectedToken.type || selectedToken.transaction_type) === 'shop_retained' ? 'Shop Retained (POS)' : (selectedToken.type || selectedToken.transaction_type) === 'redeemed' ? 'Customer Redeemed' : (selectedToken.type || selectedToken.transaction_type) === 'opening_stock' ? 'Opening Stock' : 'Customer Issued'}
                   </div>
                 </div>
 

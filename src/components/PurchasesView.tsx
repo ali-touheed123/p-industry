@@ -179,7 +179,7 @@ export default function PurchasesView({
     const supName = (selectedSupplier?.name || supplierQuery || '').toLowerCase().trim();
     if (!supName) return availableStockpileTokens;
     return availableStockpileTokens.filter((t) => {
-      const brand = (t.brand || '').toLowerCase().trim();
+      const brand = (t.brand_name || t.brand || '').toLowerCase().trim();
       if (!brand) return false;
       const brandWords = brand.split(/\s+/).filter((w: string) => w.length > 2);
       const supWords = supName.split(/\s+/).filter((w: string) => w.length > 2);
@@ -1380,10 +1380,11 @@ export default function PurchasesView({
                             />
                             <div>
                               <div style={{ fontSize: '12px', fontWeight: 700, color: '#0F172A' }}>
-                                {t.brand || 'General'} · <span style={{ fontWeight: 500, color: '#475569' }}>{t.item_name || 'Paint Item'}</span>
+                                {t.brand_name || t.brand || 'General'} · <span style={{ fontWeight: 500, color: '#475569' }}>{[t.series_name, t.unit_name].filter(Boolean).join(' · ') || t.item_name || 'Paint Token'}</span>
                               </div>
                               <div style={{ fontSize: '10px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
-                                {t.created_at ? new Date(t.created_at).toLocaleDateString('en-PK') : ''} {t.category ? `· ${t.category}` : ''}
+                                {t.created_at ? new Date(t.created_at).toLocaleDateString('en-PK') : ''}
+                                {Number(t.remaining_quantity ?? t.quantity ?? 1) > 1 ? ` · Qty: ${t.remaining_quantity ?? t.quantity}` : ''}
                               </div>
                             </div>
                           </div>

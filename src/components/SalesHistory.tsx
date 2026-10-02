@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Invoice, InvoiceItem } from '@/types';
+import { printViaIframe, buildThermalHtmlDocument } from '@/utils/iframePrint';
+import { ReceiptTemplate } from '@/types/receipt';
 import {
   Search,
   Calendar,
@@ -33,21 +35,98 @@ import {
 } from 'lucide-react';
 import { generateReceiptImageBlob } from '@/utils/receiptCanvas';
 
+/** UX-01: Build an 80mm thermal receipt as a plain HTML string for iframe printing.
+ * Applies footer/branding from assigned template when available (DEV-07). */
+function buildSalesHistoryThermalHtml(inv: any, tenantName: string, tmpl?: ReceiptTemplate | null): string {
+  const fmt = (n: number) => Number(n || 0).toLocaleString();
+  const isSplit = inv.payment_type === 'split' ||
+    (Number(inv.cash_paid || 0) > 0 &&
+      (Number(inv.card_paid || 0) > 0 || Number(inv.bank_paid || 0) > 0 || Number(inv.others_paid || 0) > 0));
+
+  const items: any[] = inv.invoice_items || inv.items || [];
+  const itemRows = items.map((it: any, idx: number) => {
+    const lineTotal = Number(it.total_price || (it.qty * it.unit_price) || 0);
+    const code = it.item_code ? `[${it.item_code}] ` : '';
+    const shade = it.shade_code ? ` (${it.shade_code})` : '';
+    return `<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;border-bottom:${idx < items.length - 1 ? '1px dotted #ccc' : 'none'};padding-bottom:3px">
+      <span>${code}${it.item_name || '—'}${shade} x${it.qty}</span>
+      <span style="font-weight:700">Rs. ${fmt(lineTotal)}</span>
+    </div>`;
+  }).join('');
+
+  const splitRows = isSplit ? `
+    <div style="padding-left:8px;font-size:11px;color:#444">
+      ${Number(inv.cash_paid || 0) > 0 ? `<div style="display:flex;justify-content:space-between"><span>&bull; Cash:</span><span>Rs. ${fmt(inv.cash_paid)}</span></div>` : ''}
+      ${Number(inv.card_paid || 0) > 0 ? `<div style="display:flex;justify-content:space-between"><span>&bull; Card:</span><span>Rs. ${fmt(inv.card_paid)}</span></div>` : ''}
+      ${Number(inv.bank_paid || 0) > 0 ? `<div style="display:flex;justify-content:space-between"><span>&bull; Bank:</span><span>Rs. ${fmt(inv.bank_paid)}</span></div>` : ''}
+      ${Number(inv.others_paid || 0) > 0 ? `<div style="display:flex;justify-content:space-between"><span>&bull; Other:</span><span>Rs. ${fmt(inv.others_paid)}</span></div>` : ''}
+    </div>` : '';
+
+  const dueRow = Number(inv.due_amount || 0) > 0
+    ? `<div style="display:flex;justify-content:space-between;font-weight:700"><span>BALANCE DUE:</span><span>Rs. ${fmt(inv.due_amount)}</span></div>` : '';
+  const discRow = Number(inv.discount || 0) > 0
+    ? `<div style="display:flex;justify-content:space-between"><span>Discount:</span><span>-Rs. ${fmt(inv.discount)}</span></div>` : '';
+
+  const footer = tmpl?.template_json?.footer;
+  const footerLine1 = footer?.line1 || `Thank you for your business!`;
+  const footerLine2 = footer?.line2 || '';
+  const whatsappRow = (footer?.showWhatsapp && footer?.whatsappNumber)
+    ? `<div style="text-align:center;font-size:9px;color:#555">WhatsApp: ${footer.whatsappNumber}</div>` : '';
+  const poweredBy = (footer?.showPoweredBy !== false)
+    ? `<div style="text-align:center;font-size:8px;color:#aaa;margin-top:2px">${footer?.poweredByText || 'Powered by Pyntflow'}</div>` : '';
+
+  return `
+<div style="text-align:center;border-bottom:1px dashed #000;padding-bottom:12px;margin-bottom:12px">
+  <h2 style="font-size:16px;font-weight:900;text-transform:uppercase;margin:0 0 2px 0">${tenantName}</h2>
+  <p style="font-size:11px;color:#555;margin:0">Pyntflow Retail &amp; Wholesale POS</p>
+  <div style="font-size:12px;font-weight:800;margin-top:4px">${inv.invoice_no || '—'}</div>
+  <div style="font-size:11px;color:#666">Date: ${inv.date || '—'} &middot; Customer: ${inv.client_name || 'Walk-in'}</div>
+</div>
+<div style="border-bottom:1px dashed #000;padding-bottom:12px;margin-bottom:12px">
+  ${itemRows}
+</div>
+<div style="display:flex;flex-direction:column;gap:4px;font-size:12px;margin-bottom:16px">
+  <div style="display:flex;justify-content:space-between"><span>Subtotal:</span><span>Rs. ${fmt(inv.subtotal)}</span></div>
+  ${discRow}
+  <div style="display:flex;justify-content:space-between;font-weight:900;font-size:14px;border-top:1px solid #000;padding-top:4px;margin-top:2px">
+    <span>NET TOTAL:</span><span>Rs. ${fmt(inv.net_total)}</span>
+  </div>
+  <div style="display:flex;justify-content:space-between;font-weight:700">
+    <span>PAID (${(inv.payment_type || 'CASH').toUpperCase()}):</span><span>Rs. ${fmt(inv.paid_amount)}</span>
+  </div>
+  ${splitRows}${dueRow}
+</div>
+<div style="text-align:center;font-size:9.5px;color:#555">${footerLine1}</div>
+${footerLine2 ? `<div style="text-align:center;font-size:9px;color:#777;margin-top:2px">${footerLine2}</div>` : ''}
+${whatsappRow}
+${poweredBy}
+`;
+}
+
 interface TokenRedemptionRow {
   id: string;
   tenant_id?: string;
-  transaction_type: 'redeemed';
+  type?: 'redeemed';
+  redemption_no?: string;
   client_id?: string | null;
   client_name: string | null;
-  item_id?: string | null;
-  item_name: string | null;
-  brand: string | null;
-  category?: string | null;
-  redeemed_amount: number;
-  remaining_balance?: number;
+  total_tokens?: number;
+  total_amount?: number;
+  redeemed_amount?: number;
   notes?: string | null;
   shift_id?: string | null;
   created_at: string;
+  token_redemption_items?: Array<{
+    brand_name: string;
+    series_name: string;
+    unit_name: string;
+    quantity: number;
+    token_value: number;
+    line_total: number;
+  }>;
+  // Legacy compatibility fields
+  item_name?: string | null;
+  brand?: string | null;
 }
 
 interface Props {
@@ -129,6 +208,9 @@ export default function SalesHistory({
   const [isGeneratingWhatsApp, setIsGeneratingWhatsApp] = useState<boolean>(false);
   const [copiedReceipt, setCopiedReceipt] = useState<boolean>(false);
 
+  // Assigned receipt template for this branch (DEV-07)
+  const [assignedTemplate, setAssignedTemplate] = useState<ReceiptTemplate | null>(null);
+
   // Helper: Strictly Registered Customer Check (Excludes Walk-in)
   const isRegisteredCustomer = (inv: Invoice | null | undefined): boolean => {
     if (!inv) return false;
@@ -180,18 +262,10 @@ export default function SalesHistory({
     if (!tenantId) return;
     setLoadingTokens(true);
     try {
-      let url = `/api/tokens?tenant_id=${tenantId}&transaction_type=redeemed`;
-      if (startDate && activeDatePreset !== 'all') {
-        url += `&start_date=${startDate}`;
-      }
-      if (endDate && activeDatePreset !== 'all') {
-        url += `&end_date=${endDate}T23:59:59.999Z`;
-      }
-
-      const res = await fetch(url);
+      const res = await fetch(`/api/token-redemptions?tenant_id=${tenantId}`);
       const data = await res.json();
       if (data.success) {
-        setTokenRedemptions(data.transactions || []);
+        setTokenRedemptions(data.redemptions || []);
       } else {
         setTokenRedemptions([]);
       }
@@ -234,6 +308,23 @@ export default function SalesHistory({
     fetchTokenRedemptions();
     fetchClients();
   }, [tenantId, startDate, endDate, typeFilter, paymentFilter, activeDatePreset]);
+
+  // Fetch assigned receipt template for this tenant on mount (DEV-07)
+  useEffect(() => {
+    if (!tenantId) return;
+    const fetchTemplate = async () => {
+      try {
+        const res = await fetch(`/api/receipt-templates/assign?tenant_id=${tenantId}`);
+        const data = await res.json();
+        if (data.success && data.template) {
+          setAssignedTemplate(data.template);
+        }
+      } catch (err) {
+        console.error('Failed to load receipt template for SalesHistory:', err);
+      }
+    };
+    fetchTemplate();
+  }, [tenantId]);
 
   // Handle Preset Clicks
   const handlePresetSelect = (preset: 'today' | 'yesterday' | '7days' | 'month' | 'all') => {
@@ -284,19 +375,31 @@ export default function SalesHistory({
   // Client-side search & filtering for Token Redemptions
   const filteredTokenRedemptions = useMemo(() => {
     return tokenRedemptions.filter((t) => {
+      if (activeDatePreset !== 'all' && t.created_at) {
+        const itemDate = t.created_at.split('T')[0];
+        if (startDate && itemDate < startDate) return false;
+        if (endDate && itemDate > endDate) return false;
+      }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
+        const matchNo = t.redemption_no?.toLowerCase().includes(q);
         const matchClient = t.client_name?.toLowerCase().includes(q);
+        const matchNotes = t.notes?.toLowerCase().includes(q);
         const matchItem = t.item_name?.toLowerCase().includes(q);
         const matchBrand = t.brand?.toLowerCase().includes(q);
-        const matchNotes = t.notes?.toLowerCase().includes(q);
-        if (!matchClient && !matchItem && !matchBrand && !matchNotes) {
+        const matchItems = t.token_redemption_items?.some(
+          (it) =>
+            it.brand_name.toLowerCase().includes(q) ||
+            it.series_name.toLowerCase().includes(q) ||
+            it.unit_name.toLowerCase().includes(q)
+        );
+        if (!matchNo && !matchClient && !matchNotes && !matchItem && !matchBrand && !matchItems) {
           return false;
         }
       }
       return true;
     });
-  }, [tokenRedemptions, searchQuery]);
+  }, [tokenRedemptions, searchQuery, activeDatePreset, startDate, endDate]);
 
   // Combined and sorted row list for display
   type CombinedRow =
@@ -331,12 +434,14 @@ export default function SalesHistory({
     return list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [filteredInvoices, filteredTokenRedemptions, typeFilter, paymentFilter]);
 
-  // Summary Metrics Calculation
+  // Summary Metrics Calculation — Disaggregated Payment Tenders (BUG-04)
   const summaryMetrics = useMemo(() => {
     let grossSales = 0;
     let returnsTotal = 0;
     let netSales = 0;
-    let cashCollected = 0;
+    let physicalCash = 0;
+    let digitalPaid = 0;
+    let tokensOtherPaid = 0;
     let creditAmount = 0;
     let totalItemsCount = 0;
     let completedCount = 0;
@@ -348,13 +453,38 @@ export default function SalesHistory({
       const paid = Number(inv.paid_amount || 0);
       const due = Number(inv.due_amount || 0);
 
+      // Extract tender amounts
+      let invCash = Number(inv.cash_paid || 0);
+      let invCard = Number(inv.card_paid || 0);
+      let invBank = Number(inv.bank_paid || 0);
+      let invOthers = Number(inv.others_paid || 0);
+
+      // Fallback for single tender invoices where split columns are 0 but paid_amount is present
+      if (invCash === 0 && invCard === 0 && invBank === 0 && invOthers === 0 && paid > 0) {
+        const pt = (inv.payment_type as string)?.toLowerCase();
+        if (pt === 'card') {
+          invCard = paid;
+        } else if (pt === 'bank') {
+          invBank = paid;
+        } else if (pt === 'cheque' || pt === 'others') {
+          invOthers = paid;
+        } else {
+          invCash = paid;
+        }
+      }
+
       if (isRet) {
         returnsTotal += net;
         returnCount += 1;
+        // Sales returns reduce cash/digital according to how the refund was tendered
+        physicalCash -= invCash;
+        digitalPaid -= (invCard + invBank);
       } else {
         grossSales += net;
         completedCount += 1;
-        cashCollected += paid;
+        physicalCash += invCash;
+        digitalPaid += (invCard + invBank);
+        tokensOtherPaid += invOthers;
         creditAmount += due;
       }
 
@@ -373,7 +503,9 @@ export default function SalesHistory({
       grossSales,
       returnsTotal,
       netSales,
-      cashCollected,
+      physicalCash,
+      digitalPaid,
+      tokensOtherPaid,
       creditAmount,
       totalItemsCount,
       completedCount,
@@ -709,11 +841,11 @@ export default function SalesHistory({
       </div>
 
       <div style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-        {/* ── Summary Metric Cards ── */}
+        {/* ── Summary Metric Cards (Disaggregated KPIs - BUG-04) ── */}
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(185px, 1fr))',
             gap: '12px',
           }}
         >
@@ -728,22 +860,22 @@ export default function SalesHistory({
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-              <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', fontFamily: 'JetBrains Mono, monospace' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', fontFamily: 'JetBrains Mono, monospace' }}>
                 Net Sales
               </span>
               <div style={{ width: 28, height: 28, borderRadius: '6px', background: '#DCFCE7', color: '#16A34A', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <TrendingUp style={{ width: 16, height: 16 }} />
               </div>
             </div>
-            <div style={{ fontSize: '22px', fontWeight: 900, color: '#0F172A', fontFamily: 'JetBrains Mono, monospace', letterSpacing: '-0.02em' }}>
+            <div style={{ fontSize: '20px', fontWeight: 900, color: '#0F172A', fontFamily: 'JetBrains Mono, monospace', letterSpacing: '-0.02em' }}>
               Rs. {summaryMetrics.netSales.toLocaleString()}
             </div>
             <div style={{ fontSize: '11px', color: '#16A34A', fontWeight: 600, marginTop: '4px' }}>
-              {summaryMetrics.completedCount} completed sales
+              {summaryMetrics.completedCount} sales{summaryMetrics.returnCount > 0 ? ` · ${summaryMetrics.returnCount} returns` : ''}
             </div>
           </div>
 
-          {/* Cash Collected */}
+          {/* Physical Cash */}
           <div
             style={{
               background: '#FFFFFF',
@@ -754,18 +886,44 @@ export default function SalesHistory({
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-              <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', fontFamily: 'JetBrains Mono, monospace' }}>
-                Cash Inflow
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', fontFamily: 'JetBrains Mono, monospace' }}>
+                Physical Cash
               </span>
               <div style={{ width: 28, height: 28, borderRadius: '6px', background: '#EFF6FF', color: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Banknote style={{ width: 16, height: 16 }} />
               </div>
             </div>
-            <div style={{ fontSize: '22px', fontWeight: 900, color: '#0F172A', fontFamily: 'JetBrains Mono, monospace', letterSpacing: '-0.02em' }}>
-              Rs. {summaryMetrics.cashCollected.toLocaleString()}
+            <div style={{ fontSize: '20px', fontWeight: 900, color: '#0F172A', fontFamily: 'JetBrains Mono, monospace', letterSpacing: '-0.02em' }}>
+              Rs. {summaryMetrics.physicalCash.toLocaleString()}
             </div>
-            <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
-              Direct cash received
+            <div style={{ fontSize: '11px', color: '#2563EB', fontWeight: 600, marginTop: '4px' }}>
+              Physical till cash
+            </div>
+          </div>
+
+          {/* Digital / Card / Bank */}
+          <div
+            style={{
+              background: '#FFFFFF',
+              border: '1px solid #E2E8F0',
+              borderRadius: '10px',
+              padding: '1rem',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', fontFamily: 'JetBrains Mono, monospace' }}>
+                Digital &amp; Bank
+              </span>
+              <div style={{ width: 28, height: 28, borderRadius: '6px', background: '#F0FDF4', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <CreditCard style={{ width: 16, height: 16 }} />
+              </div>
+            </div>
+            <div style={{ fontSize: '20px', fontWeight: 900, color: '#0F172A', fontFamily: 'JetBrains Mono, monospace', letterSpacing: '-0.02em' }}>
+              Rs. {summaryMetrics.digitalPaid.toLocaleString()}
+            </div>
+            <div style={{ fontSize: '11px', color: '#059669', fontWeight: 600, marginTop: '4px' }}>
+              Card &amp; online transfers
             </div>
           </div>
 
@@ -780,18 +938,18 @@ export default function SalesHistory({
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-              <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', fontFamily: 'JetBrains Mono, monospace' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', fontFamily: 'JetBrains Mono, monospace' }}>
                 Credit (Udhar)
               </span>
               <div style={{ width: 28, height: 28, borderRadius: '6px', background: '#FEF3C7', color: '#D97706', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <CreditCard style={{ width: 16, height: 16 }} />
+                <Receipt style={{ width: 16, height: 16 }} />
               </div>
             </div>
-            <div style={{ fontSize: '22px', fontWeight: 900, color: '#D97706', fontFamily: 'JetBrains Mono, monospace', letterSpacing: '-0.02em' }}>
+            <div style={{ fontSize: '20px', fontWeight: 900, color: '#D97706', fontFamily: 'JetBrains Mono, monospace', letterSpacing: '-0.02em' }}>
               Rs. {summaryMetrics.creditAmount.toLocaleString()}
             </div>
             <div style={{ fontSize: '11px', color: '#D97706', fontWeight: 600, marginTop: '4px' }}>
-              Client ledger balance
+              Booked to customer accounts
             </div>
           </div>
 
@@ -806,15 +964,15 @@ export default function SalesHistory({
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-              <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', fontFamily: 'JetBrains Mono, monospace' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', fontFamily: 'JetBrains Mono, monospace' }}>
                 Volume Sold
               </span>
               <div style={{ width: 28, height: 28, borderRadius: '6px', background: '#F3E8FF', color: '#9333EA', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Layers style={{ width: 16, height: 16 }} />
               </div>
             </div>
-            <div style={{ fontSize: '22px', fontWeight: 900, color: '#0F172A', fontFamily: 'JetBrains Mono, monospace', letterSpacing: '-0.02em' }}>
-              {summaryMetrics.totalItemsCount.toLocaleString()} <span style={{ fontSize: '14px', fontWeight: 600, color: '#64748B' }}>units</span>
+            <div style={{ fontSize: '20px', fontWeight: 900, color: '#0F172A', fontFamily: 'JetBrains Mono, monospace', letterSpacing: '-0.02em' }}>
+              {summaryMetrics.totalItemsCount.toLocaleString()} <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748B' }}>units</span>
             </div>
             <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
               Avg ticket: Rs. {summaryMetrics.avgTicket.toLocaleString()}
@@ -1250,7 +1408,7 @@ export default function SalesHistory({
                                 letterSpacing: '0.02em',
                               }}
                             >
-                              TOKEN PAYOUT
+                              {t.redemption_no || 'TOKEN PAYOUT'}
                             </span>
                           </td>
 
@@ -1322,7 +1480,11 @@ export default function SalesHistory({
 
                           {/* Items */}
                           <td style={{ padding: '10px 14px', textAlign: 'center', fontSize: '11.5px', color: '#334155' }}>
-                            {t.item_name ? (
+                            {t.token_redemption_items && t.token_redemption_items.length > 0 ? (
+                              <span style={{ fontWeight: 600 }}>
+                                {t.token_redemption_items.map((it) => `${it.brand_name} ${it.series_name} (${it.quantity}x ${it.unit_name})`).join(', ')}
+                              </span>
+                            ) : t.item_name ? (
                               <span style={{ fontWeight: 600 }}>
                                 {t.item_name}
                                 {t.brand && <span style={{ color: '#64748B', fontSize: '10px', display: 'block' }}>({t.brand})</span>}
@@ -1353,7 +1515,7 @@ export default function SalesHistory({
                               color: '#D97706',
                             }}
                           >
-                            -Rs. {Number(t.redeemed_amount || 0).toLocaleString()}
+                            -Rs. {Number(t.total_amount ?? t.redeemed_amount ?? 0).toLocaleString()}
                           </td>
 
                           {/* Paid */}
@@ -2289,7 +2451,15 @@ export default function SalesHistory({
             {/* Print & Close Buttons */}
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
-                onClick={() => window.print()}
+                onClick={() => {
+                  if (thermalPrintInvoice) {
+                    const html = buildThermalHtmlDocument(
+                      buildSalesHistoryThermalHtml(thermalPrintInvoice, tenantName, assignedTemplate),
+                      `Receipt ${thermalPrintInvoice.invoice_no}`
+                    );
+                    printViaIframe(html);
+                  }
+                }}
                 style={{
                   flex: 1,
                   padding: '9px',

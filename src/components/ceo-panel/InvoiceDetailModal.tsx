@@ -57,7 +57,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
           <div style={{ backgroundColor: '#FFFFFF', padding: '12px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
             <div style={{ color: '#64748B', marginBottom: '2px', fontWeight: 600, fontSize: '11px' }}>Salesperson</div>
             <div className="ceo-font-heading" style={{ color: '#0F172A', fontWeight: 700, fontSize: '14px' }}>{invoice.salesman}</div>
-            <div style={{ color: '#64748B', fontSize: '11px', marginTop: '2px' }}>Terminal Register 01</div>
+            <div style={{ color: '#64748B', fontSize: '11px', marginTop: '2px' }}>
+              {invoice.register || (invoice.shiftId ? `Shift Register #${String(invoice.shiftId).slice(-4)}` : `${branchName} Counter Register`)}
+            </div>
           </div>
 
           <div style={{ backgroundColor: '#FFFFFF', padding: '12px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
@@ -76,7 +78,22 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               {invoice.paymentMode}
             </div>
             <div style={{ color: '#64748B', fontSize: '10.5px', marginTop: '2px', lineHeight: '1.3' }}>
-              {(invoice.paymentMode === 'Split' || (Number(invoice.cashPaid || 0) > 0 && (Number(invoice.cardPaid || 0) > 0 || Number(invoice.bankPaid || 0) > 0))) ? (
+              {invoice.paymentMode === 'Credit' ? (
+                <>
+                  <div style={{ color: '#059669', fontWeight: 600 }}>Paid: {formatCurrency(Number(invoice.paidAmount || 0))}</div>
+                  <div style={{ color: '#DC2626', fontWeight: 600 }}>Due: {formatCurrency(Number(invoice.dueAmount ?? invoice.netAmount))}</div>
+                </>
+              ) : Number(invoice.dueAmount || 0) > 0 ? (
+                <>
+                  <div style={{ color: '#059669', fontWeight: 600 }}>Paid: {formatCurrency(Number(invoice.paidAmount ?? (invoice.netAmount - (invoice.dueAmount || 0))))}</div>
+                  <div style={{ color: '#DC2626', fontWeight: 600 }}>Due: {formatCurrency(Number(invoice.dueAmount))}</div>
+                  {Number(invoice.cashPaid || 0) > 0 && (
+                    <div style={{ fontSize: '9.5px', color: '#94A3B8', marginTop: '2px' }}>
+                      (Cash: {formatCurrency(Number(invoice.cashPaid))})
+                    </div>
+                  )}
+                </>
+              ) : (invoice.paymentMode === 'Split' || (Number(invoice.cashPaid || 0) > 0 && (Number(invoice.cardPaid || 0) > 0 || Number(invoice.bankPaid || 0) > 0))) ? (
                 <>
                   {Number(invoice.cashPaid || 0) > 0 && <div>Cash: {formatCurrency(Number(invoice.cashPaid))}</div>}
                   {Number(invoice.cardPaid || 0) > 0 && <div>Card: {formatCurrency(Number(invoice.cardPaid))}</div>}
@@ -163,6 +180,24 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 {formatCurrency(invoice.netAmount)}
               </span>
             </div>
+
+            {/* Explicit Paid Amount & Due Amount for Credit or Partial Sales */}
+            {(invoice.paymentMode === 'Credit' || Number(invoice.dueAmount || 0) > 0 || (invoice.paidAmount !== undefined && invoice.paidAmount < invoice.netAmount)) && (
+              <>
+                <div style={{ paddingLeft: '16px', borderLeft: '1px solid #E2E8F0' }}>
+                  <span style={{ fontSize: '11px', color: '#64748B', marginRight: '6px', textTransform: 'uppercase' }}>Paid:</span>
+                  <span className="ceo-font-mono" style={{ fontSize: '14px', fontWeight: 700, color: '#059669' }}>
+                    {formatCurrency(Number(invoice.paidAmount ?? (invoice.paymentMode === 'Credit' ? 0 : invoice.netAmount - (invoice.dueAmount || 0))))}
+                  </span>
+                </div>
+                <div style={{ paddingLeft: '16px', borderLeft: '1px solid #E2E8F0' }}>
+                  <span style={{ fontSize: '11px', color: '#64748B', marginRight: '6px', textTransform: 'uppercase' }}>Due:</span>
+                  <span className="ceo-font-mono" style={{ fontSize: '14px', fontWeight: 700, color: '#DC2626' }}>
+                    {formatCurrency(Number(invoice.dueAmount ?? (invoice.paymentMode === 'Credit' ? invoice.netAmount : 0)))}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

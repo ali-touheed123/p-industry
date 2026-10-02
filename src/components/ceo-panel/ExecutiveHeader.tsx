@@ -60,7 +60,31 @@ export const ExecutiveHeader: React.FC<ExecutiveHeaderProps> = ({
     >
       {/* Left: Mobile Hamburger + Branch Info */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
-
+        {/* FIX CEO-15: Mobile hamburger button connected to onOpenMobileMenu */}
+        {onOpenMobileMenu && (
+          <button
+            id="mobile-menu-toggle-btn"
+            type="button"
+            onClick={onOpenMobileMenu}
+            aria-label="Open mobile navigation menu"
+            className="ceo-mobile-menu-btn"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '36px',
+              height: '36px',
+              borderRadius: '6px',
+              backgroundColor: '#FFFFFF',
+              border: '1px solid #E2E8F0',
+              color: '#0F172A',
+              cursor: 'pointer',
+              flexShrink: 0,
+            }}
+          >
+            <Menu style={{ width: '18px', height: '18px' }} />
+          </button>
+        )}
 
         {/* Branch Name + Code */}
         <div style={{ minWidth: 0 }}>

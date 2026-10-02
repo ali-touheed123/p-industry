@@ -2,13 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
 
-// GET: Fetch token transactions or redeemable summary
-// ?tenant_id=&item_id=&summary=redeemable  → redeemable balance for item
-// ?tenant_id=&shift_id=                   → shift token summary
-// ?tenant_id=&client_id=                  → client token balance history
-// ?tenant_id=&transaction_type=redeemed   → token payouts for sales history
-// ?tenant_id=&usage_status=available      → shop retained & opening tokens available for purchase offset
-// ?tenant_id=&usage_status=used           → shop retained tokens used against purchases/settlements
+// GET: Fetch token transactions
+// ?tenant_id=&shift_id=                   → shift token transactions
+// ?tenant_id=&client_id=                  → client token activity
+// ?tenant_id=&type=redeemed (or transaction_type=redeemed) → token payouts
+// ?tenant_id=&usage_status=available      → stockpile tokens available in shop safe
+// ?tenant_id=&usage_status=settled        → surrendered tokens
 // ?tenant_id=&usage_status=written_off    → discarded/damaged tokens
 export async function GET(req: NextRequest) {
   try {
@@ -18,10 +17,9 @@ export async function GET(req: NextRequest) {
     const clientId = searchParams.get('client_id');
     const itemId = searchParams.get('item_id');
     const summary = searchParams.get('summary');
-    const transactionType = searchParams.get('transaction_type');
+    const typeParam = searchParams.get('type') || searchParams.get('transaction_type');
     const usageStatus = searchParams.get('usage_status');
     const brand = searchParams.get('brand');
-    const isExternal = searchParams.get('is_external');
     const startDate = searchParams.get('start_date');
     const endDate = searchParams.get('end_date');
 
@@ -34,40 +32,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    // --- Summary Mode: Item Redeemable Balance ---
-    if (summary === 'redeemable' && itemId) {
-      const { data: issuedTxns, error: issuedErr } = await supabaseAdmin
-        .from('token_transactions')
-        .select('token_value')
-        .eq('tenant_id', tenantId)
-        .eq('item_id', itemId)
-        .eq('transaction_type', 'issued');
-
-      if (issuedErr) throw issuedErr;
-
-      const { data: redeemedTxns, error: redeemedErr } = await supabaseAdmin
-        .from('token_transactions')
-        .select('redeemed_amount')
-        .eq('tenant_id', tenantId)
-        .eq('item_id', itemId)
-        .eq('transaction_type', 'redeemed');
-
-      if (redeemedErr) throw redeemedErr;
-
-      const issuedTotal = (issuedTxns || []).reduce((sum, t) => sum + (Number(t.token_value) || 0), 0);
-      const redeemedTotal = (redeemedTxns || []).reduce((sum, t) => sum + (Number(t.redeemed_amount) || 0), 0);
-      const redeemableBalance = Math.max(0, issuedTotal - redeemedTotal);
-
+    // Deprecated summary mode compatibility
+    if (summary === 'redeemable') {
       return NextResponse.json({
         success: true,
         item_id: itemId,
-        issued_total: issuedTotal,
-        redeemed_total: redeemedTotal,
-        redeemable_balance: redeemableBalance,
+        issued_total: 0,
+        redeemed_total: 0,
+        redeemable_balance: 0,
       });
     }
 
-    // --- Standard Query Mode ---
+    // Standard Query Mode on token_transactions
     const buildQuery = (includeVouchers: boolean) => {
       const selectFields = includeVouchers
         ? '*, purchases:used_against_purchase_id(id, purchase_no, supplier_name, date), vouchers:used_against_voucher_id(id, voucher_no, party_name, date)'
@@ -85,24 +61,14 @@ export async function GET(req: NextRequest) {
       if (clientId) {
         q = q.eq('client_id', clientId);
       }
-      if (itemId) {
-        q = q.eq('item_id', itemId);
-      }
-      if (transactionType) {
-        q = q.eq('transaction_type', transactionType);
+      if (typeParam) {
+        q = q.eq('type', typeParam);
       }
       if (usageStatus) {
-        if (usageStatus === 'available') {
-          q = q.or('usage_status.eq.available,and(usage_status.is.null,transaction_type.in.(shop_retained,redeemed,opening_stock))');
-        } else {
-          q = q.eq('usage_status', usageStatus);
-        }
+        q = q.eq('usage_status', usageStatus);
       }
       if (brand) {
-        q = q.ilike('brand', `%${brand}%`);
-      }
-      if (isExternal !== null && isExternal !== undefined) {
-        q = q.eq('is_external', isExternal === 'true');
+        q = q.ilike('brand_name', `%${brand}%`);
       }
       if (startDate) {
         q = q.gte('created_at', startDate);
@@ -127,30 +93,30 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST: Create or manage a token transaction
+// POST: Manage token stockpile operations (opening_stock, shop_retained, write_off, settle_vendor)
+// NOTE: Multi-line customer redemptions must use POST /api/token-redemptions (redeem_tokens_atomic)
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
-      type,
+      type: rawType,
+      transaction_type,
       tenant_id,
       invoice_id,
       client_id,
       client_name,
-      item_id,
-      item_name,
+      brand_id,
+      brand_name,
       brand,
-      category,
+      series_id,
+      series_name,
+      unit_name,
       token_value,
       token_count,
+      quantity,
       unit_token_value,
-      remaining_count,
-      allow_external,
-      is_external,
-      redeemed_amount,
       shift_id,
       notes,
-      // Vendor settlement & write-off fields
       token_id,
       token_allocations,
       settlement_type,
@@ -160,17 +126,11 @@ export async function POST(req: NextRequest) {
       write_off_reason,
     } = body;
 
+    const type = rawType || transaction_type;
+
     if (!tenant_id || !type) {
       return NextResponse.json(
         { success: false, error: 'Tenant ID and transaction type are required' },
-        { status: 400 }
-      );
-    }
-
-    const validTypes = ['issued', 'redeemed', 'shop_retained', 'opening_stock', 'write_off', 'settle_vendor'];
-    if (!validTypes.includes(type)) {
-      return NextResponse.json(
-        { success: false, error: `Invalid transaction type. Must be one of: ${validTypes.join(', ')}` },
         { status: 400 }
       );
     }
@@ -180,100 +140,78 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    // --- 1. ISSUED (Customer earned token with purchase) ---
-    if (type === 'issued') {
-      if (!item_id || !token_value) {
-        return NextResponse.json(
-          { success: false, error: 'item_id and token_value are required for issued transactions' },
-          { status: 400 }
-        );
-      }
+    // Customer redemption using virtual token balance is completely removed/deprecated
+    if (type === 'redeemed') {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Legacy virtual-balance redemption is deprecated. Use POST /api/token-redemptions (redeem_tokens_atomic).',
+        },
+        { status: 400 }
+      );
+    }
 
-      const parsedCount = Math.max(1, Number(token_count) || 1);
+    // --- 1. ISSUED (Customer earned token with purchase - activity log only, NO virtual balance) ---
+    if (type === 'issued') {
+      const parsedCount = Math.max(1, Number(token_count || quantity) || 1);
       const parsedTokenValue = Number(token_value) || 0;
-      const parsedUnitValue = Number(unit_token_value) || (parsedTokenValue / parsedCount);
+      const totalAmount = parsedTokenValue * parsedCount;
 
       const { data: txn, error: txnErr } = await supabaseAdmin
         .from('token_transactions')
         .insert({
           tenant_id,
-          transaction_type: 'issued',
+          type: 'issued',
           invoice_id: invoice_id || null,
           client_id: client_id || null,
           client_name: client_name || null,
-          item_id: item_id || null,
-          item_name: item_name || null,
-          brand: brand || null,
-          category: category || null,
+          brand_id: brand_id || null,
+          brand_name: brand_name || brand || 'General',
+          series_id: series_id || null,
+          series_name: series_name || 'Standard',
+          unit_name: unit_name || 'Can',
           token_value: parsedTokenValue,
-          token_count: parsedCount,
-          unit_token_value: parsedUnitValue,
-          remaining_count: parsedCount,
-          redeemed_amount: 0,
-          remaining_balance: parsedTokenValue,
+          quantity: parsedCount,
+          remaining_quantity: 0,
+          total_amount: totalAmount,
+          usage_status: 'n_a',
           shift_id: shift_id || null,
-          notes: notes || null,
+          notes: notes || 'Customer kept physical token with purchase',
         })
         .select()
         .single();
 
       if (txnErr) throw txnErr;
 
-      // Increase client token_balance if registered customer
-      if (client_id && parsedTokenValue > 0) {
-        const { data: clientRecord } = await supabaseAdmin
-          .from('clients')
-          .select('token_balance')
-          .eq('id', client_id)
-          .maybeSingle();
-
-        if (clientRecord) {
-          const newBalance = Number(clientRecord.token_balance || 0) + parsedTokenValue;
-          await supabaseAdmin
-            .from('clients')
-            .update({ token_balance: newBalance })
-            .eq('id', client_id);
-        }
-      }
-
       return NextResponse.json({ success: true, transaction: txn });
     }
 
     // --- 2. SHOP_RETAINED (Customer left token at store during checkout) ---
     if (type === 'shop_retained') {
-      if (!token_value) {
-        return NextResponse.json(
-          { success: false, error: 'token_value is required for shop_retained transactions' },
-          { status: 400 }
-        );
-      }
-
-      const parsedCount = Math.max(1, Number(token_count) || 1);
+      const parsedCount = Math.max(1, Number(token_count || quantity) || 1);
       const parsedTokenValue = Number(token_value) || 0;
-      const parsedUnitValue = Number(unit_token_value) || (parsedTokenValue / parsedCount);
+      const totalAmount = parsedTokenValue * parsedCount;
 
       const { data: txn, error: txnErr } = await supabaseAdmin
         .from('token_transactions')
         .insert({
           tenant_id,
-          transaction_type: 'shop_retained',
+          type: 'shop_retained',
           invoice_id: invoice_id || null,
-          client_id: null,
-          client_name: null,
-          item_id: item_id || null,
-          item_name: item_name || null,
-          brand: brand || null,
-          category: category || null,
+          client_id: client_id || null,
+          client_name: client_name || null,
+          brand_id: brand_id || null,
+          brand_name: brand_name || brand || 'General',
+          series_id: series_id || null,
+          series_name: series_name || 'Standard',
+          unit_name: unit_name || 'Can',
           token_value: parsedTokenValue,
-          token_count: parsedCount,
-          unit_token_value: parsedUnitValue,
-          remaining_count: parsedCount,
-          redeemed_amount: 0,
-          remaining_balance: 0,
-          shift_id: shift_id || null,
-          notes: notes || null,
+          quantity: parsedCount,
+          remaining_quantity: parsedCount,
+          total_amount: totalAmount,
           usage_status: 'available',
-          claim_status: 'pending',
+          shift_id: shift_id || null,
+          notes: notes || 'Shop retained token at sale',
         })
         .select()
         .single();
@@ -285,39 +223,87 @@ export async function POST(req: NextRequest) {
 
     // --- 3. OPENING_STOCK (Initial drawer/safe physical count on ERP setup) ---
     if (type === 'opening_stock') {
-      const parsedCount = Math.max(1, Number(token_count) || 1);
-      const parsedUnitVal = Number(unit_token_value) || 0;
-      const parsedTotalVal = Number(token_value) || (parsedCount * parsedUnitVal);
+      // Require canonical 4-part identity fields
+      if (!brand_name && !brand_id) {
+        return NextResponse.json({ success: false, error: 'brand_name is required for opening_stock' }, { status: 400 });
+      }
+      if (!series_id || !series_name) {
+        return NextResponse.json({ success: false, error: 'series_id and series_name are required for opening_stock' }, { status: 400 });
+      }
+      if (!unit_name) {
+        return NextResponse.json({ success: false, error: 'unit_name is required for opening_stock' }, { status: 400 });
+      }
 
-      if (parsedTotalVal <= 0) {
+      // Server-side: resolve authoritative token_value from series_token_configs
+      const { data: configRow, error: configErr } = await supabaseAdmin
+        .from('series_token_configs')
+        .select('token_value, is_enabled')
+        .eq('tenant_id', tenant_id)
+        .eq('series_id', series_id)
+        .ilike('unit_name', unit_name)
+        .maybeSingle();
+
+      if (configErr) throw configErr;
+      if (!configRow) {
         return NextResponse.json(
-          { success: false, error: 'Total token value must be greater than 0' },
+          { success: false, error: `No token configuration found for series "${series_name}" unit "${unit_name}"` },
           { status: 400 }
         );
       }
+      if (!configRow.is_enabled) {
+        return NextResponse.json(
+          { success: false, error: `Token configuration for "${series_name} ${unit_name}" is disabled` },
+          { status: 400 }
+        );
+      }
+
+      const authoritativeTokenValue = Number(configRow.token_value);
+      if (authoritativeTokenValue <= 0) {
+        return NextResponse.json(
+          { success: false, error: 'Token value in configuration must be greater than 0' },
+          { status: 400 }
+        );
+      }
+
+      // Validate Series belongs to tenant and the specified Brand
+      const { data: seriesRow, error: seriesErr } = await supabaseAdmin
+        .from('brand_series')
+        .select('id, brand_id')
+        .eq('id', series_id)
+        .eq('tenant_id', tenant_id)
+        .maybeSingle();
+
+      if (seriesErr) throw seriesErr;
+      if (!seriesRow) {
+        return NextResponse.json({ success: false, error: 'Series not found for this tenant' }, { status: 400 });
+      }
+      if (brand_id && seriesRow.brand_id !== brand_id) {
+        return NextResponse.json({ success: false, error: 'Series does not belong to the specified Brand' }, { status: 400 });
+      }
+
+      const parsedCount = Math.max(1, Number(quantity) || 1);
+      const totalAmount = parsedCount * authoritativeTokenValue;
 
       const { data: txn, error: txnErr } = await supabaseAdmin
         .from('token_transactions')
         .insert({
           tenant_id,
-          transaction_type: 'opening_stock',
+          type: 'opening_stock',
           invoice_id: null,
           client_id: null,
           client_name: null,
-          item_id: item_id || null,
-          item_name: item_name || `${brand || 'Paint'} Token (${parsedCount}x Rs. ${parsedUnitVal})`,
-          brand: brand || 'General',
-          category: category || 'Paint Tokens',
-          token_value: parsedTotalVal,
-          token_count: parsedCount,
-          unit_token_value: parsedUnitVal,
-          remaining_count: parsedCount,
-          redeemed_amount: 0,
-          remaining_balance: 0,
+          brand_id: brand_id || null,
+          brand_name: brand_name || 'General',
+          series_id: series_id,
+          series_name: series_name,
+          unit_name: unit_name,
+          token_value: authoritativeTokenValue,
+          quantity: parsedCount,
+          remaining_quantity: parsedCount,
+          total_amount: totalAmount,
+          usage_status: 'available',
           shift_id: shift_id || null,
           notes: notes || 'Opening physical stockpile balance',
-          usage_status: 'available',
-          claim_status: 'pending',
         })
         .select()
         .single();
@@ -327,135 +313,29 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, transaction: txn });
     }
 
-    // --- 4. REDEEMED (Customer or painter cashing in tokens) ---
-    if (type === 'redeemed') {
-      const parsedAmount = Number(redeemed_amount) || 0;
-      if (parsedAmount <= 0) {
-        return NextResponse.json(
-          { success: false, error: 'redeemed_amount must be greater than 0' },
-          { status: 400 }
-        );
-      }
-
-      const isLooseExternal = Boolean(allow_external || is_external);
-
-      // If item_id is specified AND NOT marked loose/external, enforce server-side balance cap
-      if (item_id && !isLooseExternal) {
-        const { data: issuedTxns, error: issuedErr } = await supabaseAdmin
-          .from('token_transactions')
-          .select('token_value')
-          .eq('tenant_id', tenant_id)
-          .eq('item_id', item_id)
-          .eq('transaction_type', 'issued');
-
-        if (issuedErr) throw issuedErr;
-
-        const { data: redeemedTxns, error: redeemedErr } = await supabaseAdmin
-          .from('token_transactions')
-          .select('redeemed_amount')
-          .eq('tenant_id', tenant_id)
-          .eq('item_id', item_id)
-          .eq('transaction_type', 'redeemed');
-
-        if (redeemedErr) throw redeemedErr;
-
-        const issuedTotal = (issuedTxns || []).reduce((sum, t) => sum + (Number(t.token_value) || 0), 0);
-        const redeemedTotal = (redeemedTxns || []).reduce((sum, t) => sum + (Number(t.redeemed_amount) || 0), 0);
-        const itemRedeemableBalance = Math.max(0, issuedTotal - redeemedTotal);
-
-        if (parsedAmount > itemRedeemableBalance) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: `Redemption amount (Rs. ${parsedAmount.toLocaleString()}) exceeds available redeemable tokens for this item (Rs. ${itemRedeemableBalance.toLocaleString()}). Check "Accept Loose / External Token" to bypass this for older or non-system tokens.`,
-            },
-            { status: 400 }
-          );
-        }
-      }
-
-      let remainingBalance = 0;
-
-      // For registered customers, validate and deduct token_balance
-      if (client_id) {
-        const { data: clientRecord } = await supabaseAdmin
-          .from('clients')
-          .select('token_balance')
-          .eq('id', client_id)
-          .maybeSingle();
-
-        if (!clientRecord) {
-          return NextResponse.json(
-            { success: false, error: 'Client not found' },
-            { status: 404 }
-          );
-        }
-
-        const currentBalance = Number(clientRecord.token_balance || 0);
-        if (parsedAmount > currentBalance) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: `Redemption amount (Rs. ${parsedAmount.toLocaleString()}) exceeds client token balance (Rs. ${currentBalance.toLocaleString()})`,
-            },
-            { status: 400 }
-          );
-        }
-
-        remainingBalance = currentBalance - parsedAmount;
-
-        // Deduct from client's token balance
-        await supabaseAdmin
-          .from('clients')
-          .update({ token_balance: remainingBalance })
-          .eq('id', client_id);
-      }
-
-      const parsedCount = Math.max(1, Number(token_count) || 1);
-      const parsedUnitVal = Number(unit_token_value) || (parsedAmount / parsedCount);
-
-      // Insert token transaction record with usage_status = 'available' (now in shop's safe)
-      const { data: txn, error: txnErr } = await supabaseAdmin
-        .from('token_transactions')
-        .insert({
-          tenant_id,
-          transaction_type: 'redeemed',
-          invoice_id: invoice_id || null,
-          client_id: client_id || null,
-          client_name: client_name || null,
-          item_id: item_id || null,
-          item_name: item_name || null,
-          brand: brand || null,
-          category: category || null,
-          token_value: parsedAmount,
-          token_count: parsedCount,
-          unit_token_value: parsedUnitVal,
-          remaining_count: parsedCount,
-          redeemed_amount: parsedAmount,
-          remaining_balance: remainingBalance,
-          shift_id: shift_id || null,
-          is_external: isLooseExternal,
-          notes: notes || (isLooseExternal ? 'Loose / External Token Intake' : null),
-          usage_status: 'available',
-          claim_status: 'pending',
-        })
-        .select()
-        .single();
-
-      if (txnErr) throw txnErr;
-
-      return NextResponse.json({
-        success: true,
-        transaction: txn,
-        remaining_balance: remainingBalance,
-      });
-    }
-
-    // --- 5. WRITE_OFF (Discard damaged, scratched, or campaign-expired tokens) ---
+    // --- 4. WRITE_OFF (Discard damaged, scratched, or rejected tokens) ---
     if (type === 'write_off') {
       const targetId = token_id || body.id;
       if (!targetId) {
         return NextResponse.json({ success: false, error: 'token_id is required for write_off' }, { status: 400 });
+      }
+
+      // Validate reason is from allowed set
+      const ALLOWED_REASONS = ['Damaged', 'Lost', 'Invalid', 'Other'];
+      const reason = write_off_reason || 'Damaged';
+      if (!ALLOWED_REASONS.includes(reason)) {
+        return NextResponse.json(
+          { success: false, error: `write_off_reason must be one of: ${ALLOWED_REASONS.join(', ')}` },
+          { status: 400 }
+        );
+      }
+      // 'Other' requires a custom note
+      const writeOffNote = notes?.trim() || '';
+      if (reason === 'Other' && !writeOffNote) {
+        return NextResponse.json(
+          { success: false, error: 'A custom note is required when write_off_reason is "Other"' },
+          { status: 400 }
+        );
       }
 
       const { data: targetTxn, error: fetchErr } = await supabaseAdmin
@@ -470,32 +350,93 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: false, error: 'Token not found' }, { status: 404 });
       }
 
-      if (targetTxn.usage_status === 'used') {
-        return NextResponse.json({ success: false, error: 'Cannot write off a token that has already been surrendered or used' }, { status: 400 });
+      // Block if already settled or written off
+      if (targetTxn.usage_status === 'settled' || targetTxn.usage_status === 'written_off') {
+        return NextResponse.json(
+          { success: false, error: 'Cannot write off a token that has already been settled or written off' },
+          { status: 400 }
+        );
+      }
+      // Block if already applied to a purchase or voucher (C2 fix)
+      if (targetTxn.used_against_purchase_id || targetTxn.used_against_voucher_id) {
+        return NextResponse.json(
+          { success: false, error: 'Cannot write off a token that has already been applied to a purchase or voucher' },
+          { status: 400 }
+        );
       }
 
-      const reason = write_off_reason || notes || 'Damaged / Rejected Token';
+      const availableQty = Number(targetTxn.remaining_quantity ?? targetTxn.quantity ?? 1);
+      const writeOffQty = body.write_off_quantity
+        ? Math.min(availableQty, Math.max(1, Number(body.write_off_quantity) || 1))
+        : availableQty; // Default: full write-off
 
-      const { data: updatedTxn, error: updateErr } = await supabaseAdmin
-        .from('token_transactions')
-        .update({
-          usage_status: 'written_off',
-          write_off_reason: reason,
-          remaining_count: 0,
-          notes: targetTxn.notes ? `${targetTxn.notes} | Written off: ${reason}` : `Written off: ${reason}`,
-        })
-        .eq('id', targetId)
-        .select()
-        .single();
+      const unitVal = Number(targetTxn.token_value) || 0;
+      const fullReasonLabel = reason === 'Other' ? `Other: ${writeOffNote}` : reason;
 
-      if (updateErr) throw updateErr;
+      if (writeOffQty >= availableQty) {
+        // Full write-off
+        const { data: updatedTxn, error: updateErr } = await supabaseAdmin
+          .from('token_transactions')
+          .update({
+            usage_status: 'written_off',
+            write_off_reason: fullReasonLabel,
+            remaining_quantity: 0,
+            total_amount: 0,
+            notes: targetTxn.notes
+              ? `${targetTxn.notes} | Written off (full): ${fullReasonLabel}`
+              : `Written off (full): ${fullReasonLabel}`,
+          })
+          .eq('id', targetId)
+          .select()
+          .single();
 
-      return NextResponse.json({ success: true, transaction: updatedTxn });
+        if (updateErr) throw updateErr;
+        return NextResponse.json({ success: true, transaction: updatedTxn, write_off_qty: writeOffQty });
+      } else {
+        // Partial write-off: decrement remaining_quantity on parent, create a written-off child row
+        const newRemaining = availableQty - writeOffQty;
+        await supabaseAdmin
+          .from('token_transactions')
+          .update({
+            remaining_quantity: newRemaining,
+            total_amount: newRemaining * unitVal,
+          })
+          .eq('id', targetId);
+
+        const { data: childTxn, error: childErr } = await supabaseAdmin
+          .from('token_transactions')
+          .insert({
+            tenant_id,
+            type: targetTxn.type,
+            invoice_id: targetTxn.invoice_id,
+            redemption_id: targetTxn.redemption_id,
+            client_id: targetTxn.client_id,
+            client_name: targetTxn.client_name,
+            brand_id: targetTxn.brand_id,
+            brand_name: targetTxn.brand_name,
+            series_id: targetTxn.series_id,
+            series_name: targetTxn.series_name,
+            unit_name: targetTxn.unit_name,
+            token_value: unitVal,
+            quantity: writeOffQty,
+            remaining_quantity: 0,
+            total_amount: 0,
+            parent_transaction_id: targetTxn.id,
+            usage_status: 'written_off',
+            write_off_reason: fullReasonLabel,
+            notes: `Partial write-off from #${targetTxn.id.slice(0, 8)}: ${fullReasonLabel}`,
+          })
+          .select()
+          .single();
+
+        if (childErr) throw childErr;
+        return NextResponse.json({ success: true, transaction: childTxn, write_off_qty: writeOffQty, remaining_qty: newRemaining });
+      }
     }
 
-    // --- 6. SETTLE_VENDOR (Direct token surrender to company rep for Cash or Credit Slip) ---
+    // --- 5. SETTLE_VENDOR (Direct token surrender to company rep for Cash or Credit Slip) ---
     if (type === 'settle_vendor') {
-      const allocations: Array<{ id: string; count: number }> = token_allocations || (token_id ? [{ id: token_id, count: Number(token_count) || 1 }] : []);
+      const allocations: Array<{ id: string; count: number }> = token_allocations || (token_id ? [{ id: token_id, count: Number(token_count || quantity) || 1 }] : []);
       if (!allocations.length) {
         return NextResponse.json({ success: false, error: 'No token allocations provided for settlement' }, { status: 400 });
       }
@@ -515,9 +456,9 @@ export async function POST(req: NextRequest) {
 
         if (pErr || !parent) continue;
 
-        const availableCount = Number(parent.remaining_count) || Number(parent.token_count) || 1;
+        const availableCount = Number(parent.remaining_quantity ?? parent.quantity ?? 1);
         const surrenderQty = Math.min(availableCount, Math.max(1, Number(alloc.count) || 1));
-        const unitVal = Number(parent.unit_token_value) || (Number(parent.token_value) / availableCount);
+        const unitVal = Number(parent.token_value) || (Number(parent.total_amount) / (availableCount || 1));
         const surrenderVal = surrenderQty * unitVal;
 
         totalSettledValue += surrenderVal;
@@ -528,12 +469,9 @@ export async function POST(req: NextRequest) {
           await supabaseAdmin
             .from('token_transactions')
             .update({
-              usage_status: 'used',
-              remaining_count: 0,
-              claim_status: 'claimed',
-              claimed_date: new Date().toISOString(),
-              claim_reference: refCode,
-              settlement_type: settlementMode,
+              usage_status: 'settled',
+              remaining_quantity: 0,
+              settled_vendor_name: supplier_name || 'Vendor / Paint Company',
               notes: parent.notes ? `${parent.notes} | Settled: ${refCode}` : `Settled with rep: ${refCode}`,
             })
             .eq('id', alloc.id);
@@ -543,8 +481,8 @@ export async function POST(req: NextRequest) {
           await supabaseAdmin
             .from('token_transactions')
             .update({
-              remaining_count: newRemaining,
-              token_value: newRemaining * unitVal,
+              remaining_quantity: newRemaining,
+              total_amount: newRemaining * unitVal,
             })
             .eq('id', alloc.id);
 
@@ -552,24 +490,23 @@ export async function POST(req: NextRequest) {
             .from('token_transactions')
             .insert({
               tenant_id,
-              transaction_type: parent.transaction_type,
+              type: parent.type,
               invoice_id: parent.invoice_id,
+              redemption_id: parent.redemption_id,
               client_id: parent.client_id,
               client_name: parent.client_name,
-              item_id: parent.item_id,
-              item_name: parent.item_name,
-              brand: parent.brand,
-              category: parent.category,
-              token_value: surrenderVal,
-              token_count: surrenderQty,
-              unit_token_value: unitVal,
-              remaining_count: 0,
+              brand_id: parent.brand_id,
+              brand_name: parent.brand_name,
+              series_id: parent.series_id,
+              series_name: parent.series_name,
+              unit_name: parent.unit_name,
+              token_value: unitVal,
+              quantity: surrenderQty,
+              remaining_quantity: 0,
+              total_amount: surrenderVal,
               parent_transaction_id: parent.id,
-              usage_status: 'used',
-              claim_status: 'claimed',
-              claimed_date: new Date().toISOString(),
-              claim_reference: refCode,
-              settlement_type: settlementMode,
+              usage_status: 'settled',
+              settled_vendor_name: supplier_name || 'Vendor / Paint Company',
               notes: `Partial surrender from #${parent.id.slice(0, 8)}: ${refCode}`,
             });
         }
@@ -608,7 +545,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    return NextResponse.json({ success: false, error: 'Unhandled transaction type' }, { status: 400 });
+    return NextResponse.json({ success: false, error: `Unhandled transaction type "${type}"` }, { status: 400 });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

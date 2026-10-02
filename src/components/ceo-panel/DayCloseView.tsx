@@ -34,16 +34,18 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
       if (!tenantId) return;
       setLoading(true);
       try {
-        const [shiftsRes, expensesRes, invoicesRes] = await Promise.all([
+        const [shiftsRes, expensesRes, invoicesRes, tokensRes] = await Promise.all([
           fetch(`/api/shifts?tenant_id=${tenantId}`),
           fetch(`/api/expenses?tenant_id=${tenantId}`),
           fetch(`/api/invoices?tenant_id=${tenantId}`),
+          fetch(`/api/tokens?tenant_id=${tenantId}`),
         ]);
 
-        const [shiftsData, expensesData, invoicesData] = await Promise.all([
+        const [shiftsData, expensesData, invoicesData, tokensData] = await Promise.all([
           shiftsRes.json(),
           expensesRes.json(),
           invoicesRes.json(),
+          tokensRes.json(),
         ]);
 
         if (!isMounted) return;
@@ -59,6 +61,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
 
         const allExpenses: any[] = expensesData.success ? (expensesData.expenses || []) : [];
         const allInvoices: any[] = invoicesData.success ? (invoicesData.invoices || []) : [];
+        const allTokens: any[] = tokensData.success && Array.isArray(tokensData.transactions) ? tokensData.transactions : [];
 
         const commEnabled = Boolean(currentTenant?.commission_enabled);
         const commRate = Number(currentTenant?.commission_rate || 2.0);
@@ -89,18 +92,34 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
             const rawDate = s.start_time || s.created_at;
             const shiftDate = rawDate ? new Date(rawDate).toLocaleDateString('en-CA') : todayLocal;
             const isOpen = s.status === 'open';
-            
-            // Match expenses for this shift or date
+
+            // Fix #5: Only use date fallback when this is the sole shift on the day.
+            // With multiple shifts per day, date-based fallback double-counts records across shifts.
+            const isOnlyShiftOnDay = branchShifts.filter((other: any) => {
+              const otherDate = (other.start_time || other.created_at || '').split('T')[0];
+              return otherDate === shiftDate;
+            }).length <= 1;
+
+            // Match expenses: prefer shift_id; date fallback only when sole shift on that day
             const shiftExpenses = allExpenses.filter((e: any) =>
               (e.shift_id && e.shift_id === s.id) ||
-              (!e.shift_id && e.created_at?.split('T')[0] === shiftDate)
+              (!e.shift_id && isOnlyShiftOnDay && e.created_at?.split('T')[0] === shiftDate)
             );
 
-            // Match invoices for this shift or date
+            // Match invoices: prefer shift_id; date fallback only when sole shift on that day
             const shiftInvoices = allInvoices.filter((i: any) =>
               (i.shift_id && i.shift_id === s.id) ||
-              (!i.shift_id && (i.date === shiftDate || i.created_at?.split('T')[0] === shiftDate))
+              (!i.shift_id && isOnlyShiftOnDay && (i.date === shiftDate || i.created_at?.split('T')[0] === shiftDate))
             );
+
+            // Match token transactions for this shift; same date-fallback guard
+            const shiftTokens = allTokens.filter((t: any) =>
+              (t.shift_id && t.shift_id === s.id) ||
+              (!t.shift_id && isOnlyShiftOnDay && t.created_at?.split('T')[0] === shiftDate)
+            );
+            const tokensRedeemedAmt = shiftTokens
+              .filter((t: any) => (t.type || t.transaction_type) === 'redeemed')
+              .reduce((sum: number, t: any) => sum + Number(t.total_amount || t.redeemed_amount || t.token_value || 0), 0);
 
             const salesInvs = shiftInvoices.filter((i: any) => (i.invoice_type || 'sales') !== 'return');
             const returnInvs = shiftInvoices.filter((i: any) => (i.invoice_type || 'sales') === 'return');
@@ -112,7 +131,14 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
                 return sum + Number(i.paid_amount || i.net_total || 0);
               }
               return sum;
-            }, 0);
+            // FIX CEO-10: subtract cash refunds so expected cash formula is correct
+            }, 0) - (returnInvs.reduce((sum: number, i: any) => {
+              const cp = Number(i.cash_paid || 0);
+              if (cp > 0) return sum + cp;
+              const pt = (i.payment_type || '').toLowerCase();
+              if (!pt || pt === 'cash' || pt === 'refund') return sum + Number(i.net_total || 0);
+              return sum;
+            }, 0));
 
             const creditSales = salesInvs.reduce((sum: number, i: any) => {
               const due = Number(i.due_amount || 0);
@@ -136,11 +162,24 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
             const returnTotal = returnInvs.reduce((sum: number, i: any) => sum + Number(i.net_total || 0), 0);
             const netShiftSales = Math.max(0, grossSales - returnTotal);
 
+            // FIX CEO-10: deduct cash portion of return invoices from cashSales.
+            // Previously, returned goods were never subtracted, making the cash drawer
+            // appear short by exactly the returned amount.
+            const cashReturns = returnInvs.reduce((sum: number, i: any) => {
+              const cp = Number(i.cash_paid || 0);
+              if (cp > 0) return sum + cp;
+              // Only count as cash refund if the return was a pure cash/refund transaction
+              const pt = (i.payment_type || '').toLowerCase();
+              if (!pt || pt === 'cash' || pt === 'refund') return sum + Number(i.net_total || 0);
+              return sum;
+            }, 0);
+
             const totalExpensesAmt = shiftExpenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0);
 
             const openAmt = Number(s.opening_cash || 0);
             const closeAmt = isOpen ? 0 : Number(s.actual_cash !== undefined && s.actual_cash !== null ? s.actual_cash : openAmt);
-            const expCash = Number(s.expected_cash !== undefined && s.expected_cash !== null && !isOpen ? s.expected_cash : (openAmt + cashSales - totalExpensesAmt));
+            // Fix #2: Fallback formula must match ShiftDrawer exactly (include cashReturns and tokensRedeemedAmt)
+            const expCash = Number(s.expected_cash !== undefined && s.expected_cash !== null && !isOpen ? s.expected_cash : Math.max(0, openAmt + cashSales - cashReturns - totalExpensesAmt - tokensRedeemedAmt));
             const variance = isOpen ? 0 : (closeAmt - expCash);
             const varianceStatus: 'MATCHED' | 'SHORT' | 'EXCESS' =
               isOpen ? 'MATCHED' : (variance === 0 ? 'MATCHED' : (variance < 0 ? 'SHORT' : 'EXCESS'));
@@ -192,6 +231,25 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
                 ? `${new Date(s.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} (Live)`
                 : 'Open / Live');
 
+
+            // FIX DB-13: Map opened_by UUID to a human-readable name.
+            // Priority: closed_by name → notes field 'Opened/Closed by X' → UUID (trimmed) → fallback
+            const resolveStaffName = (): string => {
+              if (s.closed_by && typeof s.closed_by === 'string' && !s.closed_by.match(/^[0-9a-f-]{36}$/i)) {
+                return s.closed_by;
+              }
+              if (s.notes) {
+                const match = s.notes.match(/(?:opened|closed)\s+by\s+(.+)/i);
+                if (match && match[1]) return match[1].trim();
+              }
+              if (s.opened_by && typeof s.opened_by === 'string' && !s.opened_by.match(/^[0-9a-f-]{36}$/i)) {
+                return s.opened_by;
+              }
+              // Last resort: show truncated UUID so it's clear it's unresolved
+              if (s.opened_by) return `Staff (${String(s.opened_by).substring(0, 8)}...)`;
+              return 'Counter Staff';
+            };
+
             return {
               id: s.id,
               status: s.status || (isOpen ? 'open' : 'closed'),
@@ -199,7 +257,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
               shiftTitle: `Register Shift #${s.id.substring(0, 4)}`,
               date: shiftDate,
               shiftTime,
-              cashierName: s.closed_by || (s.notes?.startsWith('Opened by ') ? s.notes.replace('Opened by ', '') : s.opened_by) || 'Counter Staff',
+              cashierName: resolveStaffName(),
               registerNo: '01',
               financialSummary: {
                 openingBalance: openAmt,
@@ -207,6 +265,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
                 creditSales,
                 bankCardSales: bankSales,
                 pettyExpenses: totalExpensesAmt,
+                tokenPayouts: tokensRedeemedAmt,
                 expectedCash: expCash,
                 actualCashCounted: closeAmt,
                 varianceAmount: variance,
@@ -231,7 +290,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
             };
           });
 
-          // Feature #3: Compute same-day shift-to-shift delta
+          // Compute same-day shift-to-shift delta AND cumulative daily cash variance
           const dateGroups = new Map<string, DayCloseRecord[]>();
           mapped.forEach(rec => {
             const existing = dateGroups.get(rec.date) || [];
@@ -239,18 +298,36 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
             dateGroups.set(rec.date, existing);
           });
           dateGroups.forEach(group => {
-            if (group.length < 2) return;
             // Sort by shift time (ascending) within the day
             group.sort((a, b) => (a.shiftTime || '').localeCompare(b.shiftTime || ''));
-            for (let i = 1; i < group.length; i++) {
-              const prevNet = group[i - 1].commissionBreakdown.totalSales;
-              const currNet = group[i].commissionBreakdown.totalSales;
-              const deltaAmt = currNet - prevNet;
-              group[i].sameDayDelta = {
-                amount: Math.abs(deltaAmt),
-                direction: deltaAmt > 0 ? 'more' : deltaAmt < 0 ? 'less' : 'same',
-                previousShiftNetSales: prevNet,
-              };
+
+            // Shift-to-shift sales delta (only meaningful with 2+ shifts)
+            if (group.length >= 2) {
+              for (let i = 1; i < group.length; i++) {
+                const prevNet = group[i - 1].commissionBreakdown.totalSales;
+                const currNet = group[i].commissionBreakdown.totalSales;
+                const deltaAmt = currNet - prevNet;
+                group[i].sameDayDelta = {
+                  amount: Math.abs(deltaAmt),
+                  direction: deltaAmt > 0 ? 'more' : deltaAmt < 0 ? 'less' : 'same',
+                  previousShiftNetSales: prevNet,
+                };
+              }
+            }
+
+            // Cumulative daily cash variance across all CLOSED shifts on this day
+            const closedShifts = group.filter(r => !r.isOpen);
+            if (closedShifts.length > 0) {
+              const totalVariance = closedShifts.reduce(
+                (sum, r) => sum + r.financialSummary.varianceAmount,
+                0
+              );
+              const allShort = closedShifts.every(
+                r => r.financialSummary.varianceStatus === 'SHORT'
+              );
+              const payload = { totalVariance, shiftCount: closedShifts.length, allShort };
+              // Stamp every record in the group so any active selection can read it
+              group.forEach(r => { r.dailyCashVariance = payload; });
             }
           });
 
@@ -270,7 +347,9 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
     return () => {
       isMounted = false;
     };
-  }, [branch?.id, branch?.slug, selectedRecordId]);
+  }, [branch?.id, branch?.slug]);
+  // FIX CEO-08: removed selectedRecordId from deps — it caused a new fetch every time
+  // the user clicked a shift, creating a 4x re-fetch loop on every selection.
 
   const filteredShifts = useMemo(() => {
     return shifts.filter((s) => {
@@ -280,9 +359,11 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
     });
   }, [shifts, startDate, endDate]);
 
+  // FIX CEO-09: do NOT fall back to shifts[0] when the date filter has no matching shifts.
+  // The old fallback silently showed a stale record from a different date range.
   const activeRecord: DayCloseRecord | undefined = useMemo(() => {
-    return filteredShifts.find((r) => r.id === selectedRecordId) || filteredShifts[0] || shifts[0];
-  }, [filteredShifts, shifts, selectedRecordId]);
+    return filteredShifts.find((r) => r.id === selectedRecordId) || filteredShifts[0];
+  }, [filteredShifts, selectedRecordId]);
 
   if (!activeRecord) {
     return (
@@ -359,7 +440,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
         </div>
       </div>
 
-      {/* ── Handover Variance Alert (only when previous shift closing data exists) ── */}
+      {/* ── Handover Variance Alert ── */}
       {activeRecord.handover && (
         <div style={{
           border: `1px solid ${activeRecord.handover.handoverStatus === 'SHORT' ? '#EF4444' : activeRecord.handover.handoverStatus === 'EXCESS' ? '#F59E0B' : '#34D399'}`,
@@ -406,6 +487,55 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
         </div>
       )}
 
+      {/* ── Cumulative Daily Cash Variance Alert (shown when ≥2 closed shifts exist on selected day) ── */}
+      {activeRecord.dailyCashVariance && activeRecord.dailyCashVariance.shiftCount >= 2 && (
+        <div style={{
+          border: `1px solid ${activeRecord.dailyCashVariance.totalVariance < 0 ? '#EF4444' : activeRecord.dailyCashVariance.totalVariance > 0 ? '#F59E0B' : '#34D399'}`,
+          borderRadius: '10px',
+          padding: '14px 20px',
+          backgroundColor: activeRecord.dailyCashVariance.totalVariance < 0 ? 'rgba(239,68,68,0.07)' : activeRecord.dailyCashVariance.totalVariance > 0 ? 'rgba(245,158,11,0.07)' : 'rgba(52,211,153,0.07)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '20px',
+          flexWrap: 'wrap',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ fontSize: '20px' }}>
+              {activeRecord.dailyCashVariance.totalVariance < 0 ? '🔴' : activeRecord.dailyCashVariance.totalVariance > 0 ? '🟡' : '✅'}
+            </div>
+            <div>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: activeRecord.dailyCashVariance.totalVariance < 0 ? '#EF4444' : activeRecord.dailyCashVariance.totalVariance > 0 ? '#F59E0B' : '#34D399' }}>
+                {activeRecord.dailyCashVariance.totalVariance < 0
+                  ? `Daily Cash Shortage — ${activeRecord.dailyCashVariance.allShort ? 'All Shifts Reported Short' : 'Combined Deficit Across Shifts'}`
+                  : activeRecord.dailyCashVariance.totalVariance > 0
+                  ? 'Daily Cash Excess — Combined Surplus Across Shifts'
+                  : 'Daily Cash Balanced — All Shifts Matched'}
+              </div>
+              <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
+                Across {activeRecord.dailyCashVariance.shiftCount} closed shifts on {activeRecord.date}
+                {activeRecord.dailyCashVariance.allShort && activeRecord.dailyCashVariance.totalVariance < 0 && (
+                  <span style={{ color: '#FCA5A5', fontWeight: 600, marginLeft: '6px' }}>
+                    ⚠️ Back-to-back shortages — escalate for investigation
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: '11px', color: '#64748B', marginBottom: '2px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Daily Variance</div>
+            <div className="ceo-font-mono" style={{
+              fontSize: '22px',
+              fontWeight: 800,
+              color: activeRecord.dailyCashVariance.totalVariance < 0 ? '#EF4444' : activeRecord.dailyCashVariance.totalVariance > 0 ? '#F59E0B' : '#34D399',
+            }}>
+              {activeRecord.dailyCashVariance.totalVariance > 0 ? '+' : ''}
+              {formatCurrency(activeRecord.dailyCashVariance.totalVariance)}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 3-Column Reconciliation Layout */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
         {/* CARD 1: Financial Summary */}
@@ -440,6 +570,13 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
                 <span>Petty Cash Expenses</span>
                 <span className="ceo-font-mono" style={{ color: '#F87171' }}>{formatCurrency(financialSummary.pettyExpenses)}</span>
               </div>
+
+              {financialSummary.tokenPayouts > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B' }}>
+                  <span>(-) Token Cash Payouts</span>
+                  <span className="ceo-font-mono" style={{ color: '#F87171' }}>{formatCurrency(financialSummary.tokenPayouts)}</span>
+                </div>
+              )}
 
               <div style={{ paddingTop: '12px', borderTop: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: '12px', fontWeight: 700, color: '#0F172A', textTransform: 'uppercase' }}>Expected Cash</span>

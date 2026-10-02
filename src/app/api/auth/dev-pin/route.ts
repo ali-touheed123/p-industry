@@ -81,3 +81,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
+
+export async function DELETE() {
+  try {
+    const res = NextResponse.json({
+      success: true,
+      message: 'Developer session invalidated',
+    });
+
+    res.cookies.set(DEV_ADMIN_COOKIE, '', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 0,
+      expires: new Date(0),
+      path: '/',
+    });
+
+    return res;
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
+

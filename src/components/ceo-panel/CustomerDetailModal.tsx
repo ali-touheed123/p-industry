@@ -318,8 +318,8 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
 
       {/* ── Sub-Modal: CEO Record Payment / Recovery ── */}
       {showPayModal && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 100, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
-          <div style={{ width: '100%', maxWidth: '420px', backgroundColor: '#161B22', border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden' }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 100, backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ width: '100%', maxWidth: '420px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)' }}>
             <div style={{ padding: '16px', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFFFFF' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <DollarSign style={{ width: '18px', height: '18px', color: '#D97706' }} />
@@ -455,12 +455,13 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                   onClick={() => setShowPayModal(false)}
                   style={{
                     padding: '8px 14px',
-                    backgroundColor: '#1E232B',
-                    border: '1px solid #E2E8F0',
+                    backgroundColor: '#F1F5F9',
+                    border: '1px solid #CBD5E1',
                     borderRadius: '6px',
-                    color: '#64748B',
+                    color: '#475569',
                     fontSize: '12px',
                     cursor: 'pointer',
+                    fontWeight: 600,
                   }}
                 >
                   Cancel

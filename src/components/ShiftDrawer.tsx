@@ -18,6 +18,60 @@ interface Props {
   onLogout?: () => void;
 }
 
+export interface ShiftClosingSnapshot {
+  shiftId: string;
+  openingCash: number;
+  cashSales: number;
+  bankSales: number;
+  creditSales: number;
+  grossSales: number;
+  netSales: number;
+  totalExpenses: number;
+  tokensRedeemed: number;
+  tokensIssued: number;
+  retainedTotal: number;
+  expectedCash: number;
+  actualPhysicalCash: number;
+  variance: number;
+  isBalanced: boolean;
+  staffName: string;
+  tenantName: string;
+  closeDateTime: string;
+  denominationSummary?: string;
+}
+
+export interface DenominationCounts {
+  note5000: number | '';
+  note1000: number | '';
+  note500: number | '';
+  note100: number | '';
+  note50: number | '';
+  note20: number | '';
+  note10: number | '';
+  coins: number | '';
+}
+
+const DEFAULT_DENOMINATIONS: DenominationCounts = {
+  note5000: '',
+  note1000: '',
+  note500: '',
+  note100: '',
+  note50: '',
+  note20: '',
+  note10: '',
+  coins: '',
+};
+
+const NOTE_DENOMINATIONS = [
+  { key: 'note5000' as const, label: '5,000', value: 5000, color: '#2563EB' },
+  { key: 'note1000' as const, label: '1,000', value: 1000, color: '#059669' },
+  { key: 'note500' as const,  label: '500',   value: 500,  color: '#7C3AED' },
+  { key: 'note100' as const,  label: '100',   value: 100,  color: '#D97706' },
+  { key: 'note50' as const,   label: '50',    value: 50,   color: '#DB2777' },
+  { key: 'note20' as const,   label: '20',    value: 20,   color: '#0891B2' },
+  { key: 'note10' as const,   label: '10',    value: 10,   color: '#475569' },
+];
+
 export default function ShiftDrawer({
   shift,
   tenantId,
@@ -39,11 +93,14 @@ export default function ShiftDrawer({
   const [submittingExpense, setSubmittingExpense] = useState(false);
   const [expenseError, setExpenseError] = useState('');
 
-  // Closing Shift State
+  // Closing Shift State & Denomination Counter (VAL-02)
   const [actualCashInput, setActualCashInput] = useState('');
+  const [countMode, setCountMode] = useState<'denominations' | 'direct'>('denominations');
+  const [denominations, setDenominations] = useState<DenominationCounts>(DEFAULT_DENOMINATIONS);
   const [isClosing, setIsClosing] = useState(false);
   const [showPrintSummary, setShowPrintSummary] = useState(false);
   const [closedShiftData, setClosedShiftData] = useState<any | null>(null);
+  const [closedShiftSnapshot, setClosedShiftSnapshot] = useState<ShiftClosingSnapshot | null>(null);
   const [showCloseConfirmModal, setShowCloseConfirmModal] = useState(false);
 
   const [purchases, setPurchases] = useState<any[]>([]);
@@ -60,6 +117,7 @@ export default function ShiftDrawer({
   // Fetch today's purchases, invoices, expenses and tokens for current shift/tenant
   React.useEffect(() => {
     if (!tenantId) return;
+    if (closedShiftSnapshot || closedShiftData) return;
     const fetchShiftData = async () => {
       try {
         const todayIso = new Date().toISOString().split('T')[0];
@@ -94,7 +152,7 @@ export default function ShiftDrawer({
       }
     };
     fetchShiftData();
-  }, [tenantId, shift?.id]);
+  }, [tenantId, shift?.id, closedShiftSnapshot, closedShiftData]);
 
   // Fetch previous same-day shift for reference & delta
   React.useEffect(() => {
@@ -115,23 +173,33 @@ export default function ShiftDrawer({
     fetchPrevShift();
   }, [tenantId, shift?.id]);
 
-  // Combine passed props with DB records (deduplicating by id)
+  // Combine passed props with DB records (deduplicating by id and isolating to current shift)
   const activeInvoices = React.useMemo(() => {
     const map = new Map<string, any>();
     dbInvoices.forEach(inv => map.set(inv.id, inv));
     (invoices || []).forEach(inv => map.set(inv.id, inv));
-    return Array.from(map.values());
-  }, [dbInvoices, invoices]);
+    const all = Array.from(map.values());
+    const currentShiftId = shift?.id || closedShiftData?.id || closedShiftSnapshot?.shiftId;
+    if (currentShiftId) {
+      return all.filter(inv => inv.shift_id === currentShiftId || (!inv.shift_id && inv.date === (shift?.start_time || '').split('T')[0]));
+    }
+    return all;
+  }, [dbInvoices, invoices, shift?.id, shift?.start_time, closedShiftData?.id, closedShiftSnapshot?.shiftId]);
 
   const activeExpenses = React.useMemo(() => {
     const map = new Map<string, PettyExpense>();
     dbExpenses.forEach(exp => map.set(exp.id, exp));
     (expenses || []).forEach(exp => map.set(exp.id, exp));
-    return Array.from(map.values());
-  }, [dbExpenses, expenses]);
+    const all = Array.from(map.values());
+    const currentShiftId = shift?.id || closedShiftData?.id || closedShiftSnapshot?.shiftId;
+    if (currentShiftId) {
+      return all.filter(exp => exp.shift_id === currentShiftId);
+    }
+    return all;
+  }, [dbExpenses, expenses, shift?.id, closedShiftData?.id, closedShiftSnapshot?.shiftId]);
 
-  // Dynamic Sales & Returns breakdown from live invoices
-  const openingCash = shift?.opening_cash || 0;
+  // Dynamic Sales & Returns breakdown from live invoices (frozen to snapshot if closed)
+  const openingCash = closedShiftSnapshot ? closedShiftSnapshot.openingCash : (shift?.opening_cash || 0);
   
   const salesInvoices = activeInvoices.filter(i => (i.invoice_type || 'sales') !== 'return');
   const returnInvoices = activeInvoices.filter(i => (i.invoice_type || 'sales') === 'return');
@@ -197,20 +265,20 @@ export default function ShiftDrawer({
 
   // Token Metrics Calculations
   const tokensIssued = tokenTransactions
-    .filter((t) => t.transaction_type === 'issued')
-    .reduce((sum, t) => sum + Number(t.token_value || 0), 0);
+    .filter((t) => (t.type || t.transaction_type) === 'issued')
+    .reduce((sum, t) => sum + Number(t.total_amount || t.token_value || 0), 0);
 
   const tokensRedeemed = tokenTransactions
-    .filter((t) => t.transaction_type === 'redeemed')
-    .reduce((sum, t) => sum + Number(t.redeemed_amount || t.token_value || 0), 0);
+    .filter((t) => (t.type || t.transaction_type) === 'redeemed')
+    .reduce((sum, t) => sum + Number(t.total_amount || t.redeemed_amount || t.token_value || 0), 0);
 
   const tokenLiability = Math.max(0, tokensIssued - tokensRedeemed);
 
   const retainedTransactions = tokenTransactions.filter(
-    (t) => t.transaction_type === 'shop_retained'
+    (t) => (t.type || t.transaction_type) === 'shop_retained'
   );
   const retainedTotal = retainedTransactions.reduce(
-    (sum, t) => sum + Number(t.token_value || 0),
+    (sum, t) => sum + Number(t.total_amount || t.token_value || 0),
     0
   );
 
@@ -220,8 +288,8 @@ export default function ShiftDrawer({
       { brand: string; category: string; count: number; totalValue: number }
     > = {};
     retainedTransactions.forEach((t) => {
-      const b = t.brand || 'Standard Brand';
-      const c = t.category || 'First Quality';
+      const b = t.brand_name || t.brand || 'Standard Brand';
+      const c = t.series_name || t.category || 'First Quality';
       const key = `${b}__${c}`;
       if (!groups[key]) {
         groups[key] = {
@@ -231,8 +299,8 @@ export default function ShiftDrawer({
           totalValue: 0,
         };
       }
-      groups[key].count += 1;
-      groups[key].totalValue += Number(t.token_value || 0);
+      groups[key].count += (t.quantity || 1);
+      groups[key].totalValue += Number(t.total_amount || t.token_value || 0);
     });
     return Object.values(groups);
   }, [retainedTransactions]);
@@ -250,6 +318,56 @@ export default function ShiftDrawer({
   const variance = hasCashInput ? actualPhysicalCash - expectedCash : 0;
   const isShort = hasCashInput && variance < 0;
   const isBalanced = hasCashInput && variance === 0;
+
+  // Denomination Helpers (VAL-02)
+  const hasDenominationsEntered = React.useMemo(() => {
+    return Object.values(denominations).some(v => v !== '' && Number(v) > 0);
+  }, [denominations]);
+
+  const getDenominationSummaryString = (counts: DenominationCounts) => {
+    const parts: string[] = [];
+    if (Number(counts.note5000) > 0) parts.push(`5000×${counts.note5000}`);
+    if (Number(counts.note1000) > 0) parts.push(`1000×${counts.note1000}`);
+    if (Number(counts.note500) > 0) parts.push(`500×${counts.note500}`);
+    if (Number(counts.note100) > 0) parts.push(`100×${counts.note100}`);
+    if (Number(counts.note50) > 0) parts.push(`50×${counts.note50}`);
+    if (Number(counts.note20) > 0) parts.push(`20×${counts.note20}`);
+    if (Number(counts.note10) > 0) parts.push(`10×${counts.note10}`);
+    if (Number(counts.coins) > 0) parts.push(`Coins: Rs. ${Number(counts.coins).toLocaleString()}`);
+    return parts.length > 0 ? parts.join(', ') : 'Direct cash entry';
+  };
+
+  const handleDenominationChange = (key: keyof DenominationCounts, val: string) => {
+    let num: number | '' = '';
+    if (val !== '') {
+      const parsed = parseInt(val, 10);
+      num = isNaN(parsed) ? '' : Math.max(0, parsed);
+    }
+    const updated = { ...denominations, [key]: num };
+    setDenominations(updated);
+
+    const total =
+      (Number(updated.note5000) || 0) * 5000 +
+      (Number(updated.note1000) || 0) * 1000 +
+      (Number(updated.note500) || 0) * 500 +
+      (Number(updated.note100) || 0) * 100 +
+      (Number(updated.note50) || 0) * 50 +
+      (Number(updated.note20) || 0) * 20 +
+      (Number(updated.note10) || 0) * 10 +
+      (Number(updated.coins) || 0);
+
+    const hasAny = Object.values(updated).some(v => v !== '');
+    if (hasAny) {
+      setActualCashInput(String(total));
+    } else {
+      setActualCashInput('');
+    }
+  };
+
+  const handleClearDenominations = () => {
+    setDenominations(DEFAULT_DENOMINATIONS);
+    setActualCashInput('');
+  };
 
   // Commission Settings (Configured by CEO / Tenant)
   const isCommissionEnabled = Boolean(tenant?.commission_enabled);
@@ -276,7 +394,9 @@ export default function ShiftDrawer({
 
   // Shift-to-shift delta (Feature #3)
   const previousNetSales = previousSameDayShift
-    ? Number(previousSameDayShift.expected_cash || 0) - Number(previousSameDayShift.opening_cash || 0)
+    ? (previousSameDayShift.net_sales !== undefined
+        ? Number(previousSameDayShift.net_sales)
+        : Number(previousSameDayShift.expected_cash || 0) - Number(previousSameDayShift.opening_cash || 0))
     : null;
   const sameDayDelta = previousNetSales !== null ? netSales - previousNetSales : null;
 
@@ -330,6 +450,34 @@ export default function ShiftDrawer({
     setShowCloseConfirmModal(false);
     setIsClosing(true);
 
+    const denomSummary = hasDenominationsEntered
+      ? getDenominationSummaryString(denominations)
+      : '';
+
+    // IMMUTABLE SNAPSHOT: Freeze all reconciliation numbers at this exact moment
+    const snapshot: ShiftClosingSnapshot = {
+      shiftId: shift?.id || Date.now().toString(),
+      openingCash,
+      cashSales,
+      bankSales,
+      creditSales,
+      grossSales,
+      netSales,
+      totalExpenses,
+      tokensRedeemed,
+      tokensIssued,
+      retainedTotal,
+      expectedCash,
+      actualPhysicalCash,
+      variance,
+      isBalanced,
+      staffName,
+      tenantName,
+      closeDateTime: `${new Date().toLocaleDateString()} • ${new Date().toLocaleTimeString()}`,
+      denominationSummary: denomSummary,
+    };
+    setClosedShiftSnapshot(snapshot);
+
     const shiftDataToSave = {
       id: shift?.id || Date.now().toString(),
       closed_by: staffName,
@@ -337,7 +485,7 @@ export default function ShiftDrawer({
       actual_cash: actualPhysicalCash,
       difference: variance,
       status: 'closed',
-      notes: `Closed by ${staffName}. Variance: ${variance}`,
+      notes: `Closed by ${staffName}. Variance: ${variance}${denomSummary ? `. Denominations: [${denomSummary}]` : ''}`,
     };
 
     try {
@@ -361,6 +509,8 @@ export default function ShiftDrawer({
 
   // WhatsApp Day Close Summary
   const handleSendWhatsAppSummary = () => {
+    const denomSummary = hasDenominationsEntered ? getDenominationSummaryString(denominations) : '';
+
     const message = `*${tenantName} — Daily Shift Closing Summary*\n` +
       `Staff: ${staffName}\n` +
       `Date: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}\n` +
@@ -378,7 +528,7 @@ export default function ShiftDrawer({
       (totalPurchases > 0 ? `• Total Purchases Today: Rs. ${totalPurchases.toLocaleString()}\n` : '') +
       `--------------------------------\n` +
       `*Expected Cash:* Rs. ${expectedCash.toLocaleString()}\n` +
-      `*Actual Physical Cash:* Rs. ${actualPhysicalCash.toLocaleString()}\n` +
+      `*Actual Physical Cash:* Rs. ${actualPhysicalCash.toLocaleString()}${denomSummary ? ` (${denomSummary})` : ''}\n` +
       `*Variance:* ${variance < 0 ? `- Rs. ${Math.abs(variance).toLocaleString()} (SHORT)` : variance > 0 ? `+ Rs. ${variance.toLocaleString()} (OVER)` : 'Rs. 0 (BALANCED)'}\n` +
       (isCommissionEnabled && commissionPool > 0 ? `--------------------------------\n*Commission Pool (${commissionRate}%):* Rs. ${commissionPool.toLocaleString()}\n` : '') +
       `Status: Shift Closed & Verified`;
@@ -656,6 +806,12 @@ export default function ShiftDrawer({
                 <span style={{ color: '#DC2626', fontWeight: 600 }}>(-) Petty Expenses</span>
                 <span className="font-mono font-bold" style={{ color: '#DC2626' }}>- Rs. {totalExpenses.toLocaleString()}</span>
               </div>
+              {tokensRedeemed > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#DC2626', fontWeight: 600 }}>(-) Token Cash Payouts</span>
+                  <span className="font-mono font-bold" style={{ color: '#DC2626' }}>- Rs. {tokensRedeemed.toLocaleString()}</span>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #E2E8F0', paddingTop: '6px', marginTop: '2px' }}>
                 <span style={{ fontWeight: 800, color: '#0F172A' }}>Expected Cash</span>
                 <span className="font-mono font-bold" style={{ fontSize: '14px', color: '#0F172A' }}>
@@ -665,38 +821,264 @@ export default function ShiftDrawer({
             </div>
           </div>
 
-          {/* Physical Cash Input Box — BUG FIX #6: Required field, no auto-fill */}
-          <div style={{ marginTop: '0.75rem', background: '#F8FAFC', padding: '8px 10px', borderRadius: '8px', border: `1px solid ${!hasCashInput ? '#F59E0B' : '#E2E8F0'}` }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-              <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: !hasCashInput ? '#92400E' : '#64748B', textTransform: 'uppercase' }}>
-                Counted Physical Cash {!hasCashInput && '(Required)'}
-              </span>
-              <span style={{ fontSize: '11px', fontWeight: 800, color: !hasCashInput ? '#92400E' : isBalanced ? '#16A34A' : '#DC2626', fontFamily: 'JetBrains Mono, monospace' }}>
-                {!hasCashInput ? 'Enter count ↓' : variance === 0 ? 'Exact Match' : variance < 0 ? `Short: Rs. ${Math.abs(variance).toLocaleString()}` : `Over: +Rs. ${variance.toLocaleString()}`}
-              </span>
+          {/* Physical Cash Input Box & Denomination Matrix — VAL-02 */}
+          <div style={{ marginTop: '0.75rem', background: '#F8FAFC', padding: '10px', borderRadius: '8px', border: `1px solid ${!hasCashInput ? '#F59E0B' : '#E2E8F0'}` }}>
+            {/* Header: Mode Switcher */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', gap: '4px', background: '#E2E8F0', padding: '2px', borderRadius: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => setCountMode('denominations')}
+                  style={{
+                    border: 'none',
+                    background: countMode === 'denominations' ? '#FFFFFF' : 'transparent',
+                    color: countMode === 'denominations' ? '#0F172A' : '#64748B',
+                    fontWeight: countMode === 'denominations' ? 700 : 500,
+                    fontSize: '11px',
+                    padding: '3px 8px',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    boxShadow: countMode === 'denominations' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <span>🧮</span> Notes Counter
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCountMode('direct')}
+                  style={{
+                    border: 'none',
+                    background: countMode === 'direct' ? '#FFFFFF' : 'transparent',
+                    color: countMode === 'direct' ? '#0F172A' : '#64748B',
+                    fontWeight: countMode === 'direct' ? 700 : 500,
+                    fontSize: '11px',
+                    padding: '3px 8px',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    boxShadow: countMode === 'direct' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <span>⌨️</span> Direct Total
+                </button>
+              </div>
+
+              {countMode === 'denominations' && hasDenominationsEntered && !isShiftClosed && (
+                <button
+                  type="button"
+                  onClick={handleClearDenominations}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#EF4444',
+                    fontSize: '10px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                  }}
+                >
+                  Reset
+                </button>
+              )}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '12px', fontWeight: 700, color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>Rs.</span>
-              <input
-                type="number"
-                value={actualCashInput}
-                onChange={e => setActualCashInput(e.target.value)}
-                style={{
-                  width: '100%',
-                  background: '#FFFFFF',
-                  border: `1px solid ${!hasCashInput ? '#F59E0B' : '#CBD5E1'}`,
-                  borderRadius: '6px',
-                  padding: '4px 8px',
-                  fontSize: '13px',
-                  fontWeight: 700,
-                  fontFamily: 'JetBrains Mono, monospace',
-                  color: '#0F172A',
-                  outline: 'none',
-                }}
-                placeholder="Enter physical cash count"
-                disabled={isShiftClosed}
-              />
-            </div>
+
+            {countMode === 'denominations' ? (
+              <div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 6px' }}>
+                  {NOTE_DENOMINATIONS.map(denom => {
+                    const count = denominations[denom.key];
+                    const lineTotal = (Number(count) || 0) * denom.value;
+                    return (
+                      <div
+                        key={denom.key}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          background: '#FFFFFF',
+                          padding: '3px 6px',
+                          borderRadius: '6px',
+                          border: '1px solid #E2E8F0',
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontWeight: 700,
+                            color: denom.color,
+                            fontSize: '10.5px',
+                            fontFamily: 'JetBrains Mono, monospace',
+                            minWidth: '38px',
+                          }}
+                        >
+                          {denom.label}
+                        </span>
+                        <span style={{ color: '#94A3B8', fontSize: '9px' }}>×</span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={count}
+                          onChange={e => handleDenominationChange(denom.key, e.target.value)}
+                          disabled={isShiftClosed}
+                          placeholder="0"
+                          style={{
+                            width: '38px',
+                            textAlign: 'center',
+                            padding: '2px 4px',
+                            border: '1px solid #CBD5E1',
+                            borderRadius: '4px',
+                            fontSize: '11px',
+                            fontFamily: 'JetBrains Mono, monospace',
+                            fontWeight: 700,
+                            outline: 'none',
+                            color: '#0F172A',
+                          }}
+                        />
+                        <span
+                          style={{
+                            minWidth: '48px',
+                            textAlign: 'right',
+                            fontFamily: 'JetBrains Mono, monospace',
+                            fontWeight: 600,
+                            color: lineTotal > 0 ? '#0F172A' : '#94A3B8',
+                            fontSize: '10px',
+                          }}
+                        >
+                          {lineTotal > 0 ? lineTotal.toLocaleString() : '—'}
+                        </span>
+                      </div>
+                    );
+                  })}
+
+                  {/* Loose Coins / Change row */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      background: '#FFFFFF',
+                      padding: '3px 6px',
+                      borderRadius: '6px',
+                      border: '1px solid #E2E8F0',
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontWeight: 700,
+                        color: '#64748B',
+                        fontSize: '10px',
+                        fontFamily: 'JetBrains Mono, monospace',
+                        minWidth: '38px',
+                      }}
+                    >
+                      Coins
+                    </span>
+                    <span style={{ color: '#94A3B8', fontSize: '9px' }}>:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={denominations.coins}
+                      onChange={e => handleDenominationChange('coins', e.target.value)}
+                      disabled={isShiftClosed}
+                      placeholder="0"
+                      style={{
+                        width: '38px',
+                        textAlign: 'center',
+                        padding: '2px 4px',
+                        border: '1px solid #CBD5E1',
+                        borderRadius: '4px',
+                        fontSize: '11px',
+                        fontFamily: 'JetBrains Mono, monospace',
+                        fontWeight: 700,
+                        outline: 'none',
+                        color: '#0F172A',
+                      }}
+                    />
+                    <span
+                      style={{
+                        minWidth: '48px',
+                        textAlign: 'right',
+                        fontFamily: 'JetBrains Mono, monospace',
+                        fontWeight: 600,
+                        color: Number(denominations.coins) > 0 ? '#0F172A' : '#94A3B8',
+                        fontSize: '10px',
+                      }}
+                    >
+                      {Number(denominations.coins) > 0 ? Number(denominations.coins).toLocaleString() : '—'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Subtotal & Status Display */}
+                <div style={{ marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: '10px', color: '#64748B', fontWeight: 600, textTransform: 'uppercase' }}>
+                      Total Counted Cash
+                    </div>
+                    <div style={{ fontSize: '14px', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: !hasCashInput ? '#94A3B8' : '#0F172A' }}>
+                      Rs. {hasCashInput ? actualPhysicalCash.toLocaleString() : '0'}
+                    </div>
+                  </div>
+
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '10px', color: '#64748B', fontWeight: 600, textTransform: 'uppercase' }}>
+                      Reconciliation
+                    </div>
+                    <div style={{
+                      fontSize: '11px',
+                      fontWeight: 800,
+                      fontFamily: 'JetBrains Mono, monospace',
+                      color: !hasCashInput ? '#F59E0B' : isBalanced ? '#16A34A' : '#DC2626',
+                    }}>
+                      {!hasCashInput
+                        ? 'Count notes ↑'
+                        : variance === 0
+                        ? '✓ Exact Match'
+                        : variance < 0
+                        ? `Short: -Rs. ${Math.abs(variance).toLocaleString()}`
+                        : `Over: +Rs. ${variance.toLocaleString()}`}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: !hasCashInput ? '#92400E' : '#64748B', textTransform: 'uppercase' }}>
+                    Counted Physical Cash {!hasCashInput && '(Required)'}
+                  </span>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: !hasCashInput ? '#92400E' : isBalanced ? '#16A34A' : '#DC2626', fontFamily: 'JetBrains Mono, monospace' }}>
+                    {!hasCashInput ? 'Enter count ↓' : variance === 0 ? '✓ Exact Match' : variance < 0 ? `Short: Rs. ${Math.abs(variance).toLocaleString()}` : `Over: +Rs. ${variance.toLocaleString()}`}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>Rs.</span>
+                  <input
+                    type="number"
+                    value={actualCashInput}
+                    onChange={e => setActualCashInput(e.target.value)}
+                    style={{
+                      width: '100%',
+                      background: '#FFFFFF',
+                      border: `1px solid ${!hasCashInput ? '#F59E0B' : '#CBD5E1'}`,
+                      borderRadius: '6px',
+                      padding: '6px 8px',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      fontFamily: 'JetBrains Mono, monospace',
+                      color: '#0F172A',
+                      outline: 'none',
+                    }}
+                    placeholder="Enter total physical cash (e.g. 45000)"
+                    disabled={isShiftClosed}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -998,6 +1380,16 @@ export default function ShiftDrawer({
                   {variance === 0 ? 'Rs. 0 (BALANCED)' : variance < 0 ? `- Rs. ${Math.abs(variance).toLocaleString()} (SHORT)` : `+ Rs. ${variance.toLocaleString()} (OVER)`}
                 </span>
               </div>
+              {hasDenominationsEntered && (
+                <div style={{ borderTop: '1px dashed #CBD5E1', paddingTop: '6px', marginTop: '2px' }}>
+                  <div style={{ fontSize: '10px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', marginBottom: '2px' }}>
+                    Note Breakdown:
+                  </div>
+                  <div style={{ fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', color: '#1E293B', wordBreak: 'break-word', lineHeight: 1.4 }}>
+                    {getDenominationSummaryString(denominations)}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* BUG FIX #2: Extra warning when variance is non-zero */}
@@ -1042,85 +1434,130 @@ export default function ShiftDrawer({
       )}
 
       {/* ── Shift Closed Print Summary Receipt ── */}
-      {showPrintSummary && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem', zIndex: 3000 }}>
-          <div style={{ width: '100%', maxWidth: '360px', padding: '1.5rem', background: '#fff', color: '#000', borderRadius: 'var(--radius-md)' }}>
-            <div style={{ textAlign: 'center', borderBottom: '1px dashed #000', paddingBottom: '0.75rem', marginBottom: '0.75rem' }}>
-              <h3 style={{ fontSize: '17px', fontWeight: '900' }}>{tenantName}</h3>
-              <div style={{ fontSize: '13px', fontWeight: '700', marginTop: '2px' }}>SHIFT CLOSING RECEIPT</div>
-              <div style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}>
-                {new Date().toLocaleDateString()} • {new Date().toLocaleTimeString()}
-              </div>
-              <div style={{ fontSize: '11px', color: '#444' }}>Cashier: {staffName}</div>
-            </div>
+      {showPrintSummary && (() => {
+        const snap: ShiftClosingSnapshot = closedShiftSnapshot || {
+          shiftId: shift?.id || '—',
+          openingCash,
+          cashSales,
+          bankSales,
+          creditSales,
+          grossSales,
+          netSales,
+          totalExpenses,
+          tokensRedeemed,
+          tokensIssued,
+          retainedTotal,
+          expectedCash,
+          actualPhysicalCash,
+          variance,
+          isBalanced,
+          staffName,
+          tenantName,
+          closeDateTime: `${new Date().toLocaleDateString()} • ${new Date().toLocaleTimeString()}`,
+          denominationSummary: hasDenominationsEntered ? getDenominationSummaryString(denominations) : '',
+        };
+        const snapIsBalanced = snap.variance === 0;
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', borderBottom: '1px dashed #000', paddingBottom: '0.75rem', marginBottom: '0.75rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>Opening Cash:</span>
-                <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {openingCash.toLocaleString()}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>Cash Sales:</span>
-                <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>+ Rs. {cashSales.toLocaleString()}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>Petty Expenses:</span>
-                <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>- Rs. {totalExpenses.toLocaleString()}</span>
-              </div>
-              {tokensRedeemed > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Token Cash Payouts:</span>
-                  <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>- Rs. {tokensRedeemed.toLocaleString()}</span>
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem', zIndex: 3000 }}>
+            <div style={{ width: '100%', maxWidth: '360px', padding: '1.5rem', background: '#fff', color: '#000', borderRadius: 'var(--radius-md)' }}>
+              <div style={{ textAlign: 'center', borderBottom: '1px dashed #000', paddingBottom: '0.75rem', marginBottom: '0.75rem' }}>
+                <h3 style={{ fontSize: '17px', fontWeight: '900' }}>{snap.tenantName}</h3>
+                <div style={{ fontSize: '13px', fontWeight: '700', marginTop: '2px' }}>SHIFT CLOSING RECEIPT</div>
+                <div style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}>
+                  {snap.closeDateTime}
                 </div>
-              )}
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '700', borderTop: '1px solid #ddd', paddingTop: '4px', marginTop: '2px' }}>
-                <span>Expected Cash:</span>
-                <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {expectedCash.toLocaleString()}</span>
+                <div style={{ fontSize: '11px', color: '#444' }}>Cashier: {snap.staffName}</div>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '700' }}>
-                <span>Actual Cash Counted:</span>
-                <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {actualPhysicalCash.toLocaleString()}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '900', color: isBalanced ? '#065f46' : '#ba1a1a', marginTop: '4px' }}>
-                <span>Variance:</span>
-                <span>{variance < 0 ? `- Rs. ${Math.abs(variance).toLocaleString()} (SHORT)` : variance > 0 ? `+ Rs. ${variance.toLocaleString()} (OVER)` : 'Rs. 0 (BALANCED)'}</span>
-              </div>
-            </div>
 
-            {/* Token summary on receipt */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '11px', borderBottom: '1px dashed #000', paddingBottom: '0.5rem', marginBottom: '0.5rem' }}>
-              <div style={{ fontWeight: '700', fontSize: '11.5px', marginBottom: '2px' }}>TOKEN SUMMARY:</div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>Tokens Issued:</span>
-                <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {tokensIssued.toLocaleString()}</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', borderBottom: '1px dashed #000', paddingBottom: '0.75rem', marginBottom: '0.75rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Opening Cash:</span>
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {snap.openingCash.toLocaleString()}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Cash Sales:</span>
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>+ Rs. {snap.cashSales.toLocaleString()}</span>
+                </div>
+                {snap.bankSales > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#0284c7' }}>
+                    <span>Bank / Card Sales:</span>
+                    <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {snap.bankSales.toLocaleString()}</span>
+                  </div>
+                )}
+                {snap.creditSales > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#b45309' }}>
+                    <span>Credit / Udhaar:</span>
+                    <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {snap.creditSales.toLocaleString()}</span>
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Petty Expenses:</span>
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>- Rs. {snap.totalExpenses.toLocaleString()}</span>
+                </div>
+                {snap.tokensRedeemed > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Token Cash Payouts:</span>
+                    <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>- Rs. {snap.tokensRedeemed.toLocaleString()}</span>
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '700', borderTop: '1px solid #ddd', paddingTop: '4px', marginTop: '2px' }}>
+                  <span>Expected Cash:</span>
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {snap.expectedCash.toLocaleString()}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '700' }}>
+                  <span>Actual Cash Counted:</span>
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {snap.actualPhysicalCash.toLocaleString()}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '900', color: snapIsBalanced ? '#065f46' : '#ba1a1a', marginTop: '4px' }}>
+                  <span>Variance:</span>
+                  <span>{snap.variance < 0 ? `- Rs. ${Math.abs(snap.variance).toLocaleString()} (SHORT)` : snap.variance > 0 ? `+ Rs. ${snap.variance.toLocaleString()} (OVER)` : 'Rs. 0 (BALANCED)'}</span>
+                </div>
+                {snap.denominationSummary && (
+                  <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px dashed #ddd', fontSize: '10.5px' }}>
+                    <div style={{ fontWeight: '700', color: '#444', marginBottom: '2px' }}>CASH NOTES COUNTED:</div>
+                    <div style={{ fontFamily: 'JetBrains Mono, monospace', color: '#111', wordBreak: 'break-word', lineHeight: 1.3 }}>
+                      {snap.denominationSummary}
+                    </div>
+                  </div>
+                )}
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>Tokens Redeemed:</span>
-                <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {tokensRedeemed.toLocaleString()}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>Shop Retained:</span>
-                <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {retainedTotal.toLocaleString()}</span>
-              </div>
-            </div>
 
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={() => window.print()} style={{ flex: 1, padding: '9px', background: '#f97316', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: '700', cursor: 'pointer', fontSize: '13px' }}>
-                Print Receipt
-              </button>
-              {/* Feature #1: Redirect to login after dismissing print summary */}
-              <button onClick={() => {
-                setShowPrintSummary(false);
-                if (onLogout) {
-                  onLogout();
-                }
-              }} style={{ flex: 1, padding: '9px', background: '#e2e8f0', color: '#000', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: '700', cursor: 'pointer', fontSize: '13px' }}>
-                Close
-              </button>
+              {/* Token summary on receipt */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '11px', borderBottom: '1px dashed #000', paddingBottom: '0.5rem', marginBottom: '0.5rem' }}>
+                <div style={{ fontWeight: '700', fontSize: '11.5px', marginBottom: '2px' }}>TOKEN SUMMARY:</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Tokens Issued:</span>
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {snap.tokensIssued.toLocaleString()}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Tokens Redeemed:</span>
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {snap.tokensRedeemed.toLocaleString()}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Shop Retained:</span>
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {snap.retainedTotal.toLocaleString()}</span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={() => window.print()} style={{ flex: 1, padding: '9px', background: '#f97316', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: '700', cursor: 'pointer', fontSize: '13px' }}>
+                  Print Receipt
+                </button>
+                {/* Feature #1: Redirect to login after dismissing print summary */}
+                <button onClick={() => {
+                  setShowPrintSummary(false);
+                  if (onLogout) {
+                    onLogout();
+                  }
+                }} style={{ flex: 1, padding: '9px', background: '#e2e8f0', color: '#000', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: '700', cursor: 'pointer', fontSize: '13px' }}>
+                  Close
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

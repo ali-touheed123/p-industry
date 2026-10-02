@@ -1,5 +1,6 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { NextRequest } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase';
 
 function getJwtSecret(): Uint8Array {
   const secret = process.env.SESSION_SECRET || process.env.DEV_ADMIN_SECRET;
@@ -29,6 +30,7 @@ export interface UserSession {
   role: 'developer' | 'ceo' | 'staff' | 'godown_staff';
   tenantId?: string;
   tenantSlug?: string;
+  ceoTenants?: Array<{ id: string; slug: string; name?: string }>;
 }
 
 /**
@@ -103,8 +105,53 @@ export async function requireTenantAuth(req: NextRequest, targetTenantId?: strin
     return { authorized: false, error: 'Forbidden: No tenant assigned to this session', status: 403, session };
   }
 
-  // Staff and CEO must strictly match the tenant they are accessing (IDOR protection)
-  if (targetTenantId && session.tenantId !== targetTenantId) {
+  if (targetTenantId) {
+    // 1. Direct match with primary tenant ID or slug
+    if (session.tenantId === targetTenantId || session.tenantSlug === targetTenantId) {
+      return { authorized: true, session };
+    }
+
+    // 2. Multi-Branch CEO Authorization
+    if (session.role === 'ceo') {
+      // Check session JWT cached sister branches
+      if (session.ceoTenants && session.ceoTenants.some((t) => t.id === targetTenantId || t.slug === targetTenantId)) {
+        return { authorized: true, session };
+      }
+
+      // Check database: verify target tenant shares owner_name or email with the CEO's primary branch
+      try {
+        const { data: primaryTenant } = await supabaseAdmin
+          .from('tenants')
+          .select('owner_name, email')
+          .eq('id', session.tenantId)
+          .maybeSingle();
+
+        if (primaryTenant && (primaryTenant.owner_name || primaryTenant.email)) {
+          let sisterQuery = supabaseAdmin
+            .from('tenants')
+            .select('id, slug')
+            .or(`id.eq.${targetTenantId},slug.eq.${targetTenantId}`)
+            .eq('is_active', true);
+
+          if (primaryTenant.owner_name && primaryTenant.email) {
+            sisterQuery = sisterQuery.or(`owner_name.eq.${primaryTenant.owner_name},email.eq.${primaryTenant.email}`);
+          } else if (primaryTenant.owner_name) {
+            sisterQuery = sisterQuery.eq('owner_name', primaryTenant.owner_name);
+          } else if (primaryTenant.email) {
+            sisterQuery = sisterQuery.eq('email', primaryTenant.email);
+          }
+
+          const { data: sisterTenant } = await sisterQuery.maybeSingle();
+          if (sisterTenant) {
+            return { authorized: true, session };
+          }
+        }
+      } catch (err) {
+        console.error('Failed to verify sister branch ownership:', err);
+      }
+    }
+
+    // Staff or unauthorized cross-branch attempt
     return { authorized: false, error: 'Forbidden: Access to this branch is denied', status: 403, session };
   }
 

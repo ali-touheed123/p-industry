@@ -81,22 +81,15 @@ export default function BranchOrders({
     }).slice(0, 60);
   }, [items, productSearch]);
 
-  // Add Item to Order Cart
+  // Add Item to Order Cart (unconstrained by local stock — allows requisitioning when local stock is 0)
   const handleAddItemToCart = (item: Item) => {
     setFormError('');
     setOrderCart(prev => {
       const existingIdx = prev.findIndex(ci => ci.item.id === item.id);
       if (existingIdx >= 0) {
-        const existingQty = prev[existingIdx].qty;
-        const maxQty = item.stock_qty;
-        if (existingQty + 1 > maxQty) {
-          // Block increment — will show error after state update
-          setFormError(`Only ${maxQty} unit${maxQty !== 1 ? 's' : ''} of "${item.name}" available at this branch.`);
-          return prev; // no change
-        }
-        // Immutable update — create a new object for the updated cart item
+        // Increment quantity requested from destination warehouse/branch
         return prev.map((ci, idx) =>
-          idx === existingIdx ? { ...ci, qty: Math.min(ci.qty + 1, maxQty) } : ci
+          idx === existingIdx ? { ...ci, qty: ci.qty + 1 } : ci
         );
       }
       return [...prev, { item, qty: 1 }];
@@ -111,16 +104,6 @@ export default function BranchOrders({
     setOrderCart(prev => {
       const cartItem = prev[idx];
       if (!cartItem) return prev;
-      const maxQty = cartItem.item.stock_qty;
-      if (newQty > maxQty) {
-        // Clamp to max available and surface a clear error
-        setFormError(`Only ${maxQty} unit${maxQty !== 1 ? 's' : ''} of "${cartItem.item.name}" available at this branch.`);
-        // Immutable update — clamp to stock cap
-        return prev.map((ci, i) =>
-          i === idx ? { ...ci, qty: maxQty } : ci
-        );
-      }
-      // Immutable update — normal path
       return prev.map((ci, i) =>
         i === idx ? { ...ci, qty: newQty } : ci
       );
@@ -603,11 +586,11 @@ export default function BranchOrders({
                                     fontWeight: 700,
                                     padding: '2px 8px',
                                     borderRadius: '9999px',
-                                    backgroundColor: it.stock_qty > 0 ? '#E0F2FE' : '#F1F5F9',
-                                    color: it.stock_qty > 0 ? '#0369A1' : '#64748B',
+                                    backgroundColor: it.stock_qty > 0 ? '#E0F2FE' : '#FEE2E2',
+                                    color: it.stock_qty > 0 ? '#0369A1' : '#B91C1C',
                                   }}
                                 >
-                                  {it.stock_qty} in stock
+                                  Local: {it.stock_qty}
                                 </span>
                                 <div
                                   style={{

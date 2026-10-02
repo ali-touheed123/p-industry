@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { printViaIframe, buildThermalHtmlDocument } from '@/utils/iframePrint';
+import { ReceiptTemplate } from '@/types/receipt';
 import { Item, Client } from '@/types';
 import {
   Search,
@@ -56,6 +58,9 @@ export interface InvoiceLineItem {
   productName: string;
   originalName?: string;
   brand?: string;
+  brand_id?: string;
+  series_id?: string;
+  series_name?: string;
   category?: string;
   shadeCode: string;
   originalShade?: string;
@@ -82,6 +87,10 @@ interface HeldOrder {
   invoiceType: 'sales' | 'return';
   time: string;
   total: number;
+  subtotal?: number;
+  discount?: number;
+  delivery_charge?: number;
+  remarks?: string;
 }
 
 
@@ -94,6 +103,96 @@ const SHORTCUTS = [
   { key: 'F8', label: 'Hold List' },
   { key: 'F9', label: 'Cancel' },
 ];
+
+/** UX-01: Build an 80mm thermal receipt as a plain HTML string for iframe printing.
+ * Applies footer/branding settings from the assigned template when available (DEV-07). */
+function buildPosThermalHtml(data: any, tenantName: string, staffName: string, tmpl?: ReceiptTemplate | null): string {
+  const fmt = (n: number) => Number(n || 0).toLocaleString();
+  const isSplit = data.payment_type === 'split' ||
+    (Number(data.cash_paid || 0) > 0 &&
+      (Number(data.card_paid || 0) > 0 || Number(data.bank_paid || 0) > 0 || Number(data.others_paid || 0) > 0));
+
+  const itemRows = (data.items || []).map((item: any, idx: number) => {
+    const lineTotal = item.qty * (item.rate || item.unit_price || 0);
+    const isRemoved = item.tokenAction === 'remove';
+    const hasToken = Boolean(item.hasToken && (item.tokenValue || 0) > 0);
+    const tokenNote = hasToken
+      ? `<div style="font-size:9px;color:#555;font-style:italic">${isRemoved ? `Token removed &mdash; Rs. ${fmt(item.tokenValue * item.qty)} deducted` : `Token included &mdash; Rs. ${fmt(item.tokenValue * item.qty)} token value`}</div>`
+      : '';
+    const codeStr = (item.code || item.item_code) ? `${item.code || item.item_code} &middot; ` : '';
+    const shadeStr = (item.shadeCode || item.shade_code) && (item.shadeCode || item.shade_code) !== '&mdash;'
+      ? `Shade: ${item.shadeCode || item.shade_code} &middot; ` : '';
+    return `<div style="padding:3px 0;border-bottom:${idx < (data.items.length - 1) ? '1px dotted #ccc' : 'none'}">
+      <div style="display:flex;justify-content:space-between">
+        <div>
+          <div style="font-weight:700">${item.productName || item.item_name || '—'}</div>
+          <div style="font-size:9.5px;color:#444">${codeStr}${shadeStr}${item.qty} x Rs. ${fmt(item.rate || item.unit_price || 0)}</div>
+        </div>
+        <div style="font-weight:700">Rs. ${fmt(lineTotal)}</div>
+      </div>${tokenNote}
+    </div>`;
+  }).join('');
+
+  const splitRows = isSplit ? `
+    <div style="padding-left:8px;font-size:9.5px;color:#444">
+      ${Number(data.cash_paid || 0) > 0 ? `<div style="display:flex;justify-content:space-between"><span>&bull; Cash:</span><span>Rs. ${fmt(data.cash_paid)}</span></div>` : ''}
+      ${Number(data.card_paid || 0) > 0 ? `<div style="display:flex;justify-content:space-between"><span>&bull; Card:</span><span>Rs. ${fmt(data.card_paid)}</span></div>` : ''}
+      ${Number(data.bank_paid || 0) > 0 ? `<div style="display:flex;justify-content:space-between"><span>&bull; Bank:</span><span>Rs. ${fmt(data.bank_paid)}</span></div>` : ''}
+      ${Number(data.others_paid || 0) > 0 ? `<div style="display:flex;justify-content:space-between"><span>&bull; Other:</span><span>Rs. ${fmt(data.others_paid)}</span></div>` : ''}
+    </div>` : '';
+
+  const changeRow = Number(data.change_returned || 0) > 0
+    ? `<div style="display:flex;justify-content:space-between;font-size:10px;color:#15803d;font-weight:700"><span>Change Returned:</span><span>Rs. ${fmt(data.change_returned)}</span></div>` : '';
+  const dueRow = Number(data.due_amount || 0) > 0
+    ? `<div style="display:flex;justify-content:space-between;font-size:10.5px;font-weight:700"><span>Balance Due:</span><span>Rs. ${fmt(data.due_amount)}</span></div>` : '';
+  const deliveryRow = Number(data.delivery_charge || 0) > 0
+    ? `<div style="display:flex;justify-content:space-between"><span style="color:#555">Delivery:</span><span>+ Rs. ${fmt(data.delivery_charge)}</span></div>` : '';
+
+  // Apply template footer config when available
+  const footer = tmpl?.template_json?.footer;
+  const footerLine1 = footer?.line1 || `Thank you for shopping at ${tenantName}!`;
+  const footerLine2 = footer?.line2 || '';
+  const whatsappRow = (footer?.showWhatsapp && footer?.whatsappNumber)
+    ? `<div style="font-size:9px;color:#555">WhatsApp: ${footer.whatsappNumber}</div>` : '';
+  const poweredBy = (footer?.showPoweredBy !== false)
+    ? `<div style="font-size:8px;color:#aaa;margin-top:2px">${footer?.poweredByText || 'Powered by Pyntflow'}</div>` : '';
+
+  return `
+<div style="text-align:center;border-bottom:1px dashed #000;padding-bottom:8px;margin-bottom:8px">
+  <h2 style="font-size:15px;font-weight:900;text-transform:uppercase;letter-spacing:0.05em;margin:0 0 2px 0">${tenantName}</h2>
+  <p style="font-size:10px;color:#333;margin:0">Retail &amp; Industrial Paint Hub</p>
+  <div style="font-size:12px;font-weight:700;margin-top:4px">${data.invoice_no || '—'}</div>
+  <div style="font-size:9px;color:#555">${data.date} &middot; ${data.time}</div>
+</div>
+<div style="font-size:11px;border-bottom:1px dashed #000;padding-bottom:6px;margin-bottom:6px">
+  <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+    <span style="color:#555">Customer:</span><span style="font-weight:700">${data.client_name || 'Walk-in'}</span>
+  </div>
+  <div style="display:flex;justify-content:space-between">
+    <span style="color:#555">Staff:</span><span style="font-weight:700">${staffName}</span>
+  </div>
+</div>
+<div style="border-bottom:1px dashed #000;padding-bottom:6px;margin-bottom:6px;font-size:10.5px">
+  ${itemRows}
+</div>
+<div style="display:flex;flex-direction:column;gap:3px;font-size:11px;border-bottom:1px dashed #000;padding-bottom:8px;margin-bottom:8px">
+  <div style="display:flex;justify-content:space-between"><span style="color:#555">Subtotal:</span><span>Rs. ${fmt(data.subTotal)}</span></div>
+  <div style="display:flex;justify-content:space-between"><span style="color:#555">Discount:</span><span>- Rs. ${fmt(data.discount)}</span></div>
+  ${deliveryRow}
+  <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:900;padding-top:3px">
+    <span>NET TOTAL:</span><span>Rs. ${fmt(data.grandTotal)}</span>
+  </div>
+  <div style="display:flex;justify-content:space-between;font-size:11px;font-weight:700;padding-top:3px">
+    <span>Paid (${(data.payment_type || 'CASH').toUpperCase()}):</span><span>Rs. ${fmt(data.paid_amount)}</span>
+  </div>
+  ${splitRows}${changeRow}${dueRow}
+</div>
+<div style="text-align:center;font-size:9.5px;color:#555">${footerLine1}</div>
+${footerLine2 ? `<div style="text-align:center;font-size:9px;color:#777;margin-top:2px">${footerLine2}</div>` : ''}
+${whatsappRow}
+${poweredBy}
+`;
+}
 
 export default function PosBilling({
   items: liveItems,
@@ -165,17 +264,20 @@ export default function PosBilling({
   const [cardPayment, setCardPayment] = useState<number>(0);
   const [bankPayment, setBankPayment] = useState<number>(0);
   const [othersPayment, setOthersPayment] = useState<number>(0);
-  const [appliedTokenAmount, setAppliedTokenAmount] = useState<number>(0);
 
   // Persistent Held Orders State
   const [heldOrders, setHeldOrders] = useState<HeldOrder[]>([]);
   const [showHeldModal, setShowHeldModal] = useState<boolean>(false);
+  const [activeHeldOrderId, setActiveHeldOrderId] = useState<string | null>(null);
 
   // Submission & Feedback State
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [notification, setNotification] = useState<string | null>(null);
   const [printReceiptData, setPrintReceiptData] = useState<any | null>(null);
   const [showTokenRedemptionModal, setShowTokenRedemptionModal] = useState<boolean>(false);
+
+  // Assigned receipt template for this branch (DEV-07)
+  const [assignedTemplate, setAssignedTemplate] = useState<ReceiptTemplate | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const prevLineItemsCountRef = useRef<number>(0);
@@ -219,6 +321,24 @@ export default function PosBilling({
     };
     fetchClients();
   }, [tenantId]);
+
+  // Fetch assigned receipt template for this tenant on mount (DEV-07)
+  useEffect(() => {
+    if (!tenantId) return;
+    const fetchTemplate = async () => {
+      try {
+        const res = await fetch(`/api/receipt-templates/assign?tenant_id=${tenantId}`);
+        const data = await res.json();
+        if (data.success && data.template) {
+          setAssignedTemplate(data.template);
+        }
+      } catch (err) {
+        console.error('Failed to load receipt template for tenant:', err);
+      }
+    };
+    fetchTemplate();
+  }, [tenantId]);
+
 
   // Fetch real client invoice history when a client is selected
   useEffect(() => {
@@ -341,35 +461,66 @@ export default function PosBilling({
   // Restore Parked Invoice into Cart when dispatched from Hold Invoices screen
   useEffect(() => {
     if (restoringHeldOrder) {
-      if (Array.isArray(restoringHeldOrder.items_json)) {
-        setLineItems(restoringHeldOrder.items_json);
-      } else if (Array.isArray(restoringHeldOrder.items)) {
-        setLineItems(restoringHeldOrder.items);
+      if (restoringHeldOrder.id) {
+        setActiveHeldOrderId(restoringHeldOrder.id);
       }
+      const rawItems = Array.isArray(restoringHeldOrder.items_json)
+        ? restoringHeldOrder.items_json
+        : Array.isArray(restoringHeldOrder.items)
+        ? restoringHeldOrder.items
+        : [];
+
+      const restoredItems: InvoiceLineItem[] = rawItems.map((it: any, idx: number) => {
+        const live = liveItems.find(
+          (li) => li.id === (it.item?.id || it.item_id) || li.code === (it.code || it.item_code)
+        );
+        return {
+          id: it.id || `restored-it-${idx}-${Date.now()}`,
+          item: live || it.item,
+          code: it.code || it.item_code || '',
+          originalCode: it.originalCode || it.code || it.item_code,
+          productName: it.productName || it.item_name || it.name || 'Product',
+          originalName: it.originalName || it.productName || it.item_name,
+          brand: it.brand || live?.brand || '',
+          category: it.category || live?.category || '',
+          shadeCode: it.shadeCode || it.shade_code || '—',
+          originalShade: it.originalShade || it.shadeCode || it.shade_code,
+          shadeColorHex: it.shadeColorHex || '#94A3B8',
+          packSize: it.packSize || it.pack_size || 'Can',
+          qty: Number(it.qty) || 1,
+          unit: it.unit || 'PCS',
+          rate: Number(it.rate || it.unit_price) || 0,
+          originalRate: Number(it.originalRate || it.rate || it.unit_price) || 0,
+          discountPercent: Number(it.discountPercent || it.discount_percent) || 0,
+          hasToken: it.hasToken ?? live?.has_token ?? false,
+          tokenValue: it.tokenValue ?? (live?.has_token ? Number(live?.token_value) || 0 : 0),
+          tokenAction: it.tokenAction || 'keep',
+          tokenReturnedWithBucket: it.tokenReturnedWithBucket,
+        };
+      });
+
+      setLineItems(restoredItems);
+
       if (restoringHeldOrder.client_name) {
         setCustomerSearch(restoringHeldOrder.client_name);
       }
       if (restoringHeldOrder.client_id && clients.length > 0) {
         const found = clients.find((c) => c.id === restoringHeldOrder.client_id);
         if (found) setSelectedClient(found);
+      } else if (restoringHeldOrder.selectedClient) {
+        setSelectedClient(restoringHeldOrder.selectedClient);
       }
       if (restoringHeldOrder.invoice_type) {
         setInvoiceType(restoringHeldOrder.invoice_type);
       }
-      if (restoringHeldOrder.discount) {
-        setInvoiceDiscount(Number(restoringHeldOrder.discount) || 0);
-      }
-      if (restoringHeldOrder.delivery_charge) {
-        setDeliveryCharge(Number(restoringHeldOrder.delivery_charge) || 0);
-      }
-      if (restoringHeldOrder.remarks) {
-        setRemarks(restoringHeldOrder.remarks);
-      }
+      setInvoiceDiscount(Number(restoringHeldOrder.discount) || 0);
+      setDeliveryCharge(Number(restoringHeldOrder.delivery_charge) || 0);
+      setRemarks(restoringHeldOrder.remarks || '');
       setIsCashManuallyEdited(false);
       showFeedback(`Restored parked order ${restoringHeldOrder.hold_no || ''}.`);
       onClearRestoringHeldOrder?.();
     }
-  }, [restoringHeldOrder, clients]);
+  }, [restoringHeldOrder, clients, liveItems]);
 
   // Load existing invoice into Cart for editing / adding more items
   useEffect(() => {
@@ -433,13 +584,13 @@ export default function PosBilling({
   }, 0);
 
   const netTotal = Math.max(0, itemSubtotal - invoiceDiscount + deliveryCharge);
-  const totalPaid = cashPayment + cardPayment + bankPayment + othersPayment + appliedTokenAmount;
+  const totalPaid = cashPayment + cardPayment + bankPayment + othersPayment;
   const balanceDue = netTotal - totalPaid;
 
   // Auto-sync cash payment continuously whenever netTotal or other tenders change (if cash not manually locked)
   useEffect(() => {
     if (!isCashManuallyEdited) {
-      const otherTenders = cardPayment + bankPayment + othersPayment + appliedTokenAmount;
+      const otherTenders = cardPayment + bankPayment + othersPayment;
       const remainingCash = Math.max(0, Math.round((netTotal - otherTenders) * 100) / 100);
       if (lineItems.length > 0) {
         setCashPayment(remainingCash);
@@ -447,15 +598,7 @@ export default function PosBilling({
         setCashPayment(0);
       }
     }
-  }, [netTotal, lineItems.length, isCashManuallyEdited, cardPayment, bankPayment, othersPayment, appliedTokenAmount]);
-
-  // Keep appliedTokenAmount clamped to netTotal if items are removed/discounted
-  useEffect(() => {
-    if (appliedTokenAmount > netTotal) {
-      setAppliedTokenAmount(Math.max(0, netTotal));
-      setIsCashManuallyEdited(false);
-    }
-  }, [netTotal, appliedTokenAmount]);
+  }, [netTotal, lineItems.length, isCashManuallyEdited, cardPayment, bankPayment, othersPayment]);
 
   // Helper for shade info — always use the product's own shade_code from DB.
   const getShadeInfo = (item: Item) => {
@@ -527,6 +670,9 @@ export default function PosBilling({
         productName: prod.name,
         originalName: prod.name,
         brand: prod.brand,
+        brand_id: prod.brand_id,
+        series_id: prod.series_id,
+        series_name: prod.series_name,
         category: prod.category,
         shadeCode,
         originalShade: shadeCode,
@@ -617,7 +763,20 @@ export default function PosBilling({
         invoiceType,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         total: netTotal,
+        subtotal: itemSubtotal,
+        discount: invoiceDiscount,
+        delivery_charge: deliveryCharge,
+        remarks,
       };
+
+      if (activeHeldOrderId) {
+        try {
+          await fetch(`/api/held-invoices?id=${activeHeldOrderId}`, { method: 'DELETE' });
+        } catch (err) {
+          console.error('Failed to clean up old held order on re-hold:', err);
+        }
+        setActiveHeldOrderId(null);
+      }
 
       setHeldOrders((prev) => [newHeld, ...prev]);
       setLineItems([]);
@@ -635,22 +794,30 @@ export default function PosBilling({
     }
   };
 
-  const handleRestoreHeld = async (order: HeldOrder) => {
-    setLineItems(order.items);
+  const handleRestoreHeld = (order: HeldOrder) => {
+    const restoredItems: InvoiceLineItem[] = (order.items || []).map((it) => {
+      const live = liveItems.find((li) => li.id === (it.item?.id || (it as any).item_id) || li.code === it.code);
+      return {
+        ...it,
+        item: live || it.item,
+        brand: it.brand || live?.brand || '',
+        category: it.category || live?.category || '',
+      };
+    });
+
+    setLineItems(restoredItems);
     setSelectedClient(order.selectedClient);
     setCustomerSearch(order.customerName);
     setInvoiceType(order.invoiceType);
+    setInvoiceDiscount(Number(order.discount) || 0);
+    setDeliveryCharge(Number(order.delivery_charge) || 0);
+    setRemarks(order.remarks || '');
     setHeldOrders((prev) => prev.filter((o) => o.id !== order.id));
+    if (order.dbId) {
+      setActiveHeldOrderId(order.dbId);
+    }
     setIsCashManuallyEdited(false);
     setShowHeldModal(false);
-
-    if (order.dbId) {
-      try {
-        await fetch(`/api/held-invoices?id=${order.dbId}`, { method: 'DELETE' });
-      } catch (err) {
-        console.error('Failed to delete held order', err);
-      }
-    }
     showFeedback(`Restored order for ${order.customerName}.`);
   };
 
@@ -676,6 +843,7 @@ export default function PosBilling({
     setInvoiceDiscount(0);
     setDeliveryCharge(0);
     setRemarks('');
+    setActiveHeldOrderId(null);
     if (editingInvoice) {
       onClearEditingInvoice?.();
       setInvoiceNo(`INV-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`);
@@ -694,7 +862,7 @@ export default function PosBilling({
     setSubmitting(true);
 
     const roundedNetTotal = Math.round(netTotal * 100) / 100;
-    const nonCashPaid = Math.round((cardPayment + bankPayment + othersPayment + appliedTokenAmount) * 100) / 100;
+    const nonCashPaid = Math.round((cardPayment + bankPayment + othersPayment) * 100) / 100;
 
     // Hard Stop: Block checkout if non-cash tenders exceed Net Total
     if (nonCashPaid > roundedNetTotal) {
@@ -739,21 +907,18 @@ export default function PosBilling({
     // Determine clean payment_type
     let determinedPaymentType = 'cash';
     if (isCreditSale) {
-      determinedPaymentType = finalPaid === 0 ? 'credit' : 'credit';
+      determinedPaymentType = 'credit';
     } else {
       const hasCard = cardPayment > 0;
       const hasBank = bankPayment > 0;
       const hasOthers = othersPayment > 0;
-      const hasTokens = appliedTokenAmount > 0;
       const hasCash = actualCashRetained > 0;
 
-      const nonCashCount = (hasCard ? 1 : 0) + (hasBank ? 1 : 0) + (hasOthers ? 1 : 0) + (hasTokens ? 1 : 0);
+      const nonCashCount = (hasCard ? 1 : 0) + (hasBank ? 1 : 0) + (hasOthers ? 1 : 0);
       const totalModes = nonCashCount + (hasCash ? 1 : 0);
 
       if (totalModes > 1) {
         determinedPaymentType = 'split';
-      } else if (hasTokens) {
-        determinedPaymentType = 'tokens';
       } else if (hasCard) {
         determinedPaymentType = 'card';
       } else if (hasBank) {
@@ -784,7 +949,7 @@ export default function PosBilling({
       cash_paid: actualCashRetained,
       card_paid: cardPayment,
       bank_paid: bankPayment,
-      others_paid: othersPayment + appliedTokenAmount,
+      others_paid: othersPayment,
       status: 'completed',
       created_by: staffName || 'Counter Staff',
       items: lineItems.map((ci) => ({
@@ -799,6 +964,14 @@ export default function PosBilling({
         discount: (ci.rate * ci.qty * ci.discountPercent) / 100,
         discount_percent: ci.discountPercent,
         total_price: ci.rate * ci.qty * (1 - ci.discountPercent / 100),
+        // Token attributes for atomic server-side processing
+        has_token: ci.hasToken,
+        token_value: ci.tokenValue,
+        token_action: ci.tokenAction || 'keep',
+        brand_id: ci.brand_id || ci.item?.brand_id || null,
+        brand_name: ci.brand || ci.item?.brand || null,
+        series_id: ci.series_id || ci.item?.series_id || null,
+        series_name: ci.series_name || ci.item?.series_name || null,
       })),
     };
 
@@ -819,69 +992,6 @@ export default function PosBilling({
       const data = await res.json();
       if (data.success) {
         const finalServerInvoiceNo = data.invoice?.invoice_no || invoiceNo;
-        const savedInvoiceId = data.invoice?.id;
-
-        // 1. Process Token Transactions for items with tokens
-        for (const item of lineItems) {
-          if (item.hasToken && (item.tokenValue || 0) > 0) {
-            const isRemoved = item.tokenAction === 'remove';
-            const tokenType = isRemoved ? 'shop_retained' : 'issued';
-            try {
-              await fetch('/api/tokens', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  type: tokenType,
-                  tenant_id: tenantId,
-                  invoice_id: savedInvoiceId || null,
-                  client_id: isRemoved ? null : selectedClient?.id || null,
-                  client_name: isRemoved ? null : (selectedClient ? selectedClient.name : customerDisplayName),
-                  item_id: item.item?.id || null,
-                  item_name: item.productName,
-                  brand: item.brand || item.item?.brand || null,
-                  category: item.category || item.item?.category || null,
-                  token_value: (item.tokenValue || 0) * item.qty,
-                  token_count: item.qty,
-                  unit_token_value: item.tokenValue || 0,
-                  remaining_count: item.qty,
-                  shift_id: shiftId || null,
-                  notes: isRemoved
-                    ? `Token removed at sale (${item.qty}x Rs. ${item.tokenValue})`
-                    : `Token issued with purchase (${item.qty}x Rs. ${item.tokenValue})`,
-                }),
-              });
-            } catch (tokErr) {
-              console.error('Error logging token transaction:', tokErr);
-            }
-          }
-        }
-
-        // 2. Process Direct Token Payment Tender against Invoice
-        if (appliedTokenAmount > 0 && selectedClient) {
-          try {
-            await fetch('/api/tokens', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                type: 'redeemed',
-                tenant_id: tenantId,
-                invoice_id: savedInvoiceId || null,
-                client_id: selectedClient.id,
-                client_name: selectedClient.name,
-                redeemed_amount: appliedTokenAmount,
-                shift_id: shiftId || null,
-                notes: `Token balance applied at POS checkout against Invoice #${finalServerInvoiceNo}`,
-              }),
-            });
-            // Update client token balance optimistically
-            setSelectedClient((prev: any) =>
-              prev ? { ...prev, token_balance: Math.max(0, Number(prev.token_balance || 0) - appliedTokenAmount) } : null
-            );
-            setAppliedTokenAmount(0);
-          } catch (tokPayErr) {
-            console.error('Error logging token payment tender:', tokPayErr);
-          }
-        }
 
         const completedInvoice = {
           ...data.invoice,
@@ -896,7 +1006,7 @@ export default function PosBilling({
           cash_paid: actualCashRetained,
           card_paid: cardPayment,
           bank_paid: bankPayment,
-          others_paid: othersPayment + appliedTokenAmount,
+          others_paid: othersPayment,
           change_returned: cashChangeReturned,
           date: invoiceDate,
           time: new Date().toLocaleTimeString(),
@@ -910,10 +1020,12 @@ export default function PosBilling({
         if (openPrint) {
           setPrintReceiptData(completedInvoice);
           showFeedback(isEditingExisting ? `Invoice #${finalServerInvoiceNo} updated & printing...` : `Invoice ${finalServerInvoiceNo} finalized & printing...`);
-          // Automatically invoke direct/thermal printing
-          setTimeout(() => {
-            window.print();
-          }, 80);
+          // UX-01: Print via hidden iframe — avoids popup blocker on post-async calls (DEV-07: applies assigned template)
+          const iframeHtml = buildThermalHtmlDocument(
+            buildPosThermalHtml(completedInvoice, tenantName, staffName, assignedTemplate),
+            `Receipt ${completedInvoice.invoice_no || finalServerInvoiceNo}`
+          );
+          printViaIframe(iframeHtml);
         } else {
           setPrintReceiptData(null);
           showFeedback(isEditingExisting ? `Invoice #${finalServerInvoiceNo} updated successfully.` : `Invoice ${finalServerInvoiceNo} saved to database.`);
@@ -921,6 +1033,16 @@ export default function PosBilling({
 
         if (isEditingExisting) {
           onClearEditingInvoice?.();
+        }
+
+        // BUG-03 FIX: Delete held invoice from database only after checkout is successfully completed
+        if (activeHeldOrderId) {
+          try {
+            await fetch(`/api/held-invoices?id=${activeHeldOrderId}`, { method: 'DELETE' });
+          } catch (delHeldErr) {
+            console.error('Failed to remove held invoice after checkout:', delHeldErr);
+          }
+          setActiveHeldOrderId(null);
         }
 
         // Reset state for next customer
@@ -1208,30 +1330,6 @@ export default function PosBilling({
                   style={{ width: 16, height: 16, color: '#94A3B8', position: 'absolute', right: '10px', cursor: 'pointer' }}
                 />
               </div>
-              {selectedClient && (selectedClient.token_balance || 0) > 0 && (
-                <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#ECFDF5', border: '1px solid #A7F3D0', padding: '3px 8px', borderRadius: '6px' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#065F46' }}>
-                    🏷️ Available Token Balance: Rs. {(selectedClient.token_balance || 0).toLocaleString()}
-                  </span>
-                  {appliedTokenAmount > 0 ? (
-                    <span style={{ fontSize: '10px', fontWeight: 700, color: '#047857' }}>
-                      ✓ Rs. {appliedTokenAmount.toLocaleString()} Applied
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const maxApplicable = Math.min(netTotal, selectedClient.token_balance || 0);
-                        setAppliedTokenAmount(maxApplicable);
-                        setIsCashManuallyEdited(false);
-                      }}
-                      style={{ fontSize: '10px', fontWeight: 700, background: '#059669', color: '#ffffff', border: 'none', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer' }}
-                    >
-                      Apply to Bill
-                    </button>
-                  )}
-                </div>
-              )}
             </div>
 
             {/* 2. Customer History Box */}
@@ -1835,28 +1933,8 @@ export default function PosBilling({
               </div>
             </div>
 
-            {/* Token Balance Applied Row */}
-            {appliedTokenAmount > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px', background: '#ECFDF5', border: '1px solid #A7F3D0', borderRadius: '6px' }}>
-                <span style={{ fontSize: '11px', fontWeight: 700, color: '#065F46', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  🏷️ Token Balance Applied
-                </span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 800, color: '#059669', fontSize: '12px' }}>
-                    − Rs. {appliedTokenAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => { setAppliedTokenAmount(0); setIsCashManuallyEdited(false); }}
-                    style={{ fontSize: '10px', color: '#DC2626', background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 700, padding: '0 2px' }}
-                    title="Remove token balance from this bill"
-                  >✕</button>
-                </div>
-              </div>
-            )}
-
             {(() => {
-              const otherTenders = cardPayment + bankPayment + othersPayment + appliedTokenAmount;
+              const otherTenders = cardPayment + bankPayment + othersPayment;
               const isNonCashOverpaid = otherTenders > netTotal;
               const changeToReturn = !isNonCashOverpaid && totalPaid > netTotal ? Math.round((totalPaid - netTotal) * 100) / 100 : 0;
 
@@ -1905,7 +1983,7 @@ export default function PosBilling({
             {/* Primary Save & Print */}
             <button
               type="button"
-              disabled={submitting || (cardPayment + bankPayment + othersPayment + appliedTokenAmount) > netTotal}
+              disabled={submitting || (cardPayment + bankPayment + othersPayment) > netTotal}
               onClick={() => handleCheckout(true)}
               className="pos-btn-checkout"
             >
@@ -1917,7 +1995,7 @@ export default function PosBilling({
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
               <button
                 type="button"
-                disabled={submitting || (cardPayment + bankPayment + othersPayment + appliedTokenAmount) > netTotal}
+                disabled={submitting || (cardPayment + bankPayment + othersPayment) > netTotal}
                 onClick={() => handleCheckout(false)}
                 style={{ padding: '8px', background: '#F1F5F9', color: '#1E293B', fontWeight: 700, fontSize: '12px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', border: '1px solid #CBD5E1', cursor: 'pointer' }}
               >
@@ -2329,51 +2407,14 @@ export default function PosBilling({
         </div>
       )}
 
-      {/* ── Print-Only Direct Thermal Receipt (No In-App Modal / No Screen Overlay) ── */}
+      {/* ── UX-01: Print-Only Thermal Receipt Wrapper (screen-hidden; iframe handles actual printing) ── */}
       {printReceiptData && (
         <div id="pos-thermal-print-wrapper" aria-hidden="true">
           <style>{`
-            @media screen {
-              #pos-thermal-print-wrapper,
-              #printable-pos-thermal-slip {
-                display: none !important;
-                visibility: hidden !important;
-              }
-            }
-            @media print {
-              body * {
-                visibility: hidden !important;
-              }
-              #pos-thermal-print-wrapper,
-              #pos-thermal-print-wrapper *,
-              #printable-pos-thermal-slip,
-              #printable-pos-thermal-slip * {
-                visibility: visible !important;
-              }
-              #pos-thermal-print-wrapper {
-                display: block !important;
-                position: fixed !important;
-                left: 0 !important;
-                top: 0 !important;
-                width: 80mm !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                background: #ffffff !important;
-              }
-              #printable-pos-thermal-slip {
-                display: block !important;
-                position: relative !important;
-                left: 0 !important;
-                top: 0 !important;
-                width: 80mm !important;
-                max-width: 80mm !important;
-                margin: 0 !important;
-                padding: 4mm !important;
-                box-shadow: none !important;
-                border: none !important;
-                background: #ffffff !important;
-                color: #000000 !important;
-              }
+            #pos-thermal-print-wrapper,
+            #printable-pos-thermal-slip {
+              display: none !important;
+              visibility: hidden !important;
             }
           `}</style>
           <div id="printable-pos-thermal-slip" style={{ width: '80mm', maxWidth: '80mm', padding: '4mm', color: '#000000', fontFamily: 'JetBrains Mono, monospace' }}>

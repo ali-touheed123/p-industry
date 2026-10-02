@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Branch } from '@/types/ceo';
-import { Truck, Search, RefreshCw, CheckCircle2, Clock, PackageCheck, AlertCircle } from 'lucide-react';
+import { Truck, Search, RefreshCw, CheckCircle2, Clock, PackageCheck, AlertCircle, Eye, X } from 'lucide-react';
 import { DatePeriodFilter } from './DatePeriodFilter';
 
 interface BranchOrdersViewProps {
@@ -19,6 +19,7 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
   const [loading, setLoading] = useState<boolean>(true);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
 
   const tenantId = branch?.id
     ? (/-b\d+$/.test(branch.id) ? branch.id.replace(/-b\d+$/, '') : branch.id)
@@ -62,20 +63,21 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
     return true;
   });
 
+  // FIX CEO-MOD-5: High-contrast status badges for light background
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'pending':
-        return { bg: 'rgba(234,179,8,0.15)', color: '#FACC15', label: 'Pending Approval' };
+        return { bg: '#FEF3C7', color: '#92400E', label: 'Pending Approval' };
       case 'accepted':
-        return { bg: 'rgba(59,130,246,0.15)', color: '#60A5FA', label: 'Accepted / Packing' };
+        return { bg: '#DBEAFE', color: '#1E40AF', label: 'Accepted / Packing' };
       case 'dispatched':
-        return { bg: 'rgba(168,85,247,0.15)', color: '#C084FC', label: 'In Transit' };
+        return { bg: '#F3E8FF', color: '#6B21A8', label: 'In Transit' };
       case 'received':
-        return { bg: 'rgba(34,197,94,0.15)', color: '#4ADE80', label: 'Received / Restocked' };
+        return { bg: '#DCFCE7', color: '#166534', label: 'Received / Restocked' };
       case 'rejected':
-        return { bg: 'rgba(239,68,68,0.15)', color: '#FCA5A5', label: 'Rejected' };
+        return { bg: '#FEE2E2', color: '#991B1B', label: 'Rejected' };
       default:
-        return { bg: 'rgba(156,163,175,0.15)', color: '#9CA3AF', label: status };
+        return { bg: '#F1F5F9', color: '#475569', label: status };
     }
   };
 
@@ -172,25 +174,26 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
       <div style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
           <thead>
-            <tr style={{ backgroundColor: '#FFFFFF', borderBottom: '1px solid #E2E8F0', color: '#64748B', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '0.05em' }}>
+            <tr style={{ backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0', color: '#475569', textTransform: 'uppercase', fontSize: '10px', letterSpacing: '0.05em', fontWeight: 700 }}>
               <th style={{ padding: '12px 16px' }}>Order #</th>
               <th style={{ padding: '12px 16px' }}>Requested By</th>
               <th style={{ padding: '12px 16px' }}>Target Branch</th>
               <th style={{ padding: '12px 16px' }}>Items Requested</th>
               <th style={{ padding: '12px 16px' }}>Date</th>
               <th style={{ padding: '12px 16px', textAlign: 'center' }}>Status</th>
+              <th style={{ padding: '12px 16px', textAlign: 'center' }}>Action</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: '#64748B' }}>
+                <td colSpan={7} style={{ padding: '40px', textAlign: 'center', color: '#475569' }}>
                   Loading branch orders...
                 </td>
               </tr>
             ) : filteredOrders.length === 0 ? (
               <tr>
-                <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: '#64748B' }}>
+                <td colSpan={7} style={{ padding: '40px', textAlign: 'center', color: '#475569' }}>
                   No branch orders found.
                 </td>
               </tr>
@@ -209,19 +212,21 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
                     </td>
                     <td style={{ padding: '12px 16px', color: '#0F172A', fontWeight: 600 }}>
                       {o.from_tenant?.name || 'Originating Branch'}
-                      {o.from_counter ? <span style={{ fontSize: '10px', color: '#64748B', display: 'block' }}>Counter: {o.from_counter}</span> : null}
+                      {o.from_counter ? <span style={{ fontSize: '11px', color: '#475569', display: 'block', fontWeight: 400 }}>Counter: {o.from_counter}</span> : null}
                     </td>
-                    <td style={{ padding: '12px 16px', color: '#9CA3AF' }}>
+                    {/* FIX CEO-MOD-5: Replaced low-contrast gray (#9CA3AF) with #0F172A */}
+                    <td style={{ padding: '12px 16px', color: '#0F172A', fontWeight: 600 }}>
                       {o.to_tenant?.name || 'Fulfilling Godown'}
-                      {o.target_counter ? <span style={{ fontSize: '10px', color: '#64748B', display: 'block' }}>Target: {o.target_counter}</span> : null}
+                      {o.target_counter ? <span style={{ fontSize: '11px', color: '#475569', display: 'block', fontWeight: 400 }}>Target: {o.target_counter}</span> : null}
                     </td>
-                    <td style={{ padding: '12px 16px', color: '#D1D5DB' }}>
-                      <div style={{ fontWeight: 600 }}>{itemsCount} units total</div>
-                      <div style={{ fontSize: '11px', color: '#64748B', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {/* FIX CEO-MOD-5: Replaced unreadable silver gray (#D1D5DB) with high contrast colors */}
+                    <td style={{ padding: '12px 16px', color: '#0F172A' }}>
+                      <div style={{ fontWeight: 700, color: '#0F172A' }}>{itemsCount} units total</div>
+                      <div style={{ fontSize: '11px', color: '#475569', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {itemListStr || 'No items listed'}
                       </div>
                     </td>
-                    <td style={{ padding: '12px 16px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', fontSize: '11px', whiteSpace: 'nowrap' }}>
+                    <td style={{ padding: '12px 16px', color: '#475569', fontFamily: 'JetBrains Mono, monospace', fontSize: '11px', whiteSpace: 'nowrap' }}>
                       {o.created_at ? new Date(o.created_at).toLocaleDateString() : '—'}
                     </td>
                     <td style={{ padding: '12px 16px', textAlign: 'center' }}>
@@ -238,6 +243,27 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
                         {badge.label}
                       </span>
                     </td>
+                    <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                      <button
+                        onClick={() => setSelectedOrder(o)}
+                        style={{
+                          padding: '4px 10px',
+                          backgroundColor: '#F8FAFC',
+                          border: '1px solid #CBD5E1',
+                          borderRadius: '6px',
+                          color: '#0F172A',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                        }}
+                      >
+                        <Eye style={{ width: '13px', height: '13px', color: '#D97706' }} />
+                        Inspect
+                      </button>
+                    </td>
                   </tr>
                 );
               })
@@ -245,6 +271,132 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
           </tbody>
         </table>
       </div>
+
+      {/* FIX CEO-MOD-5: Detail Inspection Modal for Branch Orders */}
+      {selectedOrder && (
+        <div className="ceo-modal-overlay">
+          <div id="branch-order-detail-modal" className="ceo-modal-box" style={{ maxWidth: '780px' }}>
+            {/* Modal Header */}
+            <div style={{ padding: '16px 24px', borderBottom: '1px solid #E2E8F0', backgroundColor: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Truck style={{ width: '20px', height: '20px', color: '#D97706' }} />
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <h3 className="ceo-font-heading" style={{ fontSize: '18px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
+                      {selectedOrder.order_no}
+                    </h3>
+                    <span style={{
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      backgroundColor: getStatusBadge(selectedOrder.status).bg,
+                      color: getStatusBadge(selectedOrder.status).color,
+                    }}>
+                      {getStatusBadge(selectedOrder.status).label}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '11px', color: '#64748B', margin: '2px 0 0' }}>
+                    Created {selectedOrder.created_at ? new Date(selectedOrder.created_at).toLocaleString() : '—'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedOrder(null)}
+                style={{ color: '#64748B', padding: '6px', borderRadius: '6px', backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', cursor: 'pointer' }}
+              >
+                <X style={{ width: '18px', height: '18px' }} />
+              </button>
+            </div>
+
+            {/* Routing / Branch Meta */}
+            <div style={{ padding: '16px 24px', backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }}>
+              <div style={{ backgroundColor: '#FFFFFF', padding: '14px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                <div style={{ color: '#64748B', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>Originating Requisition Branch</div>
+                <div style={{ fontSize: '15px', fontWeight: 700, color: '#0F172A', marginTop: '4px' }}>
+                  {selectedOrder.from_tenant?.name || 'Originating Branch'}
+                </div>
+                <div style={{ fontSize: '12px', color: '#475569', marginTop: '2px' }}>
+                  Counter: {selectedOrder.from_counter || 'Main Terminal'}
+                </div>
+              </div>
+
+              <div style={{ backgroundColor: '#FFFFFF', padding: '14px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                <div style={{ color: '#64748B', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>Target Fulfilling Branch / Godown</div>
+                <div style={{ fontSize: '15px', fontWeight: 700, color: '#0F172A', marginTop: '4px' }}>
+                  {selectedOrder.to_tenant?.name || 'Fulfilling Godown'}
+                </div>
+                <div style={{ fontSize: '12px', color: '#475569', marginTop: '2px' }}>
+                  Target Station: {selectedOrder.target_counter || 'Central Dispatch'}
+                </div>
+              </div>
+            </div>
+
+            {/* Items Table */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', backgroundColor: '#FFFFFF', maxHeight: '400px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B', marginBottom: '10px' }}>
+                Requisitioned Transfer Manifest ({(selectedOrder.items || selectedOrder.branch_order_items || []).length} Line Items)
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid #E2E8F0', color: '#475569', fontSize: '11px', textTransform: 'uppercase', fontWeight: 700 }}>
+                    <th style={{ padding: '8px 12px' }}>#</th>
+                    <th style={{ padding: '8px 12px' }}>Item Code</th>
+                    <th style={{ padding: '8px 12px' }}>Product Description</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'center' }}>Pack Size</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'right' }}>Requested Qty</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(selectedOrder.items || selectedOrder.branch_order_items || []).map((it: any, idx: number) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                      <td style={{ padding: '10px 12px', color: '#64748B' }}>{idx + 1}</td>
+                      <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', color: '#475569' }}>
+                        {it.item_code || '—'}
+                      </td>
+                      <td style={{ padding: '10px 12px', fontWeight: 600, color: '#0F172A' }}>
+                        {it.item_name}
+                      </td>
+                      <td style={{ padding: '10px 12px', textAlign: 'center', color: '#475569' }}>
+                        {it.pack_size || it.unit || 'Can'}
+                      </td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, color: '#0F172A', fontFamily: 'JetBrains Mono, monospace' }}>
+                        {it.qty} {it.unit || 'PCS'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {selectedOrder.remarks && (
+                <div style={{ marginTop: '16px', padding: '12px', backgroundColor: '#F8FAFC', borderRadius: '6px', border: '1px solid #E2E8F0', fontSize: '12px' }}>
+                  <span style={{ fontWeight: 700, color: '#475569' }}>Order Remarks: </span>
+                  <span style={{ color: '#0F172A' }}>{selectedOrder.remarks}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '16px 24px', backgroundColor: '#FFFFFF', borderTop: '1px solid #E2E8F0', display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setSelectedOrder(null)}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#F1F5F9',
+                  border: '1px solid #CBD5E1',
+                  borderRadius: '6px',
+                  color: '#0F172A',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Close Inspection
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

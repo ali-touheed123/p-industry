@@ -14,7 +14,18 @@ export async function GET(req: NextRequest) {
     const endDate = searchParams.get('end_date');
     const paymentType = searchParams.get('payment_type');
     const search = searchParams.get('search');
-    const limit = parseInt(searchParams.get('limit') || '500', 10);
+    const cursor = searchParams.get('cursor');
+    const limitParam = searchParams.get('limit');
+    // FIX CEO-14 / DB-15: Default raised from 500 to 5000 to prevent silent query truncation on historical views
+    let limit = 5000;
+    if (limitParam === 'all' || limitParam === 'none') {
+      limit = 10000;
+    } else if (limitParam) {
+      const parsed = parseInt(limitParam, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        limit = Math.min(parsed, 10000);
+      }
+    }
 
     if (!tenantId) {
       return NextResponse.json({ success: false, error: 'Tenant ID required' }, { status: 400 });
@@ -25,13 +36,20 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    let query = supabaseAdmin
-      .from('invoices')
-      .select('*, invoice_items(*)')
+    const summary = searchParams.get('summary') === 'true' || searchParams.get('summary') === '1' || searchParams.get('select_fields') === 'summary';
+
+    let query: any = summary
+      ? supabaseAdmin.from('invoices').select('*')
+      : supabaseAdmin.from('invoices').select('*, invoice_items(*)');
+
+    query = query
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
       .limit(limit);
 
+    if (cursor) {
+      query = query.lt('created_at', cursor);
+    }
     if (clientId) {
       query = query.eq('client_id', clientId);
     }
@@ -41,11 +59,14 @@ export async function GET(req: NextRequest) {
     if (invoiceType && invoiceType !== 'all') {
       query = query.eq('invoice_type', invoiceType);
     }
-    if (startDate) {
-      query = query.gte('date', startDate);
+    // Clean ISO strings to YYYY-MM-DD if needed to accurately match date column
+    const cleanStartDate = startDate ? (startDate.includes('T') ? startDate.split('T')[0] : startDate) : null;
+    const cleanEndDate = endDate ? (endDate.includes('T') ? endDate.split('T')[0] : endDate) : null;
+    if (cleanStartDate) {
+      query = query.gte('date', cleanStartDate);
     }
-    if (endDate) {
-      query = query.lte('date', endDate);
+    if (cleanEndDate) {
+      query = query.lte('date', cleanEndDate);
     }
     if (paymentType && paymentType !== 'all') {
       query = query.eq('payment_type', paymentType);
@@ -57,7 +78,23 @@ export async function GET(req: NextRequest) {
     const { data: invoices, error } = await query;
     if (error) throw error;
 
-    return NextResponse.json({ success: true, invoices: invoices || [] });
+    const invoiceList = invoices || [];
+    const hasMore = invoiceList.length === limit;
+    const nextCursor = hasMore && invoiceList.length > 0
+      ? invoiceList[invoiceList.length - 1].created_at
+      : null;
+
+    return NextResponse.json({
+      success: true,
+      invoices: invoiceList,
+      pagination: {
+        limit,
+        has_more: hasMore,
+        next_cursor: nextCursor,
+      },
+      next_cursor: nextCursor,
+      has_more: hasMore,
+    });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
@@ -104,21 +141,71 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    // 0. Ensure unique collision-safe invoice number
-    let finalInvoiceNo = invoice_no;
-    const { data: existingInv } = await supabaseAdmin
-      .from('invoices')
-      .select('id')
-      .eq('tenant_id', tenant_id)
-      .eq('invoice_no', finalInvoiceNo)
-      .maybeSingle();
+    // 0. Server-Side Price & Margin Bounds Validation (VAL-03)
+    const parsedSubtotal = Number(subtotal) || 0;
+    const parsedDiscount = Number(discount) || 0;
+    const parsedDelivery = Number(delivery_charge) || 0;
+    const parsedNetTotal = Number(net_total) || 0;
+    const parsedPaid = Number(paid_amount) || 0;
+    const parsedDue = Number(due_amount) || 0;
 
-    if (existingInv) {
-      finalInvoiceNo = `${invoice_no}-${Date.now().toString().slice(-4)}`;
+    if (parsedDiscount < 0) {
+      return NextResponse.json(
+        { success: false, error: 'Discount amount cannot be negative' },
+        { status: 400 }
+      );
+    }
+
+    if (invoice_type !== 'return' && parsedSubtotal > 0 && parsedDiscount > parsedSubtotal) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Discount amount (Rs. ${parsedDiscount.toLocaleString()}) cannot exceed subtotal (Rs. ${parsedSubtotal.toLocaleString()})`,
+        },
+        { status: 400 }
+      );
+    }
+
+    if (parsedNetTotal < 0) {
+      return NextResponse.json(
+        { success: false, error: `Net total cannot be negative (received Rs. ${parsedNetTotal.toLocaleString()})` },
+        { status: 400 }
+      );
+    }
+
+    if (parsedPaid < 0 || parsedDue < 0) {
+      return NextResponse.json(
+        { success: false, error: 'Paid and due amounts cannot be negative' },
+        { status: 400 }
+      );
+    }
+
+    for (const it of items) {
+      const lineQty = Number(it.qty) || 0;
+      const linePrice = Number(it.unit_price ?? it.rate ?? it.price ?? 0);
+      const lineDiscPercent = Number(it.discount_percent ?? it.discountPercent ?? 0);
+
+      if (lineQty <= 0) {
+        return NextResponse.json(
+          { success: false, error: `Invalid quantity for item "${it.item_name || it.name || it.productName || 'Product'}": must be greater than zero` },
+          { status: 400 }
+        );
+      }
+      if (linePrice < 0) {
+        return NextResponse.json(
+          { success: false, error: `Invalid unit price for item "${it.item_name || it.name || it.productName || 'Product'}": cannot be negative` },
+          { status: 400 }
+        );
+      }
+      if (lineDiscPercent < 0 || lineDiscPercent > 100) {
+        return NextResponse.json(
+          { success: false, error: `Invalid discount percentage (${lineDiscPercent}%) for item "${it.item_name || it.name || it.productName || 'Product'}": must be between 0 and 100` },
+          { status: 400 }
+        );
+      }
     }
 
     // 0.1 Backend Safeguard: Block credit sales for walk-in (no account) customers
-    const parsedDue = Number(due_amount) || 0;
     if (!client_id && parsedDue > 0) {
       return NextResponse.json(
         { success: false, error: 'Cannot record a credit sale without a customer account' },
@@ -152,140 +239,80 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 1. Insert Invoice Record
-    const { data: invoice, error: invoiceErr } = await supabaseAdmin
-      .from('invoices')
-      .insert({
-        tenant_id,
-        invoice_no: finalInvoiceNo,
-        client_id: client_id || null,
-        client_name,
-        shift_id: shift_id || null,
-        date,
-        subtotal: Number(subtotal),
-        discount: Number(discount),
-        delivery_charge: Number(delivery_charge),
-        remarks: remarks || null,
-        invoice_type,
-        net_total: Number(net_total),
-        paid_amount: Number(paid_amount),
-        due_amount: Number(due_amount),
-        payment_type,
-        cash_paid: Number(cash_paid),
-        card_paid: Number(card_paid),
-        bank_paid: Number(bank_paid),
-        others_paid: Number(others_paid),
-        status,
-        created_by: created_by || null,
-      })
-      .select()
-      .single();
+    // 1. Prepare Atomic Invoice Data
+    const invoiceData = {
+      tenant_id,
+      invoice_no: String(invoice_no).trim(),
+      client_id: client_id || null,
+      client_name,
+      shift_id: shift_id || null,
+      date,
+      subtotal: parsedSubtotal,
+      discount: parsedDiscount,
+      delivery_charge: parsedDelivery,
+      remarks: remarks || null,
+      invoice_type,
+      net_total: parsedNetTotal,
+      paid_amount: parsedPaid,
+      due_amount: parsedDue,
+      payment_type,
+      cash_paid: Number(cash_paid) || 0,
+      card_paid: Number(card_paid) || 0,
+      bank_paid: Number(bank_paid) || 0,
+      others_paid: Number(others_paid) || 0,
+      status,
+      created_by: created_by || null,
+    };
 
-    if (invoiceErr) throw invoiceErr;
-
-    // 2. Prepare and Insert Invoice Items
+    // 2. Prepare Atomic Invoice Items
     const invoiceItemsToInsert = items.map((it: any) => ({
-      invoice_id: invoice.id,
       item_id: it.item_id || it.item?.id || null,
       item_code: it.item_code || it.code || it.item?.code || '',
-      item_name: it.item_name || it.productName || it.name || it.item?.name || '',
+      item_name: it.item_name || it.productName || it.name || it.item?.name || 'Product',
       shade_code: it.shade_code || it.shadeCode || '',
       pack_size: it.pack_size || it.packSize || it.unit || 'Can',
       unit: it.unit || it.item?.unit || 'PCS',
       qty: Number(it.qty) || 1,
-      unit_price: Number(it.unit_price || it.rate || it.price) || 0,
-      discount: Number(it.discount) || 0,
-      discount_percent: Number(it.discount_percent || it.discountPercent) || 0,
-      total_price: Number(it.total_price || (it.qty * (it.unit_price || it.rate || 0))) || 0,
+      unit_price: Number(it.unit_price ?? it.rate ?? it.price ?? 0),
+      discount: Number(it.discount ?? 0),
+      discount_percent: Number(it.discount_percent ?? it.discountPercent ?? 0),
+      total_price: Number(it.total_price ?? (Number(it.qty || 1) * Number(it.unit_price ?? it.rate ?? 0))),
     }));
 
-    const { error: itemsErr } = await supabaseAdmin
-      .from('invoice_items')
-      .insert(invoiceItemsToInsert);
+    // 3. Prepare Atomic Tokens
+    const tokensToInsert = (body.tokens && Array.isArray(body.tokens))
+      ? body.tokens
+      : items
+          .filter((it: any) => Boolean(it.has_token || it.hasToken) && ((it.token_value ?? it.tokenValue) > 0 || it.token_action || it.tokenAction))
+          .map((it: any) => ({
+            token_action: it.token_action || it.tokenAction || 'keep',
+            quantity: Number(it.qty) || 1,
+            brand_id: it.brand_id || it.item?.brand_id || null,
+            brand_name: it.brand_name || it.brand || it.item?.brand || '',
+            series_id: it.series_id || it.item?.series_id || null,
+            series_name: it.series_name || it.item?.series_name || '',
+            unit_name: it.unit || it.pack_size || it.item?.unit || '',
+            token_value: Number(it.token_value ?? it.tokenValue ?? 0),
+          }));
 
-    if (itemsErr) throw itemsErr;
+    // 4. Execute Atomic RPC Transaction (Invoice + Items + Stock + Client Balance + Tokens)
+    const { data: atomicResult, error: rpcErr } = await supabaseAdmin.rpc('create_invoice_atomic', {
+      p_invoice_data: invoiceData,
+      p_items: invoiceItemsToInsert,
+      p_tokens: tokensToInsert,
+    });
 
-    // 3. Stock Adjustment
-    const isReturn = invoice_type === 'return';
-    for (const lineItem of invoiceItemsToInsert) {
-      let itemQuery = supabaseAdmin.from('items').select('id, stock_qty');
-      if (lineItem.item_id) {
-        itemQuery = itemQuery.eq('id', lineItem.item_id);
-      } else if (lineItem.item_code) {
-        itemQuery = itemQuery.eq('tenant_id', tenant_id).eq('code', lineItem.item_code);
-      } else {
-        continue;
-      }
-
-      const { data: currentItem } = await itemQuery.maybeSingle();
-
-      if (currentItem) {
-        const currentQty = currentItem.stock_qty || 0;
-        const newQty = isReturn
-          ? currentQty + lineItem.qty
-          : Math.max(0, currentQty - lineItem.qty);
-
-        await supabaseAdmin
-          .from('items')
-          .update({ stock_qty: newQty })
-          .eq('id', currentItem.id);
-      }
-    }
-
-    // 4. Client Balance Update
-    if (client_id) {
-      const { data: client } = await supabaseAdmin
-        .from('clients')
-        .select('current_balance')
-        .eq('id', client_id)
-        .maybeSingle();
-
-      if (client) {
-        const currentBal = client.current_balance || 0;
-        let newBalance = currentBal;
-
-        if (isReturn) {
-          // If return, reduce client debt
-          newBalance = Math.max(0, currentBal - Number(net_total));
-        } else if (Number(due_amount) > 0) {
-          // If sales on credit / unpaid balance, add to client debt
-          newBalance = currentBal + Number(due_amount);
-        }
-
-        await supabaseAdmin
-          .from('clients')
-          .update({ current_balance: newBalance })
-          .eq('id', client_id);
-      }
-    }
-
-    // 5. Create Audit Log Entry
-    try {
-      await supabaseAdmin.from('audit_logs').insert({
-        tenant_id,
-        user_name: client_name,
-        action: isReturn ? 'Credit Note Return' : 'Sales Invoice Complete',
-        action_type: isReturn ? 'return' : 'sale',
-        entity_type: 'invoice',
-        entity_id: invoice.id,
-        details: {
-          invoice_no: finalInvoiceNo,
-          net_total,
-          paid_amount,
-          due_amount,
-          items_count: items.length,
-        },
-      });
-    } catch {
-      // Non-blocking audit log
+    if (rpcErr) {
+      return NextResponse.json({ success: false, error: rpcErr.message }, { status: 400 });
     }
 
     return NextResponse.json({
       success: true,
       invoice: {
-        ...invoice,
+        ...(atomicResult?.invoice || {}),
         items: invoiceItemsToInsert,
       },
+      is_duplicate: Boolean(atomicResult?.is_duplicate),
     });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
@@ -317,9 +344,9 @@ export async function PATCH(req: NextRequest) {
       items = [],
     } = body;
 
-    if (!id || !tenant_id || !items.length) {
+    if (!id || !tenant_id) {
       return NextResponse.json(
-        { success: false, error: 'Invoice ID, Tenant ID, and at least 1 item are required' },
+        { success: false, error: 'Invoice ID and Tenant ID are required' },
         { status: 400 }
       );
     }
@@ -327,6 +354,92 @@ export async function PATCH(req: NextRequest) {
     const auth = await requireTenantAuth(req, tenant_id);
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
+    // Cancellation request: delegate to atomic cancellation function
+    if (status === 'cancelled' || body.action === 'cancel') {
+      const { data: cancelResult, error: cancelErr } = await supabaseAdmin.rpc('cancel_invoice_atomic', {
+        p_tenant_id: tenant_id,
+        p_invoice_id: id,
+        p_reason: body.cancel_reason || remarks || 'Cancelled by operator',
+        p_cancelled_by: body.cancelled_by || auth.session?.username || null,
+      });
+
+      if (cancelErr) {
+        return NextResponse.json({ success: false, error: cancelErr.message }, { status: 400 });
+      }
+
+      return NextResponse.json({ success: true, ...cancelResult });
+    }
+
+    if (!items.length) {
+      return NextResponse.json(
+        { success: false, error: 'At least 1 item is required for invoice update' },
+        { status: 400 }
+      );
+    }
+
+    // VAL-03: Price, discount, and margin validation safeguards for modified invoices
+    const parsedSubtotal = Number(subtotal) || 0;
+    const parsedDiscount = Number(discount) || 0;
+    const parsedNetTotal = Number(net_total) || 0;
+    const parsedPaid = Number(paid_amount) || 0;
+    const parsedDue = Number(due_amount) || 0;
+
+    if (parsedDiscount < 0) {
+      return NextResponse.json(
+        { success: false, error: 'Discount amount cannot be negative' },
+        { status: 400 }
+      );
+    }
+
+    if (parsedSubtotal > 0 && parsedDiscount > parsedSubtotal) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Discount amount (Rs. ${parsedDiscount.toLocaleString()}) cannot exceed subtotal (Rs. ${parsedSubtotal.toLocaleString()})`,
+        },
+        { status: 400 }
+      );
+    }
+
+    if (parsedNetTotal < 0) {
+      return NextResponse.json(
+        { success: false, error: `Net total cannot be negative (received Rs. ${parsedNetTotal.toLocaleString()})` },
+        { status: 400 }
+      );
+    }
+
+    if (parsedPaid < 0 || parsedDue < 0) {
+      return NextResponse.json(
+        { success: false, error: 'Paid and due amounts cannot be negative' },
+        { status: 400 }
+      );
+    }
+
+    for (const it of items) {
+      const lineQty = Number(it.qty) || 0;
+      const linePrice = Number(it.unit_price ?? it.rate ?? it.price ?? 0);
+      const lineDiscPercent = Number(it.discount_percent ?? it.discountPercent ?? 0);
+
+      if (lineQty <= 0) {
+        return NextResponse.json(
+          { success: false, error: `Invalid quantity for item "${it.item_name || it.name || it.productName || 'Product'}": must be greater than zero` },
+          { status: 400 }
+        );
+      }
+      if (linePrice < 0) {
+        return NextResponse.json(
+          { success: false, error: `Invalid unit price for item "${it.item_name || it.name || it.productName || 'Product'}": cannot be negative` },
+          { status: 400 }
+        );
+      }
+      if (lineDiscPercent < 0 || lineDiscPercent > 100) {
+        return NextResponse.json(
+          { success: false, error: `Invalid discount percentage (${lineDiscPercent}%) for item "${it.item_name || it.name || it.productName || 'Product'}": must be between 0 and 100` },
+          { status: 400 }
+        );
+      }
     }
 
     // 1. Fetch old invoice and previous line items
@@ -340,22 +453,23 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Original invoice not found' }, { status: 404 });
     }
 
-    // 2. Revert previous stock deductions for old items
+    // 2. Revert previous stock deductions for old items atomically
     if (oldInvoice.invoice_items && oldInvoice.invoice_items.length > 0) {
+      const wasReturn = oldInvoice.invoice_type === 'return';
       for (const oldIt of oldInvoice.invoice_items) {
+        if (!oldIt.item_id && !oldIt.item_code) continue;
+        const revertDelta = wasReturn ? -Number(oldIt.qty || 0) : Number(oldIt.qty || 0);
         if (oldIt.item_id) {
-          const { data: curItem } = await supabaseAdmin
-            .from('items')
-            .select('id, stock_qty')
-            .eq('id', oldIt.item_id)
-            .maybeSingle();
-
-          if (curItem) {
-            await supabaseAdmin
-              .from('items')
-              .update({ stock_qty: (curItem.stock_qty || 0) + Number(oldIt.qty || 0) })
-              .eq('id', curItem.id);
-          }
+          await supabaseAdmin.rpc('adjust_item_stock', {
+            p_item_id: oldIt.item_id,
+            p_qty_delta: revertDelta,
+          });
+        } else if (oldIt.item_code) {
+          await supabaseAdmin.rpc('adjust_item_stock_by_code', {
+            p_tenant_id: oldInvoice.tenant_id,
+            p_item_code: oldIt.item_code,
+            p_qty_delta: revertDelta,
+          });
         }
       }
     }
@@ -381,21 +495,22 @@ export async function PATCH(req: NextRequest) {
     const { error: insertItemsErr } = await supabaseAdmin.from('invoice_items').insert(invoiceItemsToInsert);
     if (insertItemsErr) throw insertItemsErr;
 
-    // 4. Apply new stock deductions
+    // 4. Apply new stock adjustments atomically
+    const isNewReturn = (body.invoice_type || oldInvoice.invoice_type) === 'return';
     for (const lineItem of invoiceItemsToInsert) {
+      if (!lineItem.item_id && !lineItem.item_code) continue;
+      const newDelta = isNewReturn ? Number(lineItem.qty || 0) : -Number(lineItem.qty || 0);
       if (lineItem.item_id) {
-        const { data: curItem } = await supabaseAdmin
-          .from('items')
-          .select('id, stock_qty')
-          .eq('id', lineItem.item_id)
-          .maybeSingle();
-
-        if (curItem) {
-          await supabaseAdmin
-            .from('items')
-            .update({ stock_qty: Math.max(0, (curItem.stock_qty || 0) - Number(lineItem.qty || 0)) })
-            .eq('id', curItem.id);
-        }
+        await supabaseAdmin.rpc('adjust_item_stock', {
+          p_item_id: lineItem.item_id,
+          p_qty_delta: newDelta,
+        });
+      } else if (lineItem.item_code) {
+        await supabaseAdmin.rpc('adjust_item_stock_by_code', {
+          p_tenant_id: oldInvoice.tenant_id,
+          p_item_code: lineItem.item_code,
+          p_qty_delta: newDelta,
+        });
       }
     }
 
@@ -412,7 +527,8 @@ export async function PATCH(req: NextRequest) {
         .maybeSingle();
 
       if (client) {
-        const updatedBalance = Math.max(0, (client.current_balance || 0) + dueDiff);
+        // CALC-01 FIX: Preserve advance credit balances without Math.max(0) clamping
+        const updatedBalance = (Number(client.current_balance) || 0) + dueDiff;
         await supabaseAdmin
           .from('clients')
           .update({ current_balance: updatedBalance })
@@ -475,4 +591,42 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
+
+// DELETE: Cancel an invoice atomically (reverts stock, client balance, and tokens)
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+    const tenantId = searchParams.get('tenant_id');
+    const reason = searchParams.get('reason') || 'Cancelled by operator';
+
+    if (!id || !tenantId) {
+      return NextResponse.json(
+        { success: false, error: 'Invoice ID and Tenant ID are required' },
+        { status: 400 }
+      );
+    }
+
+    const auth = await requireTenantAuth(req, tenantId);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
+    const { data: cancelRes, error: cancelErr } = await supabaseAdmin.rpc('cancel_invoice_atomic', {
+      p_tenant_id: tenantId,
+      p_invoice_id: id,
+      p_reason: reason,
+      p_cancelled_by: auth.session?.username || null,
+    });
+
+    if (cancelErr) {
+      return NextResponse.json({ success: false, error: cancelErr.message }, { status: 400 });
+    }
+
+    return NextResponse.json({ success: true, ...cancelRes });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
+
 

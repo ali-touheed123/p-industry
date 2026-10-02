@@ -30,7 +30,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ branch }) => {
         // Fetch clients, all invoices, and all receipt vouchers in parallel
         const [clientsRes, invoicesRes, vouchersRes] = await Promise.all([
           fetch(`/api/clients?tenant_id=${tenantId}`),
-          fetch(`/api/invoices?tenant_id=${tenantId}&limit=5000`),
+          fetch(`/api/invoices?tenant_id=${tenantId}&limit=5000&summary=true`),
           fetch(`/api/vouchers?tenant_id=${tenantId}&party_type=client`),
         ]);
 
@@ -55,26 +55,34 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ branch }) => {
         const mapped: Customer[] = clientsData.clients.map((c: any) => {
           const debt = Number(c.current_balance || c.balance || 0);
 
-          // --- invoices for this client ---
+          // --- invoices for this client (sales + returns) ---
+          // FIX CEO-04: include return invoices as credit notes in the ledger
           const clientInvoices = allInvoices.filter(
-            (inv: any) => inv.client_id === c.id && inv.invoice_type === 'sales'
+            (inv: any) => inv.client_id === c.id && (inv.invoice_type === 'sales' || inv.invoice_type === 'return')
           );
-          const lifetimePurchases = clientInvoices.reduce(
+          const clientSalesInvs = clientInvoices.filter((inv: any) => inv.invoice_type !== 'return');
+          const clientReturnInvs = clientInvoices.filter((inv: any) => inv.invoice_type === 'return');
+          const lifetimePurchases = clientSalesInvs.reduce(
             (sum: number, inv: any) => sum + Number(inv.net_total || 0), 0
           );
 
           // --- vouchers (receipts) for this client ---
           const clientVouchers = allVouchers.filter((v: any) => v.party_id === c.id && v.voucher_type === 'receipt');
-          const amountPaidToDate = clientVouchers.reduce(
+          const vouchersPaid = clientVouchers.reduce(
             (sum: number, v: any) => sum + Number(v.amount || 0), 0
           );
+          // FIX CEO-05/DB-11: also sum POS counter cash/partial payments (paid_amount on sales invoices)
+          const posPaid = clientSalesInvs.reduce(
+            (sum: number, inv: any) => sum + Number(inv.paid_amount || 0), 0
+          );
+          const amountPaidToDate = vouchersPaid + posPaid;
 
           // --- real aging: bucket invoices by date of creation ---
           let agingCurrent = 0;    // 0–30 days
           let aging30to60 = 0;     // 31–60 days
           let aging60plus = 0;     // 61+ days
 
-          clientInvoices.forEach((inv: any) => {
+          clientSalesInvs.forEach((inv: any) => {
             const unpaid = Number(inv.due_amount || 0);
             if (unpaid <= 0) return;
             const age = daysSince(inv.date || inv.created_at || '');
@@ -88,13 +96,10 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ branch }) => {
             agingCurrent = debt;
           }
 
-          // --- build transactions ledger (invoices + vouchers combined, sorted by date desc) ---
-          const transactions: Customer['transactions'] = [];
-
-          // Running balance for ledger
-          let runningBalance = 0;
+          // --- build transactions ledger (invoices + returns + POS payments + vouchers, sorted by date asc) ---
           const allEntries = [
-            ...clientInvoices.map((inv: any) => ({
+            // Sales invoices: debit the full net_total
+            ...clientSalesInvs.map((inv: any) => ({
               id: inv.id,
               date: inv.date || inv.created_at?.split('T')[0] || '',
               time: inv.created_at?.split('T')[1]?.slice(0, 5) || '',
@@ -105,6 +110,33 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ branch }) => {
               credit: 0,
               sortTs: new Date(inv.created_at || inv.date || 0).getTime(),
             })),
+            // FIX CEO-03: POS partial/cash payment at counter — add as a Credit entry
+            ...clientSalesInvs
+              .filter((inv: any) => Number(inv.paid_amount || 0) > 0)
+              .map((inv: any) => ({
+                id: `${inv.id}-paid`,
+                date: inv.date || inv.created_at?.split('T')[0] || '',
+                time: inv.created_at?.split('T')[1]?.slice(0, 5) || '',
+                type: 'Payment' as const,
+                referenceNo: inv.invoice_no,
+                description: `POS Payment — ${inv.invoice_no} (${inv.payment_type || 'cash'})`,
+                debit: 0,
+                credit: Number(inv.paid_amount || 0),
+                sortTs: new Date(inv.created_at || inv.date || 0).getTime() + 1, // +1ms so it sorts after the invoice
+              })),
+            // FIX CEO-04: Return invoices as credit notes
+            ...clientReturnInvs.map((inv: any) => ({
+              id: inv.id,
+              date: inv.date || inv.created_at?.split('T')[0] || '',
+              time: inv.created_at?.split('T')[1]?.slice(0, 5) || '',
+              type: 'Return' as const,
+              referenceNo: inv.invoice_no,
+              description: `Return Credit Note — ${inv.invoice_no}`,
+              debit: 0,
+              credit: Number(inv.net_total || 0),
+              sortTs: new Date(inv.created_at || inv.date || 0).getTime(),
+            })),
+            // Voucher receipts
             ...clientVouchers.map((v: any) => ({
               id: v.id,
               date: v.date || v.created_at?.split('T')[0] || '',
@@ -116,15 +148,17 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ branch }) => {
               credit: Number(v.amount || 0),
               sortTs: new Date(v.created_at || v.date || 0).getTime(),
             })),
-          ].sort((a, b) => a.sortTs - b.sortTs); // oldest first for running balance
+          ].sort((a, b) => a.sortTs - b.sortTs);
 
+          const transactions: Customer['transactions'] = [];
+          let runningBalance = 0;
           allEntries.forEach((entry) => {
             runningBalance = runningBalance + entry.debit - entry.credit;
             transactions.push({
               id: entry.id,
               date: entry.date,
               time: entry.time,
-              type: entry.type,
+              type: entry.type as any,
               referenceNo: entry.referenceNo,
               description: entry.description,
               debit: entry.debit,
@@ -378,7 +412,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ branch }) => {
             setLoading(true);
             Promise.all([
               fetch(`/api/clients?tenant_id=${tid}`),
-              fetch(`/api/invoices?tenant_id=${tid}&limit=5000`),
+              fetch(`/api/invoices?tenant_id=${tid}&limit=5000&summary=true`),
               fetch(`/api/vouchers?tenant_id=${tid}&party_type=client`),
             ]).then(async ([cRes, iRes, vRes]) => {
               const [cData, iData, vData] = await Promise.all([cRes.json(), iRes.json(), vRes.json()]);
@@ -391,14 +425,17 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ branch }) => {
                 };
                 const mapped = cData.clients.map((c: any) => {
                   const debt = Number(c.current_balance || c.balance || 0);
-                  const clientInvoices = allInvoices.filter((inv: any) => inv.client_id === c.id && inv.invoice_type === 'sales');
-                  const lifetimePurchases = clientInvoices.reduce((sum: number, inv: any) => sum + Number(inv.net_total || 0), 0);
+                  const clientSalesInvs2 = allInvoices.filter((inv: any) => inv.client_id === c.id && inv.invoice_type === 'sales');
+                  const clientReturnInvs2 = allInvoices.filter((inv: any) => inv.client_id === c.id && inv.invoice_type === 'return');
+                  const lifetimePurchases = clientSalesInvs2.reduce((sum: number, inv: any) => sum + Number(inv.net_total || 0), 0);
                   const clientVouchers = allVouchers.filter((v: any) => v.party_id === c.id && v.voucher_type === 'receipt');
-                  const amountPaidToDate = clientVouchers.reduce((sum: number, v: any) => sum + Number(v.amount || 0), 0);
+                  const vouchersPaid2 = clientVouchers.reduce((sum: number, v: any) => sum + Number(v.amount || 0), 0);
+                  const posPaid2 = clientSalesInvs2.reduce((sum: number, inv: any) => sum + Number(inv.paid_amount || 0), 0);
+                  const amountPaidToDate = vouchersPaid2 + posPaid2;
                   let agingCurrent = 0;
                   let aging30to60 = 0;
                   let aging60plus = 0;
-                  clientInvoices.forEach((inv: any) => {
+                  clientSalesInvs2.forEach((inv: any) => {
                     const unpaid = Number(inv.due_amount || 0);
                     if (unpaid <= 0) return;
                     const age = daysSince(inv.date || inv.created_at || '');
@@ -409,43 +446,15 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ branch }) => {
                   if (agingCurrent === 0 && aging30to60 === 0 && aging60plus === 0 && debt > 0) agingCurrent = debt;
                   const transactions: any[] = [];
                   let runningBalance = 0;
-                  const allEntries = [
-                    ...clientInvoices.map((inv: any) => ({
-                      id: inv.id,
-                      date: inv.date || inv.created_at?.split('T')[0] || '',
-                      time: inv.created_at?.split('T')[1]?.slice(0, 5) || '',
-                      type: 'Invoice' as const,
-                      referenceNo: inv.invoice_no,
-                      description: `Sales Invoice — ${inv.invoice_no}`,
-                      debit: Number(inv.net_total || 0),
-                      credit: 0,
-                      sortTs: new Date(inv.created_at || inv.date || 0).getTime(),
-                    })),
-                    ...clientVouchers.map((v: any) => ({
-                      id: v.id,
-                      date: v.date || v.created_at?.split('T')[0] || '',
-                      time: v.created_at?.split('T')[1]?.slice(0, 5) || '',
-                      type: 'Payment' as const,
-                      referenceNo: v.voucher_no,
-                      description: `Receipt — ${v.remarks || v.voucher_no}`,
-                      debit: 0,
-                      credit: Number(v.amount || 0),
-                      sortTs: new Date(v.created_at || v.date || 0).getTime(),
-                    })),
+                  const allEntries2 = [
+                    ...clientSalesInvs2.map((inv: any) => ({ id: inv.id, date: inv.date || inv.created_at?.split('T')[0] || '', time: inv.created_at?.split('T')[1]?.slice(0, 5) || '', type: 'Invoice' as const, referenceNo: inv.invoice_no, description: `Sales Invoice — ${inv.invoice_no}`, debit: Number(inv.net_total || 0), credit: 0, sortTs: new Date(inv.created_at || inv.date || 0).getTime() })),
+                    ...clientSalesInvs2.filter((inv: any) => Number(inv.paid_amount || 0) > 0).map((inv: any) => ({ id: `${inv.id}-paid`, date: inv.date || inv.created_at?.split('T')[0] || '', time: inv.created_at?.split('T')[1]?.slice(0, 5) || '', type: 'Payment' as const, referenceNo: inv.invoice_no, description: `POS Payment — ${inv.invoice_no}`, debit: 0, credit: Number(inv.paid_amount || 0), sortTs: new Date(inv.created_at || inv.date || 0).getTime() + 1 })),
+                    ...clientReturnInvs2.map((inv: any) => ({ id: inv.id, date: inv.date || inv.created_at?.split('T')[0] || '', time: inv.created_at?.split('T')[1]?.slice(0, 5) || '', type: 'Return' as const, referenceNo: inv.invoice_no, description: `Return Credit Note — ${inv.invoice_no}`, debit: 0, credit: Number(inv.net_total || 0), sortTs: new Date(inv.created_at || inv.date || 0).getTime() })),
+                    ...clientVouchers.map((v: any) => ({ id: v.id, date: v.date || v.created_at?.split('T')[0] || '', time: v.created_at?.split('T')[1]?.slice(0, 5) || '', type: 'Payment' as const, referenceNo: v.voucher_no, description: `Receipt — ${v.remarks || v.voucher_no}`, debit: 0, credit: Number(v.amount || 0), sortTs: new Date(v.created_at || v.date || 0).getTime() })),
                   ].sort((a, b) => a.sortTs - b.sortTs);
-                  allEntries.forEach((entry) => {
+                  allEntries2.forEach((entry) => {
                     runningBalance = runningBalance + entry.debit - entry.credit;
-                    transactions.push({
-                      id: entry.id,
-                      date: entry.date,
-                      time: entry.time,
-                      type: entry.type,
-                      referenceNo: entry.referenceNo,
-                      description: entry.description,
-                      debit: entry.debit,
-                      credit: entry.credit,
-                      balanceAfter: Math.max(0, runningBalance),
-                    });
+                    transactions.push({ id: entry.id, date: entry.date, time: entry.time, type: entry.type, referenceNo: entry.referenceNo, description: entry.description, debit: entry.debit, credit: entry.credit, balanceAfter: Math.max(0, runningBalance) });
                   });
                   transactions.reverse();
                   return {

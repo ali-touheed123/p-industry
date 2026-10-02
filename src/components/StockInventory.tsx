@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Item } from '@/types';
 import {
   Search,
@@ -17,6 +17,10 @@ import {
   Trash2,
 } from 'lucide-react';
 import AiInvoiceScan from './AiInvoiceScan';
+
+interface BrandOption { id: string; name: string; }
+interface SeriesOption { id: string; name: string; brand_id: string; }
+interface TokenConfigOption { unit_name: string; is_enabled: boolean; token_value: number; }
 
 interface Props {
   items: Item[];
@@ -70,13 +74,81 @@ export default function StockInventory({
   const [notification, setNotification] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
+  // ── Brand / Series catalog (loaded once) ─────────────────────────────────
+  const [brands, setBrands] = useState<BrandOption[]>([]);
+  const [allSeries, setAllSeries] = useState<SeriesOption[]>([]);
+  const [seriesConfigs, setSeriesConfigs] = useState<Record<string, TokenConfigOption[]>>({});
+
+  const fetchBrandsAndSeries = useCallback(async () => {
+    if (!tenantId) return;
+    try {
+      const [bRes, sRes, cRes] = await Promise.all([
+        fetch(`/api/brands?tenant_id=${tenantId}`),
+        fetch(`/api/brand-series?tenant_id=${tenantId}`),
+        fetch(`/api/token-configs?tenant_id=${tenantId}`),
+      ]);
+      const [bData, sData, cData] = await Promise.all([bRes.json(), sRes.json(), cRes.json()]);
+      if (bData.success) setBrands(bData.brands || []);
+      if (sData.success) {
+        const activeSeries = (sData.series || []).filter((s: any) => s.is_active !== false);
+        setAllSeries(activeSeries);
+      }
+      if (cData.success) {
+        const configMap: Record<string, TokenConfigOption[]> = {};
+        for (const cfg of (cData.configs || [])) {
+          if (!configMap[cfg.series_id]) configMap[cfg.series_id] = [];
+          configMap[cfg.series_id].push({ unit_name: cfg.unit_name, is_enabled: cfg.is_enabled, token_value: Number(cfg.token_value) });
+        }
+        setSeriesConfigs(configMap);
+      }
+    } catch { /* silent */ }
+  }, [tenantId]);
+
+  useEffect(() => { fetchBrandsAndSeries(); }, [fetchBrandsAndSeries]);
+
+  // Helper: match item unit string to config unit string safely without accidental fuzzy collisions
+  const matchUnitToConfig = (itemUnitRaw: string, configUnitRaw: string): boolean => {
+    if (!itemUnitRaw || !configUnitRaw) return false;
+    const u = itemUnitRaw.trim().toLowerCase();
+    const cu = configUnitRaw.trim().toLowerCase();
+    if (u === cu) return true;
+
+    const normU = u.replace(/[^a-z0-9]/g, '');
+    const normCU = cu.replace(/[^a-z0-9]/g, '');
+    if (normU === normCU && normU.length > 0) return true;
+
+    const isDrum = (s: string) => /\bdrums?\b/i.test(s) || /^(20\s*(l|ltr|liters?|litres?))$/i.test(s.trim());
+    const isGallon = (s: string) => /\bgallons?\b/i.test(s) || /^(4\s*(l|ltr|liters?|litres?))$/i.test(s.trim());
+    const isQuarter = (s: string) => /\bquarters?\b/i.test(s) || /^(1\s*(l|ltr|liters?|litres?))$/i.test(s.trim());
+
+    if (isDrum(cu) && isDrum(u)) return true;
+    if (isGallon(cu) && isGallon(u)) return true;
+    if (isQuarter(cu) && isQuarter(u)) return true;
+
+    return false;
+  };
+
+  // Resolve inherited token from series + unit
+  const resolveInheritedToken = useCallback((seriesId: string | null, unit: string): { has_token: boolean; token_value: number } => {
+    if (!seriesId || !seriesConfigs[seriesId]) return { has_token: false, token_value: 0 };
+    const matched = seriesConfigs[seriesId].find(c => matchUnitToConfig(unit, c.unit_name));
+    if (matched && matched.is_enabled && matched.token_value > 0) {
+      return { has_token: true, token_value: matched.token_value };
+    }
+    return { has_token: false, token_value: 0 };
+  }, [seriesConfigs]);
+
+  // ── Single Product Form — brand/series state ──────────────────────────────
+  const [formBrandId, setFormBrandId] = useState<string>('');
+  const [formSeriesId, setFormSeriesId] = useState<string>('');
+
   // ── Bulk Add Modal State ───────────────────────────────────────────────────
   const [showBulkModal, setShowBulkModal] = useState<boolean>(false);
   const [bulkBrand, setBulkBrand] = useState<string>('');
+  const [bulkBrandId, setBulkBrandId] = useState<string>('');
+  const [bulkSeriesId, setBulkSeriesId] = useState<string>('');
   const [bulkCategory, setBulkCategory] = useState<string>('Interior Emulsion');
   const [bulkUnit, setBulkUnit] = useState<string>('4L Gallon');
-  const [bulkHasToken, setBulkHasToken] = useState<boolean>(false);
-  const [bulkTokenValue, setBulkTokenValue] = useState<string>('');
   const [bulkMinAlert, setBulkMinAlert] = useState<string>('5');
   interface BulkRow { id: number; shadeName: string; code: string; retail: string; cost: string; qty: string; }
   const [bulkRows, setBulkRows] = useState<BulkRow[]>([{ id: 1, shadeName: '', code: '', retail: '', cost: '', qty: '0' }]);
@@ -84,6 +156,11 @@ export default function StockInventory({
   const [bulkErrors, setBulkErrors] = useState<{ row: number; code: string; error: string }[]>([]);
   const [bulkSavedCount, setBulkSavedCount] = useState<number | null>(null);
   const bulkNextId = React.useRef<number>(2);
+
+  // Derived: series filtered by selected brand
+  const formSeriesOptions = useMemo(() => allSeries.filter(s => !formBrandId || s.brand_id === formBrandId), [allSeries, formBrandId]);
+  const bulkSeriesOptions = useMemo(() => allSeries.filter(s => !bulkBrandId || s.brand_id === bulkBrandId), [allSeries, bulkBrandId]);
+  // Note: formInheritedToken and bulkInheritedToken are declared after formUnit/bulkUnit state below
 
   // Manual live refresh
   const handleManualRefresh = async () => {
@@ -117,8 +194,6 @@ export default function StockInventory({
 
   const [formShadeCode, setFormShadeCode] = useState<string>('Off-White 101');
   const [formBrand, setFormBrand] = useState<string>('');
-  const [formHasToken, setFormHasToken] = useState<boolean>(false);
-  const [formTokenValue, setFormTokenValue] = useState<string>('');
   const [formCostPrice, setFormCostPrice] = useState<string>('');
   const [formRetailPrice, setFormRetailPrice] = useState<string>('');
   const [formStockQty, setFormStockQty] = useState<string>('20');
@@ -154,6 +229,10 @@ export default function StockInventory({
     const set = new Set([...DEFAULT_UNITS, ...fromItems, ...customUnits]);
     return Array.from(set);
   }, [items, customUnits]);
+
+  // Derived: inherited token info for current form state (after formUnit/bulkUnit are declared)
+  const formInheritedToken = useMemo(() => resolveInheritedToken(formSeriesId || null, formUnit), [resolveInheritedToken, formSeriesId, formUnit]);
+  const bulkInheritedToken = useMemo(() => resolveInheritedToken(bulkSeriesId || null, bulkUnit), [resolveInheritedToken, bulkSeriesId, bulkUnit]);
 
 
 
@@ -215,12 +294,12 @@ export default function StockInventory({
     setFormCode(`PNT-${Math.floor(100 + Math.random() * 900)}`);
     setFormName('');
     setFormBrand('');
+    setFormBrandId('');
+    setFormSeriesId('');
     setFormCategory(allCategories[0] || 'Interior Emulsion');
     setFormUnit(allUnits[0] || '4L Gallon');
 
     setFormShadeCode('Off-White 101');
-    setFormHasToken(false);
-    setFormTokenValue('');
     setFormCostPrice('');
     setFormRetailPrice('');
     setFormStockQty('20');
@@ -246,10 +325,10 @@ export default function StockInventory({
 
   const openBulkModal = () => {
     setBulkBrand('');
+    setBulkBrandId('');
+    setBulkSeriesId('');
     setBulkCategory(allCategories[0] || 'Interior Emulsion');
     setBulkUnit(allUnits[0] || '4L Gallon');
-    setBulkHasToken(false);
-    setBulkTokenValue('');
     setBulkMinAlert('5');
     setBulkRows([{ id: 1, shadeName: '', code: '', retail: '', cost: '', qty: '0' }]);
     bulkNextId.current = 2;
@@ -260,7 +339,7 @@ export default function StockInventory({
 
   const handleBulkSave = async () => {
     if (!tenantId) { alert('Tenant ID missing'); return; }
-    if (!bulkBrand.trim()) { alert('Brand is required'); return; }
+    if (!bulkBrand.trim() && !bulkBrandId) { alert('Brand is required'); return; }
 
     const validRows = bulkRows.filter(r => r.shadeName.trim() && r.code.trim());
     if (validRows.length === 0) { alert('Please fill at least one product row (Shade Name + Code required)'); return; }
@@ -286,10 +365,10 @@ export default function StockInventory({
         body: JSON.stringify({
           tenant_id: tenantId,
           brand: bulkBrand.trim(),
+          brand_id: bulkBrandId || undefined,
+          series_id: bulkSeriesId || undefined,
           category: bulkCategory,
           unit: bulkUnit,
-          has_token: bulkHasToken,
-          token_value: bulkHasToken ? Number(bulkTokenValue) || 0 : 0,
           min_stock_alert: Number(bulkMinAlert) || 5,
           items: itemsPayload,
         }),
@@ -324,12 +403,12 @@ export default function StockInventory({
     setFormCode(item.code);
     setFormName(item.name);
     setFormBrand(item.brand || '');
+    setFormBrandId(item.brand_id || '');
+    setFormSeriesId(item.series_id || '');
     setFormCategory(item.category || allCategories[0]);
     setFormUnit(item.pack_size || item.unit || allUnits[0]);
 
     setFormShadeCode(item.shade_code || 'Standard');
-    setFormHasToken(Boolean(item.has_token));
-    setFormTokenValue(item.token_value ? item.token_value.toString() : '');
     setFormCostPrice(item.cost_price?.toString() || '');
     setFormRetailPrice(item.retail_price?.toString() || '');
     setFormStockQty(item.stock_qty?.toString() || '0');
@@ -402,6 +481,8 @@ export default function StockInventory({
       name: formName.trim(),
       category: formCategory,
       brand: formBrand.trim(),
+      brand_id: formBrandId || undefined,
+      series_id: formSeriesId || undefined,
       unit: formUnit,
       pack_size: formUnit,
 
@@ -410,8 +491,7 @@ export default function StockInventory({
       retail_price: retail,
       stock_qty: Number(formStockQty) || 0,
       min_stock_alert: Number(formMinAlert) || 5,
-      has_token: formHasToken,
-      token_value: formHasToken ? (Number(formTokenValue) || 0) : 0,
+      // Token value is auto-resolved strictly from series config on the backend (no product-level override)
     };
 
     try {
@@ -857,6 +937,11 @@ export default function StockInventory({
                                 {prod.brand}
                               </span>
                             )}
+                            {prod.series_name && (
+                              <span style={{ fontSize: '10px', color: '#7C3AED', fontWeight: 600, background: '#EDE9FE', padding: '0 4px', borderRadius: '3px' }}>
+                                {prod.series_name}
+                              </span>
+                            )}
                             {prod.shade_code && prod.shade_code !== '—' && (
                               <span style={{ fontSize: '11px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 {prod.shade_code}
@@ -1172,89 +1257,81 @@ export default function StockInventory({
                 </div>
               </div>
 
-              {/* Brand & Paint Token Configuration */}
+              {/* Brand, Series & Token Configuration — inherited from Series */}
               <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', padding: '10px', background: '#F8FAFC' }}>
+                <p style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>
+                  Brand &amp; Series — Token value auto-inherited
+                </p>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '8px' }}>
                   <div>
                     <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
                       Brand / Manufacturer *
                     </label>
-                    <input
-                      type="text"
-                      required
-                      value={formBrand}
-                      onChange={(e) => setFormBrand(e.target.value)}
-                      placeholder="e.g. Berger, Nippon, Master, Diamond"
-                      className="pos-text-input"
-                      style={{ fontWeight: 500 }}
-                    />
+                    {brands.length > 0 ? (
+                      <select
+                        value={formBrandId}
+                        onChange={(e) => {
+                          const bid = e.target.value;
+                          setFormBrandId(bid);
+                          const b = brands.find(b => b.id === bid);
+                          if (b) setFormBrand(b.name);
+                          setFormSeriesId('');
+                        }}
+                        className="pos-text-input"
+                        style={{ fontWeight: 600 }}
+                      >
+                        <option value="">— Select Brand —</option>
+                        {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        required
+                        value={formBrand}
+                        onChange={(e) => setFormBrand(e.target.value)}
+                        placeholder="e.g. Berger, Nippon, Master, Diamond"
+                        className="pos-text-input"
+                        style={{ fontWeight: 500 }}
+                      />
+                    )}
                   </div>
 
                   <div>
                     <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
-                      Has Paint Token? 🎫
+                      Series
                     </label>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <button
-                        type="button"
-                        onClick={() => setFormHasToken(false)}
-                        style={{
-                          flex: 1,
-                          padding: '7px',
-                          borderRadius: '6px',
-                          fontWeight: 700,
-                          fontSize: '11px',
-                          border: formHasToken ? '1px solid #CBD5E1' : '2px solid #F97316',
-                          background: formHasToken ? '#FFFFFF' : '#FFF7ED',
-                          color: formHasToken ? '#64748B' : '#EA580C',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        No Token
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setFormHasToken(true)}
-                        style={{
-                          flex: 1,
-                          padding: '7px',
-                          borderRadius: '6px',
-                          fontWeight: 700,
-                          fontSize: '11px',
-                          border: formHasToken ? '2px solid #F97316' : '1px solid #CBD5E1',
-                          background: formHasToken ? '#FFF7ED' : '#FFFFFF',
-                          color: formHasToken ? '#EA580C' : '#64748B',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        🎫 Yes (Has Token)
-                      </button>
-                    </div>
+                    <select
+                      value={formSeriesId}
+                      onChange={(e) => setFormSeriesId(e.target.value)}
+                      className="pos-text-input"
+                      style={{ fontWeight: 600 }}
+                      disabled={!formBrandId && formSeriesOptions.length === 0}
+                    >
+                      <option value="">— None / No Series —</option>
+                      {formSeriesOptions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
                   </div>
                 </div>
 
-                {formHasToken && (
-                  <div style={{ background: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '6px', padding: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ fontWeight: 700, color: '#92400E', display: 'block', marginBottom: '2px', fontSize: '11px' }}>
-                        Token Face Value (Rs. / PKR) *
-                      </label>
-                      <span style={{ fontSize: '10px', color: '#B45309' }}>
-                        Physical coupon value inside paint can
-                      </span>
+                {/* Inherited token badge */}
+                {formSeriesId ? (
+                  formInheritedToken.has_token ? (
+                    <div style={{ background: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '6px', padding: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '18px' }}>🎫</span>
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#92400E', fontSize: '12px' }}>Token Enabled — Inherited from Series</div>
+                        <div style={{ fontSize: '11px', color: '#B45309' }}>Rs. {formInheritedToken.token_value.toLocaleString()} per {formUnit} (auto-resolved)</div>
+                      </div>
                     </div>
-                    <div style={{ width: '150px' }}>
-                      <input
-                        type="number"
-                        min="1"
-                        required={formHasToken}
-                        value={formTokenValue}
-                        onChange={(e) => setFormTokenValue(e.target.value)}
-                        placeholder="e.g. 500"
-                        className="pos-text-input"
-                        style={{ fontWeight: 700, borderColor: '#F59E0B', background: '#FFFFFF' }}
-                      />
+                  ) : (
+                    <div style={{ background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '6px', padding: '8px', fontSize: '11px', color: '#64748B' }}>
+                      ℹ️ This unit is not token-enabled in the selected Series. Product will be created without token.
                     </div>
+                  )
+                ) : (
+                  <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '6px', padding: '10px 12px', fontSize: '11px', color: '#64748B', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>ℹ️</span>
+                    <span>No Series selected. Token values are determined exclusively by Brand + Series + Unit configuration. Select a Series above if this product has tokens.</span>
                   </div>
                 )}
               </div>
@@ -1428,12 +1505,32 @@ export default function StockInventory({
               {/* ── Section A: Common Fields ── */}
               <div style={{ padding: '1rem 1.25rem', background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
                 <p style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '10px' }}>Common Fields — same for all rows below</p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', fontSize: '12px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px', fontSize: '12px' }}>
                   <div>
                     <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>Brand *</label>
-                    <input type="text" value={bulkBrand} onChange={e => setBulkBrand(e.target.value)}
-                      placeholder="e.g. BRIGHTO" className="pos-text-input"
-                      style={{ fontWeight: 600, textTransform: 'uppercase' }} autoFocus />
+                    {brands.length > 0 ? (
+                      <select value={bulkBrandId} onChange={e => {
+                        const bid = e.target.value;
+                        setBulkBrandId(bid);
+                        const b = brands.find(b => b.id === bid);
+                        if (b) setBulkBrand(b.name);
+                        setBulkSeriesId('');
+                      }} className="pos-text-input" style={{ fontWeight: 600 }} autoFocus>
+                        <option value="">— Brand —</option>
+                        {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                    ) : (
+                      <input type="text" value={bulkBrand} onChange={e => setBulkBrand(e.target.value)}
+                        placeholder="e.g. BRIGHTO" className="pos-text-input"
+                        style={{ fontWeight: 600, textTransform: 'uppercase' }} autoFocus />
+                    )}
+                  </div>
+                  <div>
+                    <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>Series</label>
+                    <select value={bulkSeriesId} onChange={e => setBulkSeriesId(e.target.value)} className="pos-text-input" style={{ fontWeight: 600 }}>
+                      <option value="">— None —</option>
+                      {bulkSeriesOptions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
                   </div>
                   <div>
                     <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>Category</label>
@@ -1453,19 +1550,21 @@ export default function StockInventory({
                       className="pos-text-input" style={{ fontWeight: 600 }} />
                   </div>
                 </div>
-                {/* Token Row */}
+                {/* Token Inherited Info Row */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginTop: '10px', fontSize: '12px' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontWeight: 600, color: '#334155' }}>
-                    <input type="checkbox" checked={bulkHasToken} onChange={e => setBulkHasToken(e.target.checked)}
-                      style={{ accentColor: '#F97316', width: 14, height: 14 }} />
-                    Has Paint Token 🎫
-                  </label>
-                  {bulkHasToken && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <label style={{ fontWeight: 600, color: '#92400E' }}>Token Value Rs.</label>
-                      <input type="number" min="1" value={bulkTokenValue} onChange={e => setBulkTokenValue(e.target.value)}
-                        placeholder="e.g. 500" className="pos-text-input" style={{ width: '120px', borderColor: '#F59E0B' }} />
-                    </div>
+                  {bulkSeriesId ? (
+                    bulkInheritedToken.has_token ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '6px', padding: '6px 12px' }}>
+                        <span>🎫</span>
+                        <span style={{ fontWeight: 700, color: '#92400E' }}>Token Enabled — Rs. {bulkInheritedToken.token_value.toLocaleString()} per {bulkUnit} (inherited from Series)</span>
+                      </div>
+                    ) : (
+                      <div style={{ background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '6px', padding: '6px 12px', fontSize: '11px', color: '#64748B' }}>
+                        ℹ️ This unit is not token-enabled in the selected Series
+                      </div>
+                    )
+                  ) : (
+                    <span style={{ fontSize: '11px', color: '#94A3B8', fontStyle: 'italic' }}>💡 Select a Series to auto-inherit token configuration</span>
                   )}
                   {bulkBrand && (
                     <span style={{ marginLeft: 'auto', fontSize: '11px', color: '#475569', fontFamily: 'JetBrains Mono, monospace', background: '#E2E8F0', padding: '3px 8px', borderRadius: '4px' }}>

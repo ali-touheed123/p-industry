@@ -17,6 +17,11 @@ interface DevSidebarProps {
     users: number;
   };
   primaryTenantSlug?: string;
+  devIdentity?: {
+    name: string;
+    email?: string;
+    initials: string;
+  };
 }
 
 export const DevSidebar: React.FC<DevSidebarProps> = ({
@@ -24,6 +29,7 @@ export const DevSidebar: React.FC<DevSidebarProps> = ({
   onTabChange,
   counts,
   primaryTenantSlug = '/tawakkal-paint-house',
+  devIdentity,
 }) => {
   const navItems: {
     id: DevActiveTab;
@@ -74,7 +80,7 @@ export const DevSidebar: React.FC<DevSidebarProps> = ({
         {/* Profile Card */}
         <div className="aura-user-card">
           <div className="aura-avatar">
-            <span>AT</span>
+            <span>{devIdentity?.initials || 'SD'}</span>
             <span
               style={{
                 position: 'absolute',
@@ -90,7 +96,7 @@ export const DevSidebar: React.FC<DevSidebarProps> = ({
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <p style={{ fontSize: '13px', fontWeight: 700, color: '#ffffff', margin: 0 }}>Ali Touheed</p>
+              <p style={{ fontSize: '13px', fontWeight: 700, color: '#ffffff', margin: 0 }}>{devIdentity?.name || 'System Developer'}</p>
               <span
                 style={{
                   fontSize: '9px',
@@ -107,7 +113,7 @@ export const DevSidebar: React.FC<DevSidebarProps> = ({
                 SUPER DEV
               </span>
             </div>
-            <p style={{ fontSize: '11px', color: '#9ca3af', margin: '2px 0 0' }}>ali.dev@pyntflow.com</p>
+            <p style={{ fontSize: '11px', color: '#9ca3af', margin: '2px 0 0' }}>{devIdentity?.email || 'dev@pyntflow.com'}</p>
           </div>
         </div>
 

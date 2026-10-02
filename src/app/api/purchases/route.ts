@@ -184,28 +184,24 @@ export async function POST(req: NextRequest) {
 
     if (itemsErr) throw itemsErr;
 
-    // 3. Stock Inventory Adjustment
+    // 3. Atomic Stock Inventory Adjustment (VAL-01 / DB-01 fix)
     const isReturn = purchase_type === 'return';
     for (const lineItem of purchaseItemsToInsert) {
+      if (!lineItem.item_id && !lineItem.item_code) continue;
+      // Purchase INCREASES stock (+qty); Purchase Return DECREASES stock (-qty)
+      const qtyDelta = isReturn ? -Number(lineItem.qty || 0) : Number(lineItem.qty || 0);
+
       if (lineItem.item_id) {
-        const { data: currentItem } = await supabaseAdmin
-          .from('items')
-          .select('stock_qty')
-          .eq('id', lineItem.item_id)
-          .single();
-
-        if (currentItem) {
-          const currentQty = Number(currentItem.stock_qty) || 0;
-          // Purchase INCREASES stock; Purchase Return DECREASES stock
-          const newQty = isReturn
-            ? Math.max(0, currentQty - lineItem.qty)
-            : currentQty + lineItem.qty;
-
-          await supabaseAdmin
-            .from('items')
-            .update({ stock_qty: newQty })
-            .eq('id', lineItem.item_id);
-        }
+        await supabaseAdmin.rpc('adjust_item_stock', {
+          p_item_id: lineItem.item_id,
+          p_qty_delta: qtyDelta,
+        });
+      } else if (lineItem.item_code) {
+        await supabaseAdmin.rpc('adjust_item_stock_by_code', {
+          p_tenant_id: tenant_id,
+          p_item_code: lineItem.item_code,
+          p_qty_delta: qtyDelta,
+        });
       }
     }
 
@@ -222,8 +218,12 @@ export async function POST(req: NextRequest) {
         let newBalance = currentBal;
 
         if (isReturn) {
-          // Returning goods reduces our payable to supplier
-          newBalance = Math.max(0, currentBal - Number(net_total));
+          // CALC-02 FIX: Returning goods reduces our payable or creates an advance supplier debit.
+          // Account for any cash received back from supplier (paid_amount).
+          // Do NOT clamp to 0 with Math.max — negative balance means supplier owes us / advance debit balance.
+          const cashReceived = Number(paid_amount) || 0;
+          const returnCredit = Math.max(0, Number(net_total) - cashReceived);
+          newBalance = currentBal - returnCredit;
         } else {
           // Buying goods adds unpaid balance to supplier debt
           newBalance = currentBal + Number(due_amount > 0 ? due_amount : (net_total - paid_amount));
