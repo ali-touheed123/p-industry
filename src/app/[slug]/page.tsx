@@ -156,7 +156,23 @@ export default function TenantAppPage({ params }: PageProps) {
         const targetTenantId = tenant?.id || data.user.tenant?.id || data.user.tenant_id || slug;
         await refreshItems(targetTenantId);
         if (data.user.role !== 'ceo' && data.user.role !== 'developer') {
-          if (!activeShift) {
+          // FIX FINDING-POS-005: Re-verify active shift status directly from server to prevent race condition
+          let currentActiveShift = activeShift;
+          try {
+            const shiftRes = await fetch(`/api/shifts?tenant_id=${targetTenantId}&status=open`);
+            const shiftData = await shiftRes.json();
+            if (shiftData.success && shiftData.activeShift) {
+              currentActiveShift = shiftData.activeShift;
+              setActiveShift(shiftData.activeShift);
+            } else if (shiftData.success) {
+              currentActiveShift = null;
+              setActiveShift(null);
+            }
+          } catch {
+            // Keep currentActiveShift if transient network error
+          }
+
+          if (!currentActiveShift) {
             // Fetch last closed shift for handover display
             try {
               const tenantRes = await fetch(`/api/shifts?tenant_id=${targetTenantId}&last_closed=1`);

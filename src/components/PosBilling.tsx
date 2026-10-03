@@ -106,7 +106,8 @@ const SHORTCUTS = [
 
 /** UX-01: Build an 80mm thermal receipt as a plain HTML string for iframe printing.
  * Applies footer/branding settings from the assigned template when available (DEV-07). */
-function buildPosThermalHtml(data: any, tenantName: string, staffName: string, tmpl?: ReceiptTemplate | null): string {
+function buildPosThermalHtml(data: any, tenantName: string = 'PyntFlow Store', staffName: string = 'Counter Staff', tmpl?: ReceiptTemplate | null): string {
+  const effectiveTenantName = (tenantName && tenantName.trim() && tenantName !== 'Main Godown & Retail Counter #1') ? tenantName : 'PyntFlow Store';
   const fmt = (n: number) => Number(n || 0).toLocaleString();
   const isSplit = data.payment_type === 'split' ||
     (Number(data.cash_paid || 0) > 0 &&
@@ -150,7 +151,7 @@ function buildPosThermalHtml(data: any, tenantName: string, staffName: string, t
 
   // Apply template footer config when available
   const footer = tmpl?.template_json?.footer;
-  const footerLine1 = footer?.line1 || `Thank you for shopping at ${tenantName}!`;
+  const footerLine1 = footer?.line1 || `Thank you for shopping at ${effectiveTenantName}!`;
   const footerLine2 = footer?.line2 || '';
   const whatsappRow = (footer?.showWhatsapp && footer?.whatsappNumber)
     ? `<div style="font-size:9px;color:#555">WhatsApp: ${footer.whatsappNumber}</div>` : '';
@@ -159,7 +160,7 @@ function buildPosThermalHtml(data: any, tenantName: string, staffName: string, t
 
   return `
 <div style="text-align:center;border-bottom:1px dashed #000;padding-bottom:8px;margin-bottom:8px">
-  <h2 style="font-size:15px;font-weight:900;text-transform:uppercase;letter-spacing:0.05em;margin:0 0 2px 0">${tenantName}</h2>
+  <h2 style="font-size:15px;font-weight:900;text-transform:uppercase;letter-spacing:0.05em;margin:0 0 2px 0">${effectiveTenantName}</h2>
   <p style="font-size:10px;color:#333;margin:0">Retail &amp; Industrial Paint Hub</p>
   <div style="font-size:12px;font-weight:700;margin-top:4px">${data.invoice_no || '—'}</div>
   <div style="font-size:9px;color:#555">${data.date} &middot; ${data.time}</div>
@@ -200,7 +201,7 @@ export default function PosBilling({
   shiftId,
   onCompleteSale,
   staffName,
-  tenantName = 'Main Godown & Retail Counter #1',
+  tenantName = 'PyntFlow Store',
   restoringHeldOrder,
   onClearRestoringHeldOrder,
   editingInvoice,
@@ -663,7 +664,7 @@ export default function PosBilling({
       );
     } else {
       const newLineItem: InvoiceLineItem = {
-        id: `li-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `li-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
         item: prod,
         code: prod.code,
         originalCode: prod.code,
@@ -952,27 +953,33 @@ export default function PosBilling({
       others_paid: othersPayment,
       status: 'completed',
       created_by: staffName || 'Counter Staff',
-      items: lineItems.map((ci) => ({
-        item_id: ci.item?.id || null,
-        item_code: ci.code,
-        item_name: ci.productName,
-        shade_code: ci.shadeCode,
-        pack_size: ci.packSize,
-        unit: ci.unit,
-        qty: ci.qty,
-        unit_price: ci.rate,
-        discount: (ci.rate * ci.qty * ci.discountPercent) / 100,
-        discount_percent: ci.discountPercent,
-        total_price: ci.rate * ci.qty * (1 - ci.discountPercent / 100),
-        // Token attributes for atomic server-side processing
-        has_token: ci.hasToken,
-        token_value: ci.tokenValue,
-        token_action: ci.tokenAction || 'keep',
-        brand_id: ci.brand_id || ci.item?.brand_id || null,
-        brand_name: ci.brand || ci.item?.brand || null,
-        series_id: ci.series_id || ci.item?.series_id || null,
-        series_name: ci.series_name || ci.item?.series_name || null,
-      })),
+      items: lineItems.map((ci) => {
+        let effectiveRate = ci.rate;
+        if (invoiceType === 'return' && ci.hasToken && ci.tokenReturnedWithBucket === false) {
+          effectiveRate = Math.max(0, effectiveRate - (ci.tokenValue || 0));
+        }
+        return {
+          item_id: ci.item?.id || null,
+          item_code: ci.code,
+          item_name: ci.productName,
+          shade_code: ci.shadeCode,
+          pack_size: ci.packSize,
+          unit: ci.unit,
+          qty: ci.qty,
+          unit_price: effectiveRate,
+          discount: (effectiveRate * ci.qty * ci.discountPercent) / 100,
+          discount_percent: ci.discountPercent,
+          total_price: effectiveRate * ci.qty * (1 - ci.discountPercent / 100),
+          // Token attributes for atomic server-side processing
+          has_token: ci.hasToken,
+          token_value: ci.tokenValue,
+          token_action: ci.tokenAction || 'keep',
+          brand_id: ci.brand_id || ci.item?.brand_id || null,
+          brand_name: ci.brand || ci.item?.brand || null,
+          series_id: ci.series_id || ci.item?.series_id || null,
+          series_name: ci.series_name || ci.item?.series_name || null,
+        };
+      }),
     };
 
     try {
@@ -993,6 +1000,18 @@ export default function PosBilling({
       if (data.success) {
         const finalServerInvoiceNo = data.invoice?.invoice_no || invoiceNo;
 
+        const receiptItems = lineItems.map((ci) => {
+          let effectiveRate = ci.rate;
+          if (invoiceType === 'return' && ci.hasToken && ci.tokenReturnedWithBucket === false) {
+            effectiveRate = Math.max(0, effectiveRate - (ci.tokenValue || 0));
+          }
+          return {
+            ...ci,
+            rate: effectiveRate,
+            unit_price: effectiveRate,
+          };
+        });
+
         const completedInvoice = {
           ...data.invoice,
           invoice_no: finalServerInvoiceNo,
@@ -1010,7 +1029,7 @@ export default function PosBilling({
           change_returned: cashChangeReturned,
           date: invoiceDate,
           time: new Date().toLocaleTimeString(),
-          items: lineItems,
+          items: receiptItems,
           client_name: customerDisplayName,
           tenantName,
           staffName,
@@ -1081,33 +1100,55 @@ export default function PosBilling({
   });
 
   // Keyboard Shortcuts Listener ([F2], [F3], [F4], [F5], [F7], [F8], [F9], [Escape])
+  // FIX FINDING-POS-002: Store latest state and handlers in mutable ref to attach listener once on mount
+  const hotkeysStateRef = useRef({
+    handleCheckout,
+    handleAddItem,
+    handleHoldInvoice,
+    handleCancelInvoice,
+    selectedProduct,
+    filteredCatalog,
+  });
+
+  useEffect(() => {
+    hotkeysStateRef.current = {
+      handleCheckout,
+      handleAddItem,
+      handleHoldInvoice,
+      handleCancelInvoice,
+      selectedProduct,
+      filteredCatalog,
+    };
+  });
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const state = hotkeysStateRef.current;
       if (e.key === 'F5') {
         e.preventDefault();
-        handleCheckout(true);
+        state.handleCheckout(true);
       } else if (e.key === 'F2') {
         e.preventDefault();
-        handleCheckout(false);
+        state.handleCheckout(false);
       } else if (e.key === 'F3') {
         e.preventDefault();
         searchInputRef.current?.focus();
       } else if (e.key === 'F4') {
         e.preventDefault();
-        if (selectedProduct) {
-          handleAddItem(selectedProduct);
-        } else if (filteredCatalog.length === 1) {
-          handleAddItem(filteredCatalog[0]);
+        if (state.selectedProduct) {
+          state.handleAddItem(state.selectedProduct);
+        } else if (state.filteredCatalog.length === 1) {
+          state.handleAddItem(state.filteredCatalog[0]);
         }
       } else if (e.key === 'F7') {
         e.preventDefault();
-        handleHoldInvoice();
+        state.handleHoldInvoice();
       } else if (e.key === 'F8') {
         e.preventDefault();
         setShowHeldModal(true);
       } else if (e.key === 'F9') {
         e.preventDefault();
-        handleCancelInvoice();
+        state.handleCancelInvoice();
       } else if (e.key === 'Escape') {
         setShowCustomerModal(false);
         setShowHeldModal(false);
@@ -1118,7 +1159,7 @@ export default function PosBilling({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [lineItems, selectedClient, customerSearch, invoiceDiscount, deliveryCharge, cashPayment, cardPayment, bankPayment, othersPayment, submitting, selectedProduct, filteredCatalog]);
+  }, []);
 
   return (
     <section className="pos-screen">
@@ -1894,7 +1935,28 @@ export default function PosBilling({
 
             <div className="pos-payment-tile-grid">
               <div className="pos-payment-input-box">
-                <label>Cash</label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label>Cash</label>
+                  {isCashManuallyEdited && (
+                    <button
+                      type="button"
+                      onClick={() => setIsCashManuallyEdited(false)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#F97316',
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        padding: '0 2px',
+                        textDecoration: 'underline',
+                      }}
+                      title="Reset manual cash override and auto-sync with net total"
+                    >
+                      Auto-sync
+                    </button>
+                  )}
+                </div>
                 <input
                   type="number"
                   value={cashPayment}
