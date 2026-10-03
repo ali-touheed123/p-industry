@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
+import { generateUniqueCode } from '@/lib/utils';
 
 // GET: Fetch payment receipts & vouchers
 export async function GET(req: NextRequest) {
@@ -108,7 +109,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const voucher_no = `${voucher_type === 'receipt' ? 'RCP' : 'PMT'}-${Math.floor(1000 + Math.random() * 9000)}`;
+    // FIX FINDING-API-013: Use collision-safe unique code generator
+    const voucherPrefix = voucher_type === 'receipt' ? 'RCP' : 'PMT';
+    const voucher_no = await generateUniqueCode(voucherPrefix, 'vouchers', 'voucher_no', tenant_id);
 
     const resolvedPaymentMode =
       totalTokensAmount > 0

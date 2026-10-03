@@ -229,6 +229,13 @@ export async function PATCH(req: NextRequest) {
       return total;
     };
 
+    // FIX FINDING-API-003: Auth must happen before resource fetch to prevent
+    // unauthenticated enumeration of order IDs via 404 vs 403 response differentiation.
+    const auth = await requireTenantAuth(req, null);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
     // Fetch the current order to validate transition
     const { data: currentOrder, error: fetchErr } = await supabaseAdmin
       .from('branch_orders')
@@ -240,13 +247,26 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Order not found' }, { status: 404 });
     }
 
-    const auth = await requireTenantAuth(req, null);
-    if (!auth.authorized) {
-      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
-    }
+    // Enforce tenant membership: caller must belong to one of the two branches
     if (auth.session && auth.session.role !== 'developer') {
       if (auth.session.tenantId !== currentOrder.from_tenant_id && auth.session.tenantId !== currentOrder.to_tenant_id) {
         return NextResponse.json({ success: false, error: 'Forbidden: Access denied to this branch order' }, { status: 403 });
+      }
+
+      // Enforce role-specific transition restrictions:
+      //   'dispatched' can only be set by the supplying branch (to_tenant_id)
+      //   'received'   can only be set by the requesting branch (from_tenant_id)
+      if (status === 'dispatched' && auth.session.tenantId !== currentOrder.to_tenant_id) {
+        return NextResponse.json(
+          { success: false, error: 'Forbidden: Only the supplying branch may dispatch this order' },
+          { status: 403 }
+        );
+      }
+      if (status === 'received' && auth.session.tenantId !== currentOrder.from_tenant_id) {
+        return NextResponse.json(
+          { success: false, error: 'Forbidden: Only the requesting branch may confirm receipt of this order' },
+          { status: 403 }
+        );
       }
     }
 
@@ -292,32 +312,19 @@ export async function PATCH(req: NextRequest) {
     // 3. Handle Status Specific Actions (Stock & Financial Posting)
     if (status === 'dispatched') {
       // ─── STEP A: Deduct stock from Supplying Branch (to_tenant_id) ───
-      // Calculate real transfer value from supplying branch cost prices
-      const realTransferValue = await calcTransferValue(currentOrder.to_tenant_id, itemsList);
-
-      for (const it of itemsList) {
-        const cleanCode = (it.item_code || '').trim().toUpperCase();
-        const { data: sourceItem } = await supabaseAdmin
-          .from('items')
-          .select('id, stock_qty')
-          .eq('tenant_id', currentOrder.to_tenant_id)
-          .ilike('code', cleanCode)
-          .maybeSingle();
-
-        if (sourceItem) {
-          const curQty = Number(sourceItem.stock_qty || 0);
-          await supabaseAdmin
-            .from('items')
-            .update({ stock_qty: Math.max(0, curQty - Number(it.qty || 1)) })
-            .eq('id', sourceItem.id);
+      // FIX FINDING-API-006: Use atomic RPC with FOR UPDATE row locking to prevent
+      // concurrent dispatch race conditions. The RPC also persists the transfer_value.
+      const { data: rpcTransferValue, error: dispatchErr } = await supabaseAdmin.rpc(
+        'process_branch_dispatch_atomic',
+        {
+          p_order_id:     id,
+          p_to_tenant_id: currentOrder.to_tenant_id,
         }
-      }
+      );
 
-      // Persist the real transfer value onto the order row so 'received' can reuse it
-      await supabaseAdmin
-        .from('branch_orders')
-        .update({ transfer_value: realTransferValue > 0 ? realTransferValue : null })
-        .eq('id', id);
+      if (dispatchErr) throw dispatchErr;
+
+      const realTransferValue = Number(rpcTransferValue || 0);
 
       // Log dispatch audit
       try {
@@ -339,47 +346,24 @@ export async function PATCH(req: NextRequest) {
 
     } else if (status === 'received') {
       // ─── STEP B: Add stock to Requesting Branch (from_tenant_id) ───
+      // FIX FINDING-API-006: Use atomic RPC with FOR UPDATE row locking to prevent
+      // concurrent receive race conditions.
+      const { error: receiveErr } = await supabaseAdmin.rpc(
+        'process_branch_receive_atomic',
+        {
+          p_order_id:       id,
+          p_from_tenant_id: currentOrder.from_tenant_id,
+          p_to_tenant_id:   currentOrder.to_tenant_id,
+        }
+      );
 
-      // Read transfer value that was calculated & stored at dispatch time
+      if (receiveErr) throw receiveErr;
+
+      // Read transfer value that was stored at dispatch time
       const dispatchValue = Number((currentOrder as any).transfer_value || 0);
       const transferAmount = dispatchValue > 0
         ? dispatchValue
         : await calcTransferValue(currentOrder.to_tenant_id, itemsList);
-
-      for (const it of itemsList) {
-        const cleanCode = (it.item_code || '').trim().toUpperCase();
-        const { data: destItem } = await supabaseAdmin
-          .from('items')
-          .select('id, stock_qty')
-          .eq('tenant_id', currentOrder.from_tenant_id)
-          .ilike('code', cleanCode)
-          .maybeSingle();
-
-        if (destItem) {
-          const curQty = Number(destItem.stock_qty || 0);
-          await supabaseAdmin
-            .from('items')
-            .update({ stock_qty: curQty + Number(it.qty || 1) })
-            .eq('id', destItem.id);
-        } else {
-          // Item doesn't exist in receiving branch yet → copy master record from supplying branch
-          const { data: origItem } = await supabaseAdmin
-            .from('items')
-            .select('*')
-            .eq('tenant_id', currentOrder.to_tenant_id)
-            .ilike('code', cleanCode)
-            .maybeSingle();
-
-          if (origItem) {
-            const { id: _ignore, ...itemWithoutId } = origItem;
-            await supabaseAdmin.from('items').insert({
-              ...itemWithoutId,
-              tenant_id: currentOrder.from_tenant_id,
-              stock_qty: Number(it.qty || 1),
-            });
-          }
-        }
-      }
 
       // ─── STEP C: Post Inter-Branch Ledger Vouchers (real amount only) ───
 

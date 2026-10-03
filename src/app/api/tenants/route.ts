@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { hashPassword } from '@/lib/auth-passwords';
 import { requireDevAuth, requireTenantAuth } from '@/lib/session';
+import { sanitizePostgRESTLike } from '@/lib/utils';
 
 // GET all tenants or single tenant by slug
 export async function GET(req: NextRequest) {
@@ -20,21 +21,12 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ success: false, error: 'Branch not found' }, { status: 404 });
       }
 
-      // Fetch counters/users belonging to this shop
-      const { data: tenantUsers } = await supabaseAdmin
-        .from('app_users')
-        .select('id, username, full_name, role')
-        .eq('tenant_id', tenant.id);
-
-      const staffCounters = (tenantUsers || []).filter(u => u.role === 'staff' || u.role === 'godown_staff');
-
+      // FIX FINDING-API-009: Do NOT expose the employee directory on an unauthenticated
+      // slug-based lookup. Any caller can query ?slug=<name> without credentials, so
+      // returning users/counters would allow enumeration of all staff usernames and roles.
       return NextResponse.json({ 
         success: true, 
-        tenant: {
-          ...tenant,
-          users: tenantUsers || [],
-          counters: staffCounters,
-        }
+        tenant,
       });
     }
 
@@ -61,11 +53,32 @@ export async function GET(req: NextRequest) {
         .maybeSingle();
 
       if (callerTenant?.owner_name && callerTenant?.email) {
-        tenantQuery = tenantQuery.or(`id.eq.${auth.session.tenantId},owner_name.eq.${callerTenant.owner_name},email.eq.${callerTenant.email}`);
+        // FIX FINDING-API-008: sanitize DB-sourced values before .or() interpolation
+        const safeOwner = sanitizePostgRESTLike(callerTenant.owner_name);
+        const safeEmail = sanitizePostgRESTLike(callerTenant.email);
+        if (safeOwner && safeEmail) {
+          tenantQuery = tenantQuery.or(`id.eq.${auth.session.tenantId},owner_name.eq.${safeOwner},email.eq.${safeEmail}`);
+        } else if (safeOwner) {
+          tenantQuery = tenantQuery.or(`id.eq.${auth.session.tenantId},owner_name.eq.${safeOwner}`);
+        } else if (safeEmail) {
+          tenantQuery = tenantQuery.or(`id.eq.${auth.session.tenantId},email.eq.${safeEmail}`);
+        } else {
+          tenantQuery = tenantQuery.eq('id', auth.session.tenantId);
+        }
       } else if (callerTenant?.owner_name) {
-        tenantQuery = tenantQuery.or(`id.eq.${auth.session.tenantId},owner_name.eq.${callerTenant.owner_name}`);
+        const safeOwner = sanitizePostgRESTLike(callerTenant.owner_name);
+        if (safeOwner) {
+          tenantQuery = tenantQuery.or(`id.eq.${auth.session.tenantId},owner_name.eq.${safeOwner}`);
+        } else {
+          tenantQuery = tenantQuery.eq('id', auth.session.tenantId);
+        }
       } else if (callerTenant?.email) {
-        tenantQuery = tenantQuery.or(`id.eq.${auth.session.tenantId},email.eq.${callerTenant.email}`);
+        const safeEmail = sanitizePostgRESTLike(callerTenant.email);
+        if (safeEmail) {
+          tenantQuery = tenantQuery.or(`id.eq.${auth.session.tenantId},email.eq.${safeEmail}`);
+        } else {
+          tenantQuery = tenantQuery.eq('id', auth.session.tenantId);
+        }
       } else {
         tenantQuery = tenantQuery.eq('id', auth.session.tenantId);
       }

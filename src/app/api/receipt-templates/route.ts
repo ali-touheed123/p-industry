@@ -14,31 +14,55 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
 
+    // FIX FINDING-API-015: Scope templates to the caller's tenant.
+    // Previously this returned ALL templates from ALL tenants (null-scope).
+    // Developers may still fetch any template by explicit ?id=
+    const callerTenantId = auth.session?.tenantId ?? null;
+    const isDeveloper = auth.session?.role === 'developer';
+
     if (id) {
-      const { data, error } = await supabaseAdmin
+      const templateQuery = supabaseAdmin
         .from('receipt_templates')
         .select('*')
         .eq('id', id)
-        .eq('is_deleted', false)
-        .single();
+        .eq('is_deleted', false);
+
+      const { data, error } = await templateQuery.single();
 
       if (error || !data) {
         return NextResponse.json({ success: false, error: 'Template not found' }, { status: 404 });
       }
 
+      // Non-developers may only read templates belonging to their tenant or system templates (null tenant_id)
+      if (!isDeveloper && callerTenantId && data.tenant_id && data.tenant_id !== callerTenantId) {
+        return NextResponse.json({ success: false, error: 'Forbidden: template belongs to another tenant' }, { status: 403 });
+      }
+
       return NextResponse.json({ success: true, template: data });
     }
 
-    const { data: templates, error } = await supabaseAdmin
+    // FIX FINDING-API-016: Add default pagination limit (50) to prevent unbounded catalog scans
+    const limitParam = searchParams.get('limit');
+    const limit = limitParam ? Math.min(Math.max(parseInt(limitParam, 10) || 50, 1), 200) : 50;
+
+    let listQuery = supabaseAdmin
       .from('receipt_templates')
       .select('*')
       .eq('is_deleted', false)
       .order('is_default', { ascending: false })
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    // Scope to caller's tenant (or global system templates with null tenant_id)
+    if (!isDeveloper && callerTenantId) {
+      listQuery = listQuery.or(`tenant_id.eq.${callerTenantId},tenant_id.is.null`);
+    }
+
+    const { data: templates, error } = await listQuery;
 
     if (error) throw error;
 
-    // If no templates exist yet, seed a default one
+    // If no templates exist yet, seed a default one (scoped to caller's tenant)
     if (!templates || templates.length === 0) {
       const defaultRecord = {
         name: 'Standard Thermal 80mm',
@@ -47,6 +71,7 @@ export async function GET(req: NextRequest) {
         template_json: DEFAULT_TEMPLATE_JSON,
         is_default: true,
         is_deleted: false,
+        tenant_id: callerTenantId,
       };
 
       const { data: created, error: seedErr } = await supabaseAdmin

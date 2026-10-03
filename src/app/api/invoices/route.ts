@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
+import { sanitizePostgRESTLike } from '@/lib/utils';
 
 // GET: Fetch invoices for a tenant / branch or shift with date filtering and search
 export async function GET(req: NextRequest) {
@@ -72,7 +73,11 @@ export async function GET(req: NextRequest) {
       query = query.eq('payment_type', paymentType);
     }
     if (search) {
-      query = query.or(`invoice_no.ilike.%${search}%,client_name.ilike.%${search}%`);
+      // FIX FINDING-API-007: strip PostgREST meta-characters before interpolation
+      const safeSearch = sanitizePostgRESTLike(search);
+      if (safeSearch) {
+        query = query.or(`invoice_no.ilike.%${safeSearch}%,client_name.ilike.%${safeSearch}%`);
+      }
     }
 
     const { data: invoices, error } = await query;

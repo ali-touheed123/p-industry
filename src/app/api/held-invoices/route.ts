@@ -97,8 +97,20 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'ID required' }, { status: 400 });
     }
 
-    const { data: existingHeld } = await supabaseAdmin.from('held_invoices').select('tenant_id').eq('id', id).maybeSingle();
-    const auth = await requireTenantAuth(req, existingHeld?.tenant_id);
+    // FIX FINDING-API-010: Fetch resource first. If missing, return 404 immediately
+    // before calling requireTenantAuth(). Passing undefined as tenant_id would fall
+    // back to a null-scoped check, letting any authenticated user attempt deletion.
+    const { data: existingHeld } = await supabaseAdmin
+      .from('held_invoices')
+      .select('tenant_id')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (!existingHeld) {
+      return NextResponse.json({ success: false, error: 'Held invoice not found' }, { status: 404 });
+    }
+
+    const auth = await requireTenantAuth(req, existingHeld.tenant_id);
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }

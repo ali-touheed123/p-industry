@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
+import { generateUniqueCode } from '@/lib/utils';
 
 // GET: Fetch clients for a tenant
 export async function GET(req: NextRequest) {
@@ -55,7 +56,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    const code = `CL-${Math.floor(1000 + Math.random() * 9000)}`;
+    // FIX FINDING-API-013: Use collision-safe unique code generator
+    const code = await generateUniqueCode('CL', 'clients', 'code', tenant_id);
 
     const { data: client, error } = await supabaseAdmin
       .from('clients')

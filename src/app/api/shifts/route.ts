@@ -218,8 +218,19 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Shift ID required' }, { status: 400 });
     }
 
-    const { data: existingShift } = await supabaseAdmin.from('shifts').select('tenant_id').eq('id', id).maybeSingle();
-    const auth = await requireTenantAuth(req, existingShift?.tenant_id);
+    // FIX FINDING-API-011: Fetch resource first. If missing, return 404 immediately
+    // before calling requireTenantAuth() to avoid null-scope auth bypass.
+    const { data: existingShift } = await supabaseAdmin
+      .from('shifts')
+      .select('tenant_id')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (!existingShift) {
+      return NextResponse.json({ success: false, error: 'Shift not found' }, { status: 404 });
+    }
+
+    const auth = await requireTenantAuth(req, existingShift.tenant_id);
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
@@ -309,8 +320,14 @@ export async function PATCH(req: NextRequest) {
         );
       }
     } catch (calcErr) {
-      // Non-blocking: fall back to client-supplied value if calculation fails
-      console.error('Server-side expected_cash recomputation failed, using client value:', calcErr);
+      // FIX FINDING-API-014: Hard-fail on reconciliation error.
+      // The previous code fell back to the client-supplied expected_cash, which
+      // a tampered POS could manipulate to conceal a cash shortage on shift close.
+      console.error('Server-side expected_cash recomputation failed — aborting shift close:', calcErr);
+      return NextResponse.json(
+        { success: false, error: 'Shift close failed: unable to recompute expected cash from server transactions. Please try again.' },
+        { status: 500 }
+      );
     }
 
     const { data: shift, error } = await supabaseAdmin
