@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
 
-// POST: Receive inward stock (GRN) with audit logging & sequential reference number
+// POST: Receive inward stock (GRN) with atomic stock increment and audit logging (FINDING-INV-002)
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -28,74 +28,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    // 1. Fetch current item
-    const { data: item, error: itemErr } = await supabaseAdmin
-      .from('items')
-      .select('id, code, name, stock_qty')
-      .eq('id', item_id)
-      .single();
-
-    if (itemErr || !item) {
-      return NextResponse.json(
-        { success: false, error: 'Item not found' },
-        { status: 404 }
-      );
-    }
-
-    // 2. Generate sequential unique GRN reference number
-    const currentYear = new Date().getFullYear();
-    const { count } = await supabaseAdmin
-      .from('audit_logs')
-      .select('*', { count: 'exact', head: true })
-      .eq('tenant_id', tenant_id)
-      .eq('action_type', 'grn_receive');
-
-    const nextSeq = (count || 0) + 1;
-    const grn_no = `GRN-${currentYear}-${String(nextSeq).padStart(4, '0')}`;
-
-    // 3. Atomic stock quantity update (VAL-01 / DB-01 fix)
-    const previousStock = Number(item.stock_qty || 0);
-    const { data: rpcRes, error: rpcErr } = await supabaseAdmin.rpc('adjust_item_stock', {
+    // Execute atomic receiving RPC (locks item row, updates stock, creates GRN audit log)
+    const { data: rpcRes, error: rpcErr } = await supabaseAdmin.rpc('receive_goods_atomic', {
+      p_tenant_id: tenant_id,
       p_item_id: item_id,
-      p_qty_delta: parsedQty,
+      p_qty: parsedQty,
+      p_batch_no: batch_no ? String(batch_no).trim() : null,
+      p_supplier_ref: supplier_bill_ref ? String(supplier_bill_ref).trim() : null,
+      p_received_by: received_by || 'Inventory Staff',
     });
 
-    if (rpcErr) throw rpcErr;
-    const newStock = (rpcRes && rpcRes.length > 0) ? Number(rpcRes[0].new_stock_qty) : (previousStock + parsedQty);
-
-    // 4. Record stock movement audit log
-    try {
-      await supabaseAdmin.from('audit_logs').insert({
-        tenant_id,
-        user_name: received_by,
-        action: `Goods Received (${grn_no})`,
-        action_type: 'grn_receive',
-        entity_type: 'item',
-        entity_id: item.id,
-        details: {
-          grn_no,
-          item_id: item.id,
-          item_code: item.code,
-          item_name: item.name,
-          qty_received: parsedQty,
-          previous_stock: previousStock,
-          new_stock: newStock,
-          batch_no: batch_no || null,
-          supplier_bill_ref: supplier_bill_ref || null,
-          received_at: new Date().toISOString(),
-        },
-      });
-    } catch (logErr) {
-      console.error('Failed to write GRN audit log:', logErr);
+    if (rpcErr) {
+      const isNotFound = rpcErr.message?.includes('not found');
+      return NextResponse.json(
+        { success: false, error: rpcErr.message },
+        { status: isNotFound ? 404 : 400 }
+      );
     }
 
     return NextResponse.json({
       success: true,
-      grn_no,
-      new_stock: newStock,
+      grn_no: rpcRes.grn_no,
+      new_stock: Number(rpcRes.new_stock),
       item: {
-        ...item,
-        stock_qty: newStock,
+        id: rpcRes.item_id,
+        code: rpcRes.item_code,
+        name: rpcRes.item_name,
+        stock_qty: Number(rpcRes.new_stock),
       },
     });
   } catch (error: any) {

@@ -299,7 +299,8 @@ export async function POST(req: NextRequest) {
         if (!row.name?.trim() || !row.code?.trim()) continue; // skip empty rows silently
 
         const retail = Number(row.retail_price) || 0;
-        const cost = Number(row.cost_price) || Math.round(retail * 0.75);
+        // FIX FINDING-INV-003: Default cost to 0 — no arbitrary margin calculation (retail * 0.75 removed)
+        const cost = Number(row.cost_price) || 0;
 
         const result = await insertOneItem({
           code: row.code.trim(),

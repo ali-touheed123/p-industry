@@ -55,7 +55,7 @@ const DEFAULT_UNITS = [
 export default function StockInventory({
   items,
   tenantId,
-  tenantName = 'Main Godown & Retail Counter #1',
+  tenantName = 'PyntFlow Store',
   onStockUpdated,
 }: Props) {
   // Filters state (Matching painterp InventoryView.tsx)
@@ -82,12 +82,13 @@ export default function StockInventory({
   const fetchBrandsAndSeries = useCallback(async () => {
     if (!tenantId) return;
     try {
-      const [bRes, sRes, cRes] = await Promise.all([
+      const [bRes, sRes, cRes, uRes] = await Promise.all([
         fetch(`/api/brands?tenant_id=${tenantId}`),
         fetch(`/api/brand-series?tenant_id=${tenantId}`),
         fetch(`/api/token-configs?tenant_id=${tenantId}`),
+        fetch(`/api/custom-units?tenant_id=${tenantId}`),
       ]);
-      const [bData, sData, cData] = await Promise.all([bRes.json(), sRes.json(), cRes.json()]);
+      const [bData, sData, cData, uData] = await Promise.all([bRes.json(), sRes.json(), cRes.json(), uRes.json()]);
       if (bData.success) setBrands(bData.brands || []);
       if (sData.success) {
         const activeSeries = (sData.series || []).filter((s: any) => s.is_active !== false);
@@ -100,6 +101,9 @@ export default function StockInventory({
           configMap[cfg.series_id].push({ unit_name: cfg.unit_name, is_enabled: cfg.is_enabled, token_value: Number(cfg.token_value) });
         }
         setSeriesConfigs(configMap);
+      }
+      if (uData.success && Array.isArray(uData.units)) {
+        setCustomUnits(uData.units.map((u: any) => u.name));
       }
     } catch { /* silent */ }
   }, [tenantId]);
@@ -187,6 +191,7 @@ export default function StockInventory({
 
   // Add / Edit Product Form State (Text-only shade name, no visual color swatch)
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [formCode, setFormCode] = useState<string>('');
   const [formName, setFormName] = useState<string>('');
   const [formCategory, setFormCategory] = useState<string>('Interior Emulsion');
@@ -291,6 +296,7 @@ export default function StockInventory({
   // Open modal for new product
   const handleOpenAddProduct = () => {
     setEditingItemId(null);
+    setFormError(null);
     setFormCode(`PNT-${Math.floor(100 + Math.random() * 900)}`);
     setFormName('');
     setFormBrand('');
@@ -400,6 +406,7 @@ export default function StockInventory({
   // Open modal for editing existing product
   const handleOpenEditProduct = (item: Item) => {
     setEditingItemId(item.id);
+    setFormError(null);
     setFormCode(item.code);
     setFormName(item.name);
     setFormBrand(item.brand || '');
@@ -431,12 +438,23 @@ export default function StockInventory({
     showToast(`Category "${cat}" added to system!`);
   };
 
-  // Add custom new unit handler
-  const handleAddNewUnit = () => {
+  // Add custom new unit handler (FINDING-INV-005: Persist custom packaging unit to database)
+  const handleAddNewUnit = async () => {
     if (!newUnitInput.trim()) return;
     const unit = newUnitInput.trim();
     if (!customUnits.includes(unit)) {
       setCustomUnits((prev) => [...prev, unit]);
+      if (tenantId) {
+        try {
+          await fetch('/api/custom-units', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tenant_id: tenantId, name: unit }),
+          });
+        } catch (e) {
+          console.error('Failed to persist custom unit to database:', e);
+        }
+      }
     }
     setFormUnit(unit);
     setNewUnitInput('');
@@ -447,33 +465,36 @@ export default function StockInventory({
   // Save product to Supabase
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
+
     if (!formName.trim() || !formCode.trim()) {
-      alert('Product name and code are required');
+      setFormError('Product name and code are required');
       return;
     }
     if (!formBrand.trim()) {
-      alert('Brand / Manufacturer is required');
+      setFormError('Brand / Manufacturer is required');
       return;
     }
     if (!tenantId) {
-      alert('Tenant ID missing');
+      setFormError('Tenant ID missing');
       return;
     }
 
     const normalizedCode = formCode.trim().toUpperCase();
 
-    // Check duplicate SKU / Product Code
+    // Check duplicate SKU / Product Code locally
     const duplicate = items.find(
       (it) => it.code?.trim().toUpperCase() === normalizedCode && it.id !== editingItemId
     );
     if (duplicate) {
-      alert('A product with this code already exists.');
+      setFormError(`A product with code "${normalizedCode}" already exists.`);
       return;
     }
 
     setSubmitting(true);
     const retail = Number(formRetailPrice) || 0;
-    const cost = Number(formCostPrice) || Math.round(retail * 0.75);
+    // FIX FINDING-INV-003: Require explicit cost price entry / default strictly to 0 (no arbitrary 75% margin calculation)
+    const cost = Number(formCostPrice) || 0;
 
     const payload = {
       tenant_id: tenantId,
@@ -508,7 +529,8 @@ export default function StockInventory({
           setShowAddProductModal(false);
           onStockUpdated?.();
         } else {
-          alert(`Failed to update: ${data.error}`);
+          // FIX FINDING-INV-004: Display server-side duplicate SKU / validation errors in modal
+          setFormError(data.error || 'Failed to update product.');
         }
       } else {
         // Insert new item
@@ -523,11 +545,12 @@ export default function StockInventory({
           setShowAddProductModal(false);
           onStockUpdated?.();
         } else {
-          alert(`Failed to create: ${data.error}`);
+          // FIX FINDING-INV-004: Display server-side duplicate SKU / validation errors in modal
+          setFormError(data.error || 'Failed to create product.');
         }
       }
     } catch (err: any) {
-      alert(`Network error saving product: ${err.message}`);
+      setFormError(`Network error saving product: ${err.message}`);
     } finally {
       setSubmitting(false);
     }
@@ -1335,6 +1358,14 @@ export default function StockInventory({
                   </div>
                 )}
               </div>
+
+              {/* FIX FINDING-INV-004: Inline server-side error banner (duplicate SKU, validation, network errors) */}
+              {formError && (
+                <div role="alert" style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: '8px', padding: '10px 14px', color: '#DC2626', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                  <span style={{ flexShrink: 0 }}>⚠</span>
+                  <span>{formError}</span>
+                </div>
+              )}
 
               {/* Modal Actions */}
               <div style={{ display: 'flex', gap: '8px', paddingTop: '10px', borderTop: '1px solid #E2E8F0' }}>
