@@ -1,19 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SignJWT } from 'jose';
 import { checkRateLimit, resetRateLimit } from '@/lib/rate-limit';
-
-function getDevAdminSecret(): Uint8Array {
-  const secret = process.env.DEV_ADMIN_SECRET || process.env.SESSION_SECRET;
-  if (!secret) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('CRITICAL SECURITY ERROR: DEV_ADMIN_SECRET or SESSION_SECRET must be configured in production.');
-    }
-    return new TextEncoder().encode('pyntflow-dev-secret-super-key-32-chars-min!');
-  }
-  return new TextEncoder().encode(secret);
-}
-
-const DEV_ADMIN_COOKIE = 'aura_dev_token';
+import { getDevSecret, DEV_ADMIN_COOKIE } from '@/lib/jwt-secrets';
 
 export async function POST(req: NextRequest) {
   try {
@@ -38,10 +26,17 @@ export async function POST(req: NextRequest) {
     const { pin } = await req.json();
     const cleanPin = String(pin || '').trim();
 
-    // In production, PIN must come exclusively from environment variable
-    const masterPin = (process.env.DEV_ADMIN_PIN || (process.env.NODE_ENV !== 'production' ? 'dev2026' : '')).trim();
+    // PIN must come exclusively from environment variable DEV_ADMIN_PIN (no hardcoded fallback)
+    const masterPin = (process.env.DEV_ADMIN_PIN || '').trim();
+    if (!masterPin) {
+      console.error('[SECURITY ERROR] DEV_ADMIN_PIN environment variable is not configured.');
+      return NextResponse.json(
+        { success: false, error: 'Developer authentication is not configured on this server.' },
+        { status: 503 }
+      );
+    }
 
-    if (!masterPin || !cleanPin || cleanPin !== masterPin) {
+    if (!cleanPin || cleanPin !== masterPin) {
       return NextResponse.json(
         { success: false, error: 'Invalid Developer Master PIN' },
         { status: 401 }
@@ -51,7 +46,7 @@ export async function POST(req: NextRequest) {
     // Reset rate limiter on valid PIN authentication
     resetRateLimit(`dev-pin:${ip}`);
 
-    // Sign developer super-admin token valid for 8 hours
+    // Sign developer super-admin token valid for 8 hours using strict high-entropy secret
     const token = await new SignJWT({
       role: 'developer',
       access: 'dev-panel',
@@ -60,7 +55,7 @@ export async function POST(req: NextRequest) {
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuedAt()
       .setExpirationTime('8h')
-      .sign(getDevAdminSecret());
+      .sign(getDevSecret());
 
     const res = NextResponse.json({
       success: true,

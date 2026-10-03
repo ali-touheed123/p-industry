@@ -2,27 +2,13 @@ import { SignJWT, jwtVerify } from 'jose';
 import { NextRequest } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 
-function getJwtSecret(): Uint8Array {
-  const secret = process.env.SESSION_SECRET || process.env.DEV_ADMIN_SECRET;
-  if (!secret) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('CRITICAL SECURITY ERROR: SESSION_SECRET environment variable is missing.');
-    }
-    return new TextEncoder().encode('pyntflow-dev-local-only-fallback-secret-min-32-chars!');
-  }
-  return new TextEncoder().encode(secret);
-}
-
-function getDevSecret(): Uint8Array {
-  const secret = process.env.DEV_ADMIN_SECRET || process.env.SESSION_SECRET;
-  if (!secret) {
-    return new TextEncoder().encode('pyntflow-dev-secret-super-key-32-chars-min!');
-  }
-  return new TextEncoder().encode(secret);
-}
-
-export const SESSION_COOKIE_NAME = 'pyntflow_session';
-export const DEV_ADMIN_COOKIE = 'aura_dev_token';
+export {
+  getJwtSecret,
+  getDevSecret,
+  SESSION_COOKIE_NAME,
+  DEV_ADMIN_COOKIE,
+} from './jwt-secrets';
+import { getJwtSecret, getDevSecret, SESSION_COOKIE_NAME, DEV_ADMIN_COOKIE } from './jwt-secrets';
 
 export interface UserSession {
   userId: string;

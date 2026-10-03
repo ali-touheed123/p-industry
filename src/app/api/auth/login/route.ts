@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import { verifyPassword, hashPassword } from '@/lib/auth-passwords';
+import { verifyPassword, hashPassword, isLegacyPasswordHash } from '@/lib/auth-passwords';
 import { createSessionToken, SESSION_COOKIE_NAME } from '@/lib/session';
 import { checkRateLimit, resetRateLimit } from '@/lib/rate-limit';
 
@@ -43,20 +43,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Invalid username or password' }, { status: 401 });
     }
 
-    // 3. Verify password securely using bcrypt (with automatic fallback for plaintext)
-    const isValid = await verifyPassword(password, user.password_hash);
+    // 3. Verify password securely using bcrypt (with transitional migration hook for legacy accounts)
+    const isLegacy = isLegacyPasswordHash(user.password_hash);
+    const isValid = await verifyPassword(password, user.password_hash, { allowLegacyMigration: true });
     if (!isValid) {
       return NextResponse.json({ success: false, error: 'Invalid username or password' }, { status: 401 });
     }
 
     // Auto-upgrade plain-text password to bcrypt hash on successful authentication
-    if (!user.password_hash.startsWith('$2a$') && !user.password_hash.startsWith('$2b$')) {
+    if (isLegacy) {
       try {
         const secureHash = await hashPassword(password);
         await supabaseAdmin
           .from('app_users')
           .update({ password_hash: secureHash })
           .eq('id', user.id);
+        console.info(`[SECURITY AUDIT] Successfully auto-upgraded password hash for user ${user.username} to bcrypt.`);
       } catch (upgradeErr) {
         console.error('Failed to auto-upgrade password hash:', upgradeErr);
       }
