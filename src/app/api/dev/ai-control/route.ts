@@ -38,12 +38,13 @@ export async function GET(req: NextRequest) {
     }
 
     // 2. Fetch all tenants and their AI settings
-    const [{ data: tenantsData }, { data: tenantAiSettings }] = await Promise.all([
+    const [{ data: tenantsData }, tenantAiRes] = await Promise.all([
       supabaseAdmin.from('tenants').select('id, name, slug, city, is_active'),
-      supabaseAdmin.from('tenant_ai_settings').select('*').catch(() => ({ data: null })),
+      Promise.resolve(supabaseAdmin.from('tenant_ai_settings').select('*')).catch(() => ({ data: null, error: null })),
     ]);
+    const tenantAiSettings = tenantAiRes?.data;
 
-    const tenantAiMap = new Map((tenantAiSettings || []).map((s: any) => [s.tenant_id, s]));
+    const tenantAiMap = new Map<string, any>((tenantAiSettings || []).map((s: any) => [s.tenant_id, s]));
 
     // 3. Fetch Ledger Usage Data
     let dbLedger: any[] = [];
@@ -93,7 +94,7 @@ export async function GET(req: NextRequest) {
     });
 
     // Combine Tenants with AI Settings & Usage
-    const shopList = (tenantsData || []).map((tenant) => {
+    const shopList = (tenantsData || []).map((tenant: any) => {
       const dbSetting = tenantAiMap.get(tenant.id);
       const memSetting = getMemoryTenantSettings(tenant.id);
 
@@ -120,7 +121,7 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    const tenantNameMap = new Map((tenantsData || []).map((t) => [t.id, t.name]));
+    const tenantNameMap = new Map((tenantsData || []).map((t: any) => [t.id, t.name]));
     const formattedHistory = combinedLedger.slice(0, 100).map((row) => ({
       ...row,
       tenant_name: tenantNameMap.get(row.tenant_id) || 'Shop ID: ' + row.tenant_id.substring(0, 8),
