@@ -5,7 +5,8 @@ import {
   LayoutDashboard,
   Building2, 
   Users,
-  Printer
+  Printer,
+  Bot
 } from 'lucide-react';
 import { DevActiveTab } from '@/types/dev';
 
@@ -57,6 +58,12 @@ export const DevSidebar: React.FC<DevSidebarProps> = ({
       description: 'Developers, CEOs, staff & incharges',
       icon: Users,
       count: counts.users,
+    },
+    {
+      id: 'ai-control',
+      label: 'AI Control Center',
+      description: 'Gemini usage, limits & ledger',
+      icon: Bot,
     },
     {
       id: 'receipt-templates',

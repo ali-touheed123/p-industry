@@ -221,6 +221,25 @@ export default function AiInvoiceScan({
   const [savedPurchaseNo, setSavedPurchaseNo] = useState<string>('');
   const [savedItemsCount, setSavedItemsCount] = useState<number>(0);
 
+  // Quota state
+  const [quota, setQuota] = useState<{ remainingDaily: number; remainingMonthly: number } | null>(null);
+
+  React.useEffect(() => {
+    if (isOpen && tenantId) {
+      fetch(`/api/ai-invoice-scan?tenant_id=${tenantId}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && data.usage) {
+            setQuota({
+              remainingDaily: data.usage.remainingDaily,
+              remainingMonthly: data.usage.remainingMonthly,
+            });
+          }
+        })
+        .catch(() => {});
+    }
+  }, [isOpen, tenantId]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
@@ -268,7 +287,17 @@ export default function AiInvoiceScan({
 
       const data = await res.json();
 
+      if (data.usage) {
+        setQuota({
+          remainingDaily: data.usage.remainingDaily,
+          remainingMonthly: data.usage.remainingMonthly,
+        });
+      }
+
       if (!res.ok || !data.success) {
+        if (data.code?.includes('EXCEEDED') || data.code?.includes('DISABLED')) {
+          throw new Error(`AI Scan Limit Reached: ${data.error || 'No scans remaining.'}`);
+        }
         throw new Error(data.error || 'Failed to scan invoice with AI');
       }
 
@@ -564,9 +593,23 @@ export default function AiInvoiceScan({
               <h2 style={{ fontSize: '16px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
                 AI Invoice Scanner &amp; Inward Stock
               </h2>
-              <p style={{ fontSize: '11px', color: '#64748B', margin: 0 }}>
-                Powered by Google Gemini 3.5 Flash Lite — Auto-read physical invoices &amp; update inventory
-              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: '#64748B', marginTop: '2px', flexWrap: 'wrap' }}>
+                <span>Powered by Gemini AI</span>
+                {quota && (
+                  <span
+                    style={{
+                      padding: '2px 8px',
+                      borderRadius: '12px',
+                      backgroundColor: quota.remainingDaily > 0 ? '#ECFDF5' : '#FEF2F2',
+                      color: quota.remainingDaily > 0 ? '#047857' : '#B91C1C',
+                      fontWeight: 600,
+                      border: `1px solid ${quota.remainingDaily > 0 ? '#A7F3D0' : '#FECACA'}`,
+                    }}
+                  >
+                    {quota.remainingDaily} scans remaining today • {quota.remainingMonthly} remaining this period
+                  </span>
+                )}
+              </div>
             </div>
           </div>
           <button

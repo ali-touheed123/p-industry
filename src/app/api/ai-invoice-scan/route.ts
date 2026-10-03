@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
+import { executeCentralAiGateway, getShopAiQuota } from '@/lib/ai-gateway';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // Allow up to 60s for vision inference
@@ -53,6 +53,38 @@ function calculateWordSimilarity(a: string, b: string): number {
   return smaller > 0 ? common / smaller : 0;
 }
 
+/**
+ * GET /api/ai-invoice-scan?tenant_id=...
+ * Query shop AI scan quota and remaining balance
+ */
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const tenantId = searchParams.get('tenant_id');
+
+    if (!tenantId) {
+      return NextResponse.json({ success: false, error: 'tenant_id parameter is required' }, { status: 400 });
+    }
+
+    const auth = await requireTenantAuth(req, tenantId);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
+    const quota = await getShopAiQuota(tenantId);
+    return NextResponse.json({
+      success: true,
+      usage: quota,
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message || 'Failed to fetch quota' }, { status: 500 });
+  }
+}
+
+/**
+ * POST /api/ai-invoice-scan
+ * Scan invoice image via Central AI Gateway
+ */
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -67,32 +99,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Invoice image is required' }, { status: 400 });
     }
 
-    // 1. Authenticate user
+    // 1. Authenticate user & tenant
     const auth = await requireTenantAuth(req, tenantId);
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    // 2. Validate Gemini API Key
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            'GEMINI_API_KEY is not configured on the server. Please set GEMINI_API_KEY in .env.local or Vercel Environment Variables.',
-        },
-        { status: 500 }
-      );
-    }
-
-    // 3. Read image as Base64
+    // 2. Read image as Base64
     const arrayBuffer = await file.arrayBuffer();
     const base64Data = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = file.type || 'image/jpeg';
-
-    // 4. Initialize Gemini
-    const genAI = new GoogleGenerativeAI(apiKey);
 
     const prompt = `You are an expert invoice parser for a paint and hardware store in Pakistan.
 Carefully examine this invoice image and extract all header and line items.
@@ -124,61 +140,41 @@ Return ONLY valid JSON matching this schema:
 
 If any value is unreadable or missing, set that specific field to null. Do NOT wrap output in markdown fences like \`\`\`json if possible; output raw JSON only.`;
 
-    let extractedData: GeminiExtractionResult;
+    // 3. EXECUTE VIA CENTRAL AI GATEWAY (Enforces quotas, rate limits, kill switches, token costs & ledger)
+    const gatewayResult = await executeCentralAiGateway<GeminiExtractionResult>({
+      tenantId,
+      feature: 'invoice_scanner',
+      provider: 'gemini',
+      preferredModel: 'gemini-3.5-flash-lite',
+      prompt,
+      mediaInlineData: {
+        data: base64Data,
+        mimeType,
+      },
+      responseMimeType: 'application/json',
+      temperature: 0.1,
+    });
 
-    // We try the requested model first: gemini-3.5-flash-lite. If the API returns a model not found error,
-    // fallback gracefully to gemini-2.0-flash or gemini-1.5-flash so user isn't stuck.
-    const candidateModels = ['gemini-3.5-flash-lite', 'gemini-2.0-flash', 'gemini-1.5-flash'];
-    let lastError: any = null;
-    let modelSuccess = false;
+    if (!gatewayResult.success) {
+      const isQuotaOrDisabled =
+        gatewayResult.errorCode?.includes('EXCEEDED') ||
+        gatewayResult.errorCode?.includes('DISABLED') ||
+        gatewayResult.errorCode === 'AI_SCAN_LIMIT_REACHED';
 
-    for (const modelName of candidateModels) {
-      try {
-        const model = genAI.getGenerativeModel({
-          model: modelName,
-          generationConfig: {
-            responseMimeType: 'application/json',
-            temperature: 0.1,
-          },
-        });
-
-        const result = await model.generateContent([
-          prompt,
-          {
-            inlineData: {
-              data: base64Data,
-              mimeType: mimeType,
-            },
-          },
-        ]);
-
-        const responseText = result.response.text().trim();
-        // Clean any accidental markdown backticks
-        const cleanJson = responseText.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim();
-        extractedData = JSON.parse(cleanJson);
-        modelSuccess = true;
-        break;
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`[AI-INVOICE] Failed using model ${modelName}:`, err?.message || err);
-        // If it's an API key error or network error, break immediately rather than trying other models
-        if (err?.message?.includes('API_KEY_INVALID') || err?.status === 403) {
-          break;
-        }
-      }
-    }
-
-    if (!modelSuccess || !extractedData!) {
       return NextResponse.json(
         {
           success: false,
-          error: `Gemini AI scanning failed: ${lastError?.message || 'Unknown error'}. Please check your API key and image quality.`,
+          code: gatewayResult.errorCode || 'AI_SCAN_LIMIT_REACHED',
+          error: gatewayResult.error || 'Invoice scanning rejected or failed.',
+          usage: gatewayResult.usage,
         },
-        { status: 502 }
+        { status: isQuotaOrDisabled ? 429 : 502 }
       );
     }
 
-    // 5. Fetch DB items & suppliers for matching
+    const extractedData = gatewayResult.data || {};
+
+    // 4. Fetch DB items & suppliers for matching
     const [itemsRes, suppliersRes] = await Promise.all([
       supabaseAdmin
         .from('items')
@@ -193,7 +189,7 @@ If any value is unreadable or missing, set that specific field to null. Do NOT w
     const dbItems = itemsRes.data || [];
     const dbSuppliers = suppliersRes.data || [];
 
-    // 6. Match Supplier
+    // 5. Match Supplier
     let matchedSupplier = {
       id: null as string | null,
       name: extractedData.supplier_name || '',
@@ -232,7 +228,7 @@ If any value is unreadable or missing, set that specific field to null. Do NOT w
       }
     }
 
-    // 7. Match Items
+    // 6. Match Items
     const rawItems = Array.isArray(extractedData.items) ? extractedData.items : [];
     const processedItems = rawItems.map((aiItem) => {
       const aiName = (aiItem.product_name || '').trim();
@@ -242,7 +238,6 @@ If any value is unreadable or missing, set that specific field to null. Do NOT w
       const totalPrice = aiItem.total_price !== null && aiItem.total_price !== undefined
         ? Number(aiItem.total_price)
         : (unitPrice !== null ? unitPrice * qty : null);
-      // Derive after-tax unit price: total already includes tax, so total/qty = true per-unit cost
       const afterTaxUnitPrice = (totalPrice !== null && qty > 0)
         ? totalPrice / qty
         : unitPrice;
@@ -316,7 +311,6 @@ If any value is unreadable or missing, set that specific field to null. Do NOT w
       };
     });
 
-    // Subtotal & Net Total defaults
     const computedSubtotal = processedItems.reduce((sum, it) => sum + (Number(it.total_price) || 0), 0);
     const discount = Number(extractedData.discount) || 0;
     const netTotal = extractedData.net_total !== null && extractedData.net_total !== undefined
@@ -338,6 +332,8 @@ If any value is unreadable or missing, set that specific field to null. Do NOT w
       subtotal: extractedData.subtotal !== null && extractedData.subtotal !== undefined ? Number(extractedData.subtotal) : computedSubtotal,
       discount: discount,
       net_total: netTotal,
+      usage: gatewayResult.usage,
+      tokenUsage: gatewayResult.tokenUsage,
     });
   } catch (error: any) {
     console.error('[AI-INVOICE] Unexpected error:', error);

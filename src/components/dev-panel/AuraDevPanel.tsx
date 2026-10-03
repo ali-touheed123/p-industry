@@ -11,6 +11,7 @@ import { DevBranchModal } from './DevBranchModal';
 import { DevUserModal } from './DevUserModal';
 import { DevBranchPortalModal } from './DevBranchPortalModal';
 import { DevReceiptTemplatesView } from './DevReceiptTemplatesView';
+import { DevAiControlView } from './DevAiControlView';
 import { DevPinLogin } from './DevPinLogin';
 import { CheckCheck, AlertCircle } from 'lucide-react';
 import './aura-panel.css';
@@ -414,6 +415,10 @@ export default function AuraDevPanel() {
 
           {activeTab === 'receipt-templates' && (
             <DevReceiptTemplatesView onShowToast={showToast} />
+          )}
+
+          {activeTab === 'ai-control' && (
+            <DevAiControlView onShowToast={showToast} />
           )}
         </main>
       </div>
