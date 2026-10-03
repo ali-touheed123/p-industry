@@ -442,15 +442,23 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    // 1. Fetch old invoice and previous line items
+    // 1. Fetch old invoice and previous line items with strict tenant isolation
     const { data: oldInvoice, error: fetchErr } = await supabaseAdmin
       .from('invoices')
       .select('*, invoice_items(*)')
       .eq('id', id)
+      .eq('tenant_id', tenant_id)
       .single();
 
     if (fetchErr || !oldInvoice) {
       return NextResponse.json({ success: false, error: 'Original invoice not found' }, { status: 404 });
+    }
+
+    if (oldInvoice.tenant_id !== tenant_id) {
+      return NextResponse.json(
+        { success: false, error: 'Forbidden: Invoice does not belong to authorized tenant' },
+        { status: 403 }
+      );
     }
 
     // 2. Revert previous stock deductions for old items atomically
@@ -524,6 +532,7 @@ export async function PATCH(req: NextRequest) {
         .from('clients')
         .select('current_balance')
         .eq('id', client_id)
+        .eq('tenant_id', tenant_id)
         .maybeSingle();
 
       if (client) {
@@ -532,7 +541,8 @@ export async function PATCH(req: NextRequest) {
         await supabaseAdmin
           .from('clients')
           .update({ current_balance: updatedBalance })
-          .eq('id', client_id);
+          .eq('id', client_id)
+          .eq('tenant_id', tenant_id);
       }
     }
 
@@ -557,6 +567,7 @@ export async function PATCH(req: NextRequest) {
         status,
       })
       .eq('id', id)
+      .eq('tenant_id', tenant_id)
       .select()
       .single();
 

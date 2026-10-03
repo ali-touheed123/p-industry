@@ -383,20 +383,29 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Item ID required' }, { status: 400 });
     }
 
-    let targetTenantId = updateFields.tenant_id;
-    if (!targetTenantId) {
-      const { data: existing } = await supabaseAdmin.from('items').select('tenant_id').eq('id', id).maybeSingle();
-      targetTenantId = existing?.tenant_id;
+    // AUTH-002: Fetch existing item first to derive true tenant ownership from database
+    const { data: existingItem, error: existingErr } = await supabaseAdmin
+      .from('items')
+      .select('id, tenant_id, series_id, pack_size, unit, brand_id')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (existingErr || !existingItem) {
+      return NextResponse.json({ success: false, error: 'Item not found' }, { status: 404 });
     }
 
+    const targetTenantId = existingItem.tenant_id;
     const auth = await requireTenantAuth(req, targetTenantId);
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
+    // Strip tenant_id from update payload to prevent cross-tenant hijacking or reassignment
+    delete (updateFields as any).tenant_id;
+
     if (updateFields.code && targetTenantId) {
       const normalizedCode = updateFields.code.trim().toUpperCase();
-      const { data: existingItem } = await supabaseAdmin
+      const { data: existingCodeItem } = await supabaseAdmin
         .from('items')
         .select('id')
         .eq('tenant_id', targetTenantId)
@@ -404,7 +413,7 @@ export async function PATCH(req: NextRequest) {
         .neq('id', id)
         .maybeSingle();
 
-      if (existingItem) {
+      if (existingCodeItem) {
         return NextResponse.json(
           { success: false, error: 'A product with this code already exists.' },
           { status: 400 }
@@ -422,15 +431,9 @@ export async function PATCH(req: NextRequest) {
       updateFields.has_token !== undefined ||
       updateFields.token_value !== undefined
     ) {
-      const { data: currentItem } = await supabaseAdmin
-        .from('items')
-        .select('series_id, pack_size, unit, brand_id')
-        .eq('id', id)
-        .maybeSingle();
-
-      let effectiveSeriesId = updateFields.series_id !== undefined ? updateFields.series_id : currentItem?.series_id;
-      const effectiveBrandId = updateFields.brand_id !== undefined ? updateFields.brand_id : currentItem?.brand_id;
-      const effectiveUnit = updateFields.pack_size || updateFields.unit || currentItem?.pack_size || currentItem?.unit;
+      let effectiveSeriesId = updateFields.series_id !== undefined ? updateFields.series_id : existingItem.series_id;
+      const effectiveBrandId = updateFields.brand_id !== undefined ? updateFields.brand_id : existingItem.brand_id;
+      const effectiveUnit = updateFields.pack_size || updateFields.unit || existingItem.pack_size || existingItem.unit;
 
       // Validate series belongs to brand if both present
       if (effectiveSeriesId && effectiveBrandId) {
@@ -463,6 +466,7 @@ export async function PATCH(req: NextRequest) {
       .from('items')
       .update(updateFields)
       .eq('id', id)
+      .eq('tenant_id', targetTenantId)
       .select()
       .single();
 
@@ -491,13 +495,27 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Item ID required' }, { status: 400 });
     }
 
-    const { data: existingItem } = await supabaseAdmin.from('items').select('tenant_id').eq('id', id).maybeSingle();
-    const auth = await requireTenantAuth(req, existingItem?.tenant_id);
+    const { data: existingItem, error: fetchErr } = await supabaseAdmin
+      .from('items')
+      .select('tenant_id')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (fetchErr || !existingItem) {
+      return NextResponse.json({ success: false, error: 'Item not found' }, { status: 404 });
+    }
+
+    const auth = await requireTenantAuth(req, existingItem.tenant_id);
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    const { error } = await supabaseAdmin.from('items').delete().eq('id', id);
+    const { error } = await supabaseAdmin
+      .from('items')
+      .delete()
+      .eq('id', id)
+      .eq('tenant_id', existingItem.tenant_id);
+
     if (error) throw error;
 
     return NextResponse.json({ success: true });
