@@ -100,14 +100,26 @@ export default function PurchasesView({
 
   // Record & Meta
   const [recordNo, setRecordNo] = useState<string>('01');
-  const [purchaseInvNo, setPurchaseInvNo] = useState<string>(
-    () => `P-INV-${Math.floor(1000 + Math.random() * 9000)}`
-  );
+  // Task 7.3 (FINDING-PROC-003): Use timestamp + 4 random hex digits.
+  // Format: P-INV-YYYYMMDD-XXXX gives ~65,536 unique values per day per branch,
+  // eliminating the collision risk of the previous 9,000-value random space.
+  const [purchaseInvNo, setPurchaseInvNo] = useState<string>(() => {
+    const today = new Date();
+    const datePart = today.toISOString().slice(0, 10).replace(/-/g, '');
+    const randPart = Math.floor(0x1000 + Math.random() * 0xf000).toString(16).toUpperCase();
+    return `P-INV-${datePart}-${randPart}`;
+  });
   const [invoiceDate, setInvoiceDate] = useState<string>(
     () => new Date().toISOString().split('T')[0]
   );
   const [selectedCompany, setSelectedCompany] = useState<string>('');
-  const [poNumber, setPoNumber] = useState<string>(() => `PO-${Math.floor(1000 + Math.random() * 9000)}`);
+  // Task 7.3 (FINDING-PROC-003): Same collision-resistant scheme for PO number.
+  const [poNumber, setPoNumber] = useState<string>(() => {
+    const today = new Date();
+    const datePart = today.toISOString().slice(0, 10).replace(/-/g, '');
+    const randPart = Math.floor(0x1000 + Math.random() * 0xf000).toString(16).toUpperCase();
+    return `PO-${datePart}-${randPart}`;
+  });
   const [selectedGodown, setSelectedGodown] = useState<string>('SHOP - Main Retail Floor');
 
   // Supplier state

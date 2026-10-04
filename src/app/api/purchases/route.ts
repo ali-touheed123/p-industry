@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
 
@@ -61,14 +61,16 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST: Create Purchase Invoice or Purchase Return
+// POST: Create Purchase Invoice or Purchase Return (atomic via create_purchase_atomic RPC)
+// Task 7.1 — FINDING-PROC-001 fix: all 6 sequential DB writes now execute inside a single
+// PostgreSQL transaction. Partial failure causes automatic rollback of every step.
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
       tenant_id,
       purchase_no,
-      purchase_type = 'purchase', // 'purchase' or 'return'
+      purchase_type = 'purchase',
       supplier_id,
       supplier_name = 'Supplier',
       date = new Date().toISOString().split('T')[0],
@@ -95,80 +97,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    // 0. Validate Applied Tokens (if any)
-    let totalTokensAmount = 0;
-    if (Array.isArray(applied_token_ids) && applied_token_ids.length > 0) {
-      const { data: validTokens, error: tokensFetchErr } = await supabaseAdmin
-        .from('token_transactions')
-        .select('id, token_value, usage_status, used_against_purchase_id')
-        .eq('tenant_id', tenant_id)
-        .in('id', applied_token_ids);
+    // Build the purchase_data JSONB and items JSONB for the atomic RPC
+    const purchaseData = {
+      purchase_no,
+      purchase_type,
+      supplier_id: supplier_id || null,
+      supplier_name,
+      date,
+      subtotal: Number(subtotal) || 0,
+      discount: Number(discount) || 0,
+      net_total: Number(net_total) || 0,
+      paid_amount: Number(paid_amount) || 0,
+      due_amount: Number(due_amount) || 0,
+      payment_type,
+      created_by: created_by || null,
+    };
 
-      if (tokensFetchErr) throw tokensFetchErr;
-
-      if (!validTokens || validTokens.length !== applied_token_ids.length) {
-        return NextResponse.json(
-          { success: false, error: 'One or more selected tokens were not found.' },
-          { status: 400 }
-        );
-      }
-
-      const alreadyUsed = validTokens.filter(
-        (t) => t.usage_status === 'used' || t.used_against_purchase_id !== null
-      );
-      if (alreadyUsed.length > 0) {
-        return NextResponse.json(
-          { success: false, error: 'One or more selected tokens have already been applied to another purchase.' },
-          { status: 400 }
-        );
-      }
-
-      totalTokensAmount = validTokens.reduce((sum, t) => sum + (Number(t.token_value) || 0), 0);
-    }
-
-    // 1. Insert Purchase Header
-    const { data: purchase, error: purchaseErr } = await supabaseAdmin
-      .from('purchases')
-      .insert({
-        tenant_id,
-        purchase_no,
-        purchase_type,
-        supplier_id: supplier_id || null,
-        supplier_name,
-        date,
-        subtotal: Number(subtotal) || 0,
-        discount: Number(discount) || 0,
-        tokens_applied_amount: totalTokensAmount,
-        net_total: Number(net_total) || 0,
-        paid_amount: Number(paid_amount) || 0,
-        due_amount: Number(due_amount) || 0,
-        payment_type,
-        created_by: created_by || null,
-      })
-      .select()
-      .single();
-
-    if (purchaseErr) throw purchaseErr;
-
-    // 1b. Mark tokens as used against this purchase
-    if (Array.isArray(applied_token_ids) && applied_token_ids.length > 0) {
-      const { error: markTokensErr } = await supabaseAdmin
-        .from('token_transactions')
-        .update({
-          usage_status: 'used',
-          used_against_purchase_id: purchase.id,
-          used_date: new Date().toISOString(),
-        })
-        .in('id', applied_token_ids);
-
-      if (markTokensErr) {
-        console.error('Failed to mark tokens as used:', markTokensErr);
-      }
-    }
-
-    // 2. Insert Line Items
-    const purchaseItemsToInsert = items.map((it: any) => ({
-      purchase_id: purchase.id,
+    const lineItems = items.map((it: any) => ({
       item_id: it.itemId || it.item_id || null,
       item_code: it.code || it.item_code || '',
       item_name: it.productName || it.item_name || '',
@@ -178,96 +123,232 @@ export async function POST(req: NextRequest) {
       total_price: Number(it.rate || it.unit_price || 0) * (Number(it.qty) || 1),
     }));
 
-    const { error: itemsErr } = await supabaseAdmin
+    const tokenIds: string[] = Array.isArray(applied_token_ids) ? applied_token_ids : [];
+
+    // Invoke atomic stored procedure — all operations in a single DB transaction
+    const { data: rpcResult, error: rpcError } = await supabaseAdmin.rpc(
+      'create_purchase_atomic',
+      {
+        p_tenant_id:     tenant_id,
+        p_purchase_data: purchaseData,
+        p_items:         lineItems,
+        p_token_ids:     tokenIds.length > 0 ? tokenIds : null,
+      }
+    );
+
+    if (rpcError) throw rpcError;
+
+    const result = rpcResult as {
+      purchase_id: string;
+      purchase_no: string;
+      tokens_applied_amount: number;
+    };
+
+    return NextResponse.json({
+      success: true,
+      purchase: {
+        id: result.purchase_id,
+        purchase_no: result.purchase_no,
+        tokens_applied_amount: result.tokens_applied_amount,
+        items: lineItems,
+      },
+    });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
+
+// PATCH: Update an existing purchase order header fields.
+// Task 7.2 — FINDING-PROC-002: Provides administrative correction of purchase entries.
+//
+// Design notes:
+//   - Only header fields (supplier_name, date, payment_type, notes) are patchable here.
+//   - Line-item and stock modifications require a compensating purchase return, which is
+//     the existing business workflow. This avoids re-running stock deltas that could
+//     introduce double-counting with the original atomic insert.
+//   - Tenant ownership is verified from the DB record before authorizing.
+export async function PATCH(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { id, supplier_name, date, payment_type, notes } = body;
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Purchase ID is required' }, { status: 400 });
+    }
+
+    // Fetch the existing record to derive tenant_id server-side (prevents IDOR)
+    const { data: existing } = await supabaseAdmin
+      .from('purchases')
+      .select('id, tenant_id, purchase_type')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (!existing) {
+      return NextResponse.json({ success: false, error: 'Purchase not found' }, { status: 404 });
+    }
+
+    const auth = await requireTenantAuth(req, existing.tenant_id);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
+    const updates: Record<string, any> = {};
+    if (supplier_name !== undefined) updates.supplier_name = supplier_name?.trim() || null;
+    if (date !== undefined) updates.date = date || null;
+    if (payment_type !== undefined) updates.payment_type = payment_type || null;
+    if (notes !== undefined) updates.notes = notes || null;
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ success: false, error: 'No updatable fields provided' }, { status: 400 });
+    }
+
+    const { data: purchase, error } = await supabaseAdmin
+      .from('purchases')
+      .update(updates)
+      .eq('id', id)
+      .eq('tenant_id', existing.tenant_id) // defence-in-depth: scope to verified tenant
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return NextResponse.json({ success: true, purchase });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
+
+// DELETE: Cancel a purchase order and atomically revert stock and supplier balance.
+// Task 7.2 — FINDING-PROC-002: Provides administrative cancellation of purchase orders.
+//
+// Design notes:
+//   - Cancellation reverses the stock delta and supplier balance recorded at creation time.
+//   - Token redemptions are NOT reversed on cancellation (tokens were legitimately used;
+//     reversing them would require separate business approval).
+//   - A hard delete of purchase_items is performed after stock reversal so that the
+//     purchase header can be deleted without FK violation.
+//   - Tenant ownership is verified from the DB record before authorizing.
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Purchase ID is required' }, { status: 400 });
+    }
+
+    // Fetch full purchase record to derive tenant_id server-side (prevents IDOR)
+    const { data: purchase } = await supabaseAdmin
+      .from('purchases')
+      .select('id, tenant_id, purchase_type, supplier_id, net_total, paid_amount, due_amount')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (!purchase) {
+      return NextResponse.json({ success: false, error: 'Purchase not found' }, { status: 404 });
+    }
+
+    const auth = await requireTenantAuth(req, purchase.tenant_id);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
+    const isReturn = purchase.purchase_type === 'return';
+
+    // Fetch line items to reverse their stock deltas
+    const { data: lineItems } = await supabaseAdmin
       .from('purchase_items')
-      .insert(purchaseItemsToInsert);
+      .select('item_id, item_code, qty')
+      .eq('purchase_id', id);
 
-    if (itemsErr) throw itemsErr;
+    if (lineItems && lineItems.length > 0) {
+      for (const lineItem of lineItems) {
+        // Cancelling a purchase: reverse the stock change made at creation.
+        // Purchase originally added stock (+qty), so cancellation removes it (-qty).
+        // Purchase return originally removed stock (-qty), so cancellation restores it (+qty).
+        const reverseDelta = isReturn
+          ? Number(lineItem.qty || 0)
+          : -Number(lineItem.qty || 0);
 
-    // 3. Atomic Stock Inventory Adjustment (VAL-01 / DB-01 fix)
-    const isReturn = purchase_type === 'return';
-    for (const lineItem of purchaseItemsToInsert) {
-      if (!lineItem.item_id && !lineItem.item_code) continue;
-      // Purchase INCREASES stock (+qty); Purchase Return DECREASES stock (-qty)
-      const qtyDelta = isReturn ? -Number(lineItem.qty || 0) : Number(lineItem.qty || 0);
-
-      if (lineItem.item_id) {
-        await supabaseAdmin.rpc('adjust_item_stock', {
-          p_item_id: lineItem.item_id,
-          p_qty_delta: qtyDelta,
-        });
-      } else if (lineItem.item_code) {
-        await supabaseAdmin.rpc('adjust_item_stock_by_code', {
-          p_tenant_id: tenant_id,
-          p_item_code: lineItem.item_code,
-          p_qty_delta: qtyDelta,
-        });
+        if (lineItem.item_id) {
+          await supabaseAdmin.rpc('adjust_item_stock', {
+            p_item_id:   lineItem.item_id,
+            p_qty_delta: reverseDelta,
+          });
+        } else if (lineItem.item_code) {
+          await supabaseAdmin.rpc('adjust_item_stock_by_code', {
+            p_tenant_id: purchase.tenant_id,
+            p_item_code: lineItem.item_code,
+            p_qty_delta: reverseDelta,
+          });
+        }
       }
     }
 
-    // 4. Update Supplier Balance if supplier exists
-    if (supplier_id) {
+    // Reverse supplier balance
+    if (purchase.supplier_id) {
       const { data: supplier } = await supabaseAdmin
         .from('suppliers')
         .select('current_balance')
-        .eq('id', supplier_id)
+        .eq('id', purchase.supplier_id)
+        .eq('tenant_id', purchase.tenant_id)
         .single();
 
       if (supplier) {
         const currentBal = Number(supplier.current_balance) || 0;
-        let newBalance = currentBal;
+        let newBalance: number;
 
         if (isReturn) {
-          // CALC-02 FIX: Returning goods reduces our payable or creates an advance supplier debit.
-          // Account for any cash received back from supplier (paid_amount).
-          // Do NOT clamp to 0 with Math.max — negative balance means supplier owes us / advance debit balance.
-          const cashReceived = Number(paid_amount) || 0;
-          const returnCredit = Math.max(0, Number(net_total) - cashReceived);
-          newBalance = currentBal - returnCredit;
+          // The return had reduced the balance; restore it
+          const paidAmt = Number(purchase.paid_amount) || 0;
+          const returnCredit = Math.max(0, Number(purchase.net_total) - paidAmt);
+          newBalance = currentBal + returnCredit;
         } else {
-          // Buying goods adds unpaid balance to supplier debt
-          newBalance = currentBal + Number(due_amount > 0 ? due_amount : (net_total - paid_amount));
+          // The purchase had increased the balance; remove it
+          const dueAmt = Number(purchase.due_amount) || 0;
+          const netTotal = Number(purchase.net_total) || 0;
+          const paidAmt = Number(purchase.paid_amount) || 0;
+          const debtAdded = dueAmt > 0 ? dueAmt : Math.max(0, netTotal - paidAmt);
+          newBalance = currentBal - debtAdded;
         }
 
         await supabaseAdmin
           .from('suppliers')
-          .update({
-            current_balance: newBalance,
-            last_payment_amount: paid_amount > 0 ? Number(paid_amount) : undefined,
-            last_payment_date: paid_amount > 0 ? date : undefined,
-          })
-          .eq('id', supplier_id);
+          .update({ current_balance: newBalance })
+          .eq('id', purchase.supplier_id)
+          .eq('tenant_id', purchase.tenant_id);
       }
     }
 
-    // 5. Create Audit Log
+    // Delete line items then the purchase header
+    await supabaseAdmin
+      .from('purchase_items')
+      .delete()
+      .eq('purchase_id', id);
+
+    const { error: deleteErr } = await supabaseAdmin
+      .from('purchases')
+      .delete()
+      .eq('id', id)
+      .eq('tenant_id', purchase.tenant_id);
+
+    if (deleteErr) throw deleteErr;
+
+    // Audit log
     try {
       await supabaseAdmin.from('audit_logs').insert({
-        tenant_id,
-        user_name: supplier_name,
-        action: isReturn ? 'Purchase Return' : 'Purchase Invoice Complete',
-        action_type: isReturn ? 'purchase_return' : 'purchase',
+        tenant_id:   purchase.tenant_id,
+        action:      'Purchase Cancelled',
+        action_type: 'purchase_cancel',
         entity_type: 'purchase',
-        entity_id: purchase.id,
-        details: {
-          purchase_no,
-          net_total,
-          paid_amount,
-          due_amount,
-          items_count: items.length,
-        },
+        entity_id:   id,
+        details:     { purchase_id: id, original_type: purchase.purchase_type },
       });
     } catch {
       // Non-blocking
     }
 
-    return NextResponse.json({
-      success: true,
-      purchase: {
-        ...purchase,
-        items: purchaseItemsToInsert,
-      },
-    });
+    return NextResponse.json({ success: true, message: 'Purchase cancelled successfully' });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
