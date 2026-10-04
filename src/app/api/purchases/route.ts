@@ -8,6 +8,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const tenantId = searchParams.get('tenant_id');
     const type = searchParams.get('type');
+    const paymentType = searchParams.get('payment_type');
     const shiftId = searchParams.get('shift_id');
     const startDate = searchParams.get('start_date');
     const limit = parseInt(searchParams.get('limit') || '200', 10);
@@ -28,7 +29,7 @@ export async function GET(req: NextRequest) {
       .order('created_at', { ascending: false })
       .limit(limit);
 
-    // Scope purchases to a specific shift's time window
+    // Scope purchases to a specific shift (directly by shift_id, with fallback to time window for legacy records)
     if (shiftId) {
       const { data: shift } = await supabaseAdmin
         .from('shifts')
@@ -37,10 +38,13 @@ export async function GET(req: NextRequest) {
         .single();
 
       if (shift?.start_time) {
-        query = query.gte('created_at', shift.start_time);
         if (shift.end_time && shift.status === 'closed') {
-          query = query.lte('created_at', shift.end_time);
+          query = query.or(`shift_id.eq.${shiftId},and(shift_id.is.null,created_at.gte.${shift.start_time},created_at.lte.${shift.end_time})`);
+        } else {
+          query = query.or(`shift_id.eq.${shiftId},and(shift_id.is.null,created_at.gte.${shift.start_time})`);
         }
+      } else {
+        query = query.eq('shift_id', shiftId);
       }
     } else if (startDate) {
       // Fallback: scope to a specific date
@@ -50,6 +54,10 @@ export async function GET(req: NextRequest) {
 
     if (type && type !== 'all') {
       query = query.eq('purchase_type', type);
+    }
+
+    if (paymentType && paymentType !== 'all') {
+      query = query.eq('payment_type', paymentType);
     }
 
     const { data: purchases, error } = await query;
@@ -81,6 +89,7 @@ export async function POST(req: NextRequest) {
       due_amount = 0,
       payment_type = 'credit',
       created_by,
+      shift_id,
       items = [],
       applied_token_ids = [],
     } = body;
@@ -111,6 +120,7 @@ export async function POST(req: NextRequest) {
       due_amount: Number(due_amount) || 0,
       payment_type,
       created_by: created_by || null,
+      shift_id: shift_id || null,
     };
 
     const lineItems = items.map((it: any) => ({

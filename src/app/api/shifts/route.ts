@@ -83,8 +83,9 @@ export async function GET(req: NextRequest) {
           if (prevShift) {
             const { data: prevInvoices } = await supabaseAdmin
               .from('invoices')
-              .select('net_total, invoice_type')
-              .eq('shift_id', prevShift.id);
+              .select('net_total, invoice_type, status')
+              .eq('shift_id', prevShift.id)
+              .neq('status', 'cancelled');
 
             let prevNetSales = 0;
             if (prevInvoices && prevInvoices.length > 0) {
@@ -251,12 +252,13 @@ export async function PATCH(req: NextRequest) {
         const tenantId = shiftRecord.data.tenant_id;
         const startTime = shiftRecord.data.start_time || new Date().toISOString().split('T')[0] + 'T00:00:00';
 
-        // Sum cash received and cash returned: invoices linked to this shift
+        // Sum cash received and cash returned: invoices linked to this shift (excluding cancelled)
         const { data: shiftInvoices } = await supabaseAdmin
           .from('invoices')
-          .select('net_total, paid_amount, cash_paid, payment_type, invoice_type')
+          .select('net_total, paid_amount, cash_paid, payment_type, invoice_type, status')
           .eq('shift_id', id)
-          .eq('tenant_id', tenantId);
+          .eq('tenant_id', tenantId)
+          .neq('status', 'cancelled');
 
         let cashIn = 0;
         let cashReturns = 0;
@@ -280,16 +282,20 @@ export async function PATCH(req: NextRequest) {
         let supplierCashPaid = 0;
         const { data: shiftPurchases } = await supabaseAdmin
           .from('purchases')
-          .select('net_total, paid_amount, payment_type, purchase_type')
+          .select('net_total, paid_amount, payment_type, purchase_type, shift_id, created_at')
           .eq('tenant_id', tenantId)
-          .gte('created_at', startTime);
+          .or(`shift_id.eq.${id},and(shift_id.is.null,created_at.gte.${startTime})`);
 
         if (shiftPurchases) {
           shiftPurchases.forEach((p: any) => {
             if ((p.purchase_type || 'purchase') === 'return') return;
             const pt = (p.payment_type || '').toLowerCase();
-            const paid = Number(p.paid_amount || (pt === 'cash' ? p.net_total : 0) || 0);
-            supplierCashPaid += paid;
+            if (pt === 'cash') {
+              const paid = Number(p.paid_amount || p.net_total || 0);
+              supplierCashPaid += paid;
+            } else if (Number(p.paid_amount || 0) > 0 && pt.includes('cash')) {
+              supplierCashPaid += Number(p.paid_amount);
+            }
           });
         }
 

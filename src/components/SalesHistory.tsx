@@ -24,6 +24,7 @@ import {
   RefreshCw,
   Share2,
   X,
+  XCircle,
   User,
   ShoppingBag,
   Ticket,
@@ -34,6 +35,7 @@ import {
   MessageCircle,
 } from 'lucide-react';
 import { generateReceiptImageBlob } from '@/utils/receiptCanvas';
+import { calculateSalesSummary } from '@/utils/salesMath';
 
 /** UX-01: Build an 80mm thermal receipt as a plain HTML string for iframe printing.
  * Applies footer/branding from assigned template when available (DEV-07). */
@@ -191,6 +193,11 @@ export default function SalesHistory({
   const [loadingTokens, setLoadingTokens] = useState<boolean>(false);
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
 
+  // Task 9.7: Cursor-based pagination state
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState<boolean>(false);
+  const [loadingMore, setLoadingMore] = useState<boolean>(false);
+
   // Selected Invoice Modal / Print
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [thermalPrintInvoice, setThermalPrintInvoice] = useState<Invoice | null>(null);
@@ -211,6 +218,38 @@ export default function SalesHistory({
   // Assigned receipt template for this branch (DEV-07)
   const [assignedTemplate, setAssignedTemplate] = useState<ReceiptTemplate | null>(null);
 
+  // Task 9.6: Invoice cancellation state
+  const [cancelModal, setCancelModal] = useState<{ invoice: Invoice } | null>(null);
+  const [cancelReason, setCancelReason] = useState<string>('');
+  const [isCancelling, setIsCancelling] = useState<boolean>(false);
+
+  const handleCancelInvoice = async () => {
+    if (!cancelModal) return;
+    const reason = cancelReason.trim();
+    if (!reason) {
+      alert('Cancellation reason is required.');
+      return;
+    }
+    setIsCancelling(true);
+    try {
+      const inv = cancelModal.invoice;
+      const url = `/api/invoices?id=${inv.id}&tenant_id=${tenantId}&reason=${encodeURIComponent(reason)}`;
+      const res = await fetch(url, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        setCancelModal(null);
+        setCancelReason('');
+        await fetchInvoices();
+      } else {
+        alert(`Failed to cancel invoice: ${data.error || 'Unknown error'}`);
+      }
+    } catch (err: any) {
+      alert(`Network error: ${err.message}`);
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
   // Helper: Strictly Registered Customer Check (Excludes Walk-in)
   const isRegisteredCustomer = (inv: Invoice | null | undefined): boolean => {
     if (!inv) return false;
@@ -223,12 +262,12 @@ export default function SalesHistory({
     return false;
   };
 
-  // Fetch Invoices from Backend
+  // Fetch Invoices from Backend (Task 9.7: cursor-based pagination)
   const fetchInvoices = async () => {
     if (!tenantId) return;
     setLoading(true);
     try {
-      let url = `/api/invoices?tenant_id=${tenantId}&limit=500`;
+      let url = `/api/invoices?tenant_id=${tenantId}&limit=100`;
       if (startDate && activeDatePreset !== 'all') {
         url += `&start_date=${startDate}`;
       }
@@ -246,14 +285,61 @@ export default function SalesHistory({
       const data = await res.json();
       if (data.success) {
         setInvoices(data.invoices || []);
+        const next = data.next_cursor || data.pagination?.next_cursor || null;
+        setNextCursor(next);
+        setHasMore(Boolean(data.pagination?.has_more ?? (next !== null)));
       } else {
         setInvoices([]);
+        setNextCursor(null);
+        setHasMore(false);
       }
     } catch (err) {
       console.error('Failed to fetch sales invoices', err);
       setInvoices([]);
+      setNextCursor(null);
+      setHasMore(false);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Task 9.7: Load More Invoices
+  const handleLoadMore = async () => {
+    if (!tenantId || !nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      let url = `/api/invoices?tenant_id=${tenantId}&limit=100&cursor=${encodeURIComponent(nextCursor)}`;
+      if (startDate && activeDatePreset !== 'all') {
+        url += `&start_date=${startDate}`;
+      }
+      if (endDate && activeDatePreset !== 'all') {
+        url += `&end_date=${endDate}`;
+      }
+      if (typeFilter === 'sales' || typeFilter === 'return') {
+        url += `&type=${typeFilter}`;
+      }
+      if (paymentFilter !== 'all') {
+        url += `&payment_type=${paymentFilter}`;
+      }
+
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.invoices)) {
+        setInvoices(prev => {
+          const existingIds = new Set(prev.map(i => i.id));
+          const newInvs = data.invoices.filter((i: any) => !existingIds.has(i.id));
+          return [...prev, ...newInvs];
+        });
+        const next = data.next_cursor || data.pagination?.next_cursor || null;
+        setNextCursor(next);
+        setHasMore(Boolean(data.pagination?.has_more ?? (next !== null)));
+      } else {
+        setHasMore(false);
+      }
+    } catch (err) {
+      console.error('Failed to load more invoices', err);
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -434,84 +520,13 @@ export default function SalesHistory({
     return list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [filteredInvoices, filteredTokenRedemptions, typeFilter, paymentFilter]);
 
-  // Summary Metrics Calculation — Disaggregated Payment Tenders (BUG-04)
+  // Summary Metrics Calculation — Task 9.5: Standardized finance math via salesMath
+  // Task 9.1: Cancelled invoices are excluded from all metric totals
   const summaryMetrics = useMemo(() => {
-    let grossSales = 0;
-    let returnsTotal = 0;
-    let netSales = 0;
-    let physicalCash = 0;
-    let digitalPaid = 0;
-    let tokensOtherPaid = 0;
-    let creditAmount = 0;
-    let totalItemsCount = 0;
-    let completedCount = 0;
-    let returnCount = 0;
-
-    filteredInvoices.forEach((inv) => {
-      const isRet = inv.invoice_type === 'return';
-      const net = Number(inv.net_total || 0);
-      const paid = Number(inv.paid_amount || 0);
-      const due = Number(inv.due_amount || 0);
-
-      // Extract tender amounts
-      let invCash = Number(inv.cash_paid || 0);
-      let invCard = Number(inv.card_paid || 0);
-      let invBank = Number(inv.bank_paid || 0);
-      let invOthers = Number(inv.others_paid || 0);
-
-      // Fallback for single tender invoices where split columns are 0 but paid_amount is present
-      if (invCash === 0 && invCard === 0 && invBank === 0 && invOthers === 0 && paid > 0) {
-        const pt = (inv.payment_type as string)?.toLowerCase();
-        if (pt === 'card') {
-          invCard = paid;
-        } else if (pt === 'bank') {
-          invBank = paid;
-        } else if (pt === 'cheque' || pt === 'others') {
-          invOthers = paid;
-        } else {
-          invCash = paid;
-        }
-      }
-
-      if (isRet) {
-        returnsTotal += net;
-        returnCount += 1;
-        // Sales returns reduce cash/digital according to how the refund was tendered
-        physicalCash -= invCash;
-        digitalPaid -= (invCard + invBank);
-      } else {
-        grossSales += net;
-        completedCount += 1;
-        physicalCash += invCash;
-        digitalPaid += (invCard + invBank);
-        tokensOtherPaid += invOthers;
-        creditAmount += due;
-      }
-
-      const invItems = inv.invoice_items || inv.items;
-      if (invItems && invItems.length) {
-        invItems.forEach((it) => {
-          totalItemsCount += Number(it.qty || 0);
-        });
-      }
-    });
-
-    netSales = grossSales - returnsTotal;
-    const avgTicket = completedCount > 0 ? Math.round(grossSales / completedCount) : 0;
-
+    const summary = calculateSalesSummary(filteredInvoices);
     return {
-      grossSales,
-      returnsTotal,
-      netSales,
-      physicalCash,
-      digitalPaid,
-      tokensOtherPaid,
-      creditAmount,
-      totalItemsCount,
-      completedCount,
-      returnCount,
+      ...summary,
       totalInvoices: filteredInvoices.length,
-      avgTicket,
     };
   }, [filteredInvoices]);
 
@@ -1764,17 +1779,21 @@ export default function SalesHistory({
                                 textTransform: 'uppercase',
                                 background: isReturn
                                   ? '#FEE2E2'
+                                  : (inv.status || '').toLowerCase() === 'cancelled'
+                                  ? '#F1F5F9'
                                   : Number(inv.due_amount) > 0
                                   ? '#FEF3C7'
                                   : '#DCFCE7',
                                 color: isReturn
                                   ? '#991B1B'
+                                  : (inv.status || '').toLowerCase() === 'cancelled'
+                                  ? '#64748B'
                                   : Number(inv.due_amount) > 0
                                   ? '#92400E'
                                   : '#166534',
                               }}
                             >
-                              {isReturn ? 'RETURN' : Number(inv.due_amount) > 0 ? 'DUE' : 'PAID'}
+                              {isReturn ? 'RETURN' : (inv.status || '').toLowerCase() === 'cancelled' ? 'CANCELLED' : Number(inv.due_amount) > 0 ? 'DUE' : 'PAID'}
                             </span>
                           </td>
 
@@ -1856,6 +1875,26 @@ export default function SalesHistory({
                                 >
                                   <ShoppingBag style={{ width: 13, height: 13 }} />
                                   <span>POS Edit</span>
+                                </button>
+                              )}
+
+                              {/* Task 9.6: Cancel/Void Invoice button (only for active, non-return invoices) */}
+                              {!isReturn && (inv.status || '').toLowerCase() !== 'cancelled' && (
+                                <button
+                                  type="button"
+                                  onClick={() => { setCancelModal({ invoice: inv }); setCancelReason(''); }}
+                                  title="Cancel / Void Invoice"
+                                  style={{
+                                    padding: '5px',
+                                    background: '#FEE2E2',
+                                    color: '#DC2626',
+                                    border: '1px solid #FECACA',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                  }}
+                                >
+                                  <XCircle style={{ width: 14, height: 14 }} />
                                 </button>
                               )}
                             </div>
@@ -1969,6 +2008,59 @@ export default function SalesHistory({
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* Task 9.7: Pagination Controls */}
+          {!loading && combinedRows.length > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '12px 16px',
+                borderTop: '1px solid #E2E8F0',
+                background: '#F8FAFC',
+                borderBottomLeftRadius: '10px',
+                borderBottomRightRadius: '10px',
+              }}
+            >
+              <div style={{ fontSize: '12px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
+                Showing <strong>{combinedRows.length}</strong> records{hasMore ? ' (more records available on server)' : ''}
+              </div>
+              {hasMore && (
+                <button
+                  type="button"
+                  onClick={handleLoadMore}
+                  disabled={loadingMore}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '6px 14px',
+                    background: '#FFFFFF',
+                    border: '1px solid #CBD5E1',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    color: '#0F172A',
+                    cursor: loadingMore ? 'wait' : 'pointer',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                  }}
+                >
+                  {loadingMore ? (
+                    <>
+                      <RefreshCw style={{ width: 13, height: 13, animation: 'spin 1s linear infinite' }} />
+                      Loading...
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown style={{ width: 14, height: 14 }} />
+                      Load More Invoices
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -2748,6 +2840,87 @@ export default function SalesHistory({
                 }}
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Task 9.6: Cancel Invoice Confirmation Modal */}
+      {cancelModal && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 9999,
+          }}
+          onClick={() => { if (!isCancelling) setCancelModal(null); }}
+        >
+          <div
+            style={{
+              background: '#FFFFFF', borderRadius: '14px', padding: '28px',
+              width: '460px', maxWidth: '95vw', boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+              <div style={{ background: '#FEE2E2', borderRadius: '8px', padding: '8px', display: 'flex' }}>
+                <XCircle style={{ width: 20, height: 20, color: '#DC2626' }} />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '15px', fontWeight: 800, color: '#0F172A', margin: 0 }}>
+                  Cancel / Void Invoice
+                </h3>
+                <p style={{ fontSize: '12px', color: '#64748B', margin: 0 }}>
+                  {cancelModal.invoice.invoice_no} — Rs. {Number(cancelModal.invoice.net_total || 0).toLocaleString()}
+                </p>
+              </div>
+            </div>
+            <p style={{ fontSize: '13px', color: '#475569', marginBottom: '16px', lineHeight: 1.5 }}>
+              This will permanently cancel the invoice. Stock adjustments, client balance, and token
+              applications will be reversed atomically. <strong>This action cannot be undone.</strong>
+            </p>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px' }}>
+              Cancellation Reason <span style={{ color: '#DC2626' }}>*</span>
+            </label>
+            <textarea
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="e.g. Customer requested cancellation, duplicate entry, data entry error..."
+              rows={3}
+              style={{
+                width: '100%', borderRadius: '8px', border: '1.5px solid #CBD5E1',
+                padding: '8px 12px', fontSize: '13px', color: '#0F172A',
+                outline: 'none', resize: 'vertical', fontFamily: 'inherit',
+                boxSizing: 'border-box',
+              }}
+              disabled={isCancelling}
+            />
+            <div style={{ display: 'flex', gap: '10px', marginTop: '18px', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => setCancelModal(null)}
+                disabled={isCancelling}
+                style={{
+                  padding: '8px 16px', background: '#F1F5F9', color: '#334155',
+                  border: '1px solid #CBD5E1', borderRadius: '8px', fontSize: '13px',
+                  fontWeight: 700, cursor: 'pointer',
+                }}
+              >
+                Keep Invoice
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelInvoice}
+                disabled={isCancelling || !cancelReason.trim()}
+                style={{
+                  padding: '8px 20px',
+                  background: isCancelling || !cancelReason.trim() ? '#FCA5A5' : '#DC2626',
+                  color: '#FFFFFF', border: 'none', borderRadius: '8px',
+                  fontSize: '13px', fontWeight: 700,
+                  cursor: isCancelling || !cancelReason.trim() ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {isCancelling ? 'Cancelling…' : 'Confirm Cancel'}
               </button>
             </div>
           </div>

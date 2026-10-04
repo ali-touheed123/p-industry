@@ -80,6 +80,7 @@ export async function GET(req: NextRequest) {
         .select('*, invoice_items(*)')
         .eq('tenant_id', tenantId)
         .eq('client_id', partyId)
+        .neq('status', 'cancelled')
         .order('created_at', { ascending: true });
 
       if (invErr) throw invErr;

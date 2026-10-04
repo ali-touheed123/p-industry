@@ -5,6 +5,13 @@ import { Branch, Invoice } from '@/types/ceo';
 import { formatCurrency } from '@/data/ceoMockData';
 import { TrendingUp, BarChart3, Calendar, FileText } from 'lucide-react';
 import { DatePeriodFilter } from './DatePeriodFilter';
+import {
+  calculateGrossSales,
+  calculateDiscounts,
+  calculateSalesReturns,
+  calculateNetSales,
+  isReturnInvoice,
+} from '@/utils/salesMath';
 
 interface OverviewViewProps {
   branch: Branch;
@@ -61,9 +68,11 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
       setLoading(true);
 
       try {
-        // 1. Fetch Invoices
+        // 1. Fetch Invoices — Task 9.7: bound to the visible date window
         try {
-          const invRes = await fetch(`/api/invoices?tenant_id=${tenantId}`);
+          const invRes = await fetch(
+            `/api/invoices?tenant_id=${tenantId}&start_date=${fromDate}&end_date=${toDate}&limit=5000`
+          );
           const invData = await invRes.json();
           if (isMounted && invData.success && invData.invoices) {
             setInvoices(invData.invoices);
@@ -72,9 +81,11 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
           console.error('Failed to load invoices for overview', err);
         }
 
-        // 2. Fetch Expenses
+        // 2. Fetch Expenses — Task 9.7: bound to the visible date window
         try {
-          const expRes = await fetch(`/api/expenses?tenant_id=${tenantId}`);
+          const expRes = await fetch(
+            `/api/expenses?tenant_id=${tenantId}&start_date=${fromDate}&end_date=${toDate}`
+          );
           const expData = await expRes.json();
           if (isMounted && expData.success && expData.expenses) {
             setExpensesList(expData.expenses);
@@ -119,7 +130,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
     return () => {
       isMounted = false;
     };
-  }, [branch?.id, branch?.slug, refreshTick]);
+  }, [branch?.id, branch?.slug, refreshTick, fromDate, toDate]);
 
   const allDailyRecords = useMemo(() => {
     if (!invoices || invoices.length === 0) return [];
@@ -134,8 +145,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
       expensesByDate[d] = (expensesByDate[d] || 0) + Number(exp.amount || 0);
     });
 
-    // Group invoices by date
+    // Group invoices by date (Task 9.1: exclude cancelled/voided)
     invoices.forEach((inv) => {
+      if ((inv.status || '').toLowerCase() === 'cancelled') return;
       const d = inv.date || (inv.created_at ? inv.created_at.split('T')[0] : todayIso);
       if (!groups[d]) groups[d] = [];
       groups[d].push(inv);
@@ -155,14 +167,13 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
         const dayName = isNaN(dateObj.getTime()) ? '' : dayNames[dateObj.getDay()];
 
         const salesInvs = dayInvs.filter((i) => (i.invoice_type || 'sales') !== 'return');
-        const returnInvs = dayInvs.filter((i) => (i.invoice_type || 'sales') === 'return');
+        const returnInvs = dayInvs.filter(isReturnInvoice);
 
-        // grossSales = pre-discount subtotal of all forward invoices
-        const grossSales = salesInvs.reduce((sum, i) => sum + Number(i.subtotal || i.net_total || 0), 0);
-        const returnTotal = returnInvs.reduce((sum, i) => sum + Number(i.net_total || 0), 0);
-        // Include delivery charges and deductions via net_total
-        const discounts = salesInvs.reduce((sum, i) => sum + Number(i.discount || 0), 0);
-        const netSales = Math.max(0, salesInvs.reduce((s, i) => s + Number(i.net_total || 0), 0) - returnTotal);
+        // Task 9.5: Standardized sales formulas from salesMath
+        const grossSales = calculateGrossSales(dayInvs);
+        const returnTotal = calculateSalesReturns(dayInvs);
+        const discounts = calculateDiscounts(dayInvs);
+        const netSales = calculateNetSales(dayInvs);
 
         // Real COGS calculation based on items sold
         let calculatedCogs = 0;

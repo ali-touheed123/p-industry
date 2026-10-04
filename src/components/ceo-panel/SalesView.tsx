@@ -6,6 +6,7 @@ import { formatCurrency } from '@/data/ceoMockData';
 import { Search, ChevronRight } from 'lucide-react';
 import { InvoiceDetailModal } from './InvoiceDetailModal';
 import { DatePeriodFilter } from './DatePeriodFilter';
+import { calculateSalesSummary } from '@/utils/salesMath';
 
 interface SalesViewProps {
   branch: Branch;
@@ -128,55 +129,33 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
   }, [invoices, paymentFilter, searchQuery, startDate, endDate]);
 
   const stats = useMemo(() => {
-    // Exclude return invoices from financial summaries — all non-return sales count as forward sales
-    const forwardSales = filteredInvoices.filter((inv) => {
-      const st = (inv.status || '').toLowerCase();
-      return st !== 'return' && st !== 'returned' && st !== 'cancelled' && st !== 'void';
-    });
-    const returnInvoices = filteredInvoices.filter((inv) => {
-      const st = (inv.status || '').toLowerCase();
-      return st === 'return' || st === 'returned' || st === 'partial return';
-    });
+    // Task 9.5: Convert to InvoiceLike format and use standardized salesMath
+    const invoiceLikes = filteredInvoices.map((inv) => ({
+      status: inv.status,
+      invoice_type: (inv.status || '').toLowerCase() === 'return' ? 'return' : 'sales',
+      subtotal: inv.grossAmount,
+      net_total: inv.netAmount,
+      discount: inv.discountAmount,
+      paid_amount: inv.paidAmount,
+      due_amount: inv.dueAmount,
+      cash_paid: inv.cashPaid,
+      card_paid: inv.cardPaid,
+      bank_paid: inv.bankPaid,
+      others_paid: inv.othersPaid,
+      items: inv.items,
+    }));
 
-    const netSales = forwardSales.reduce((acc, inv) => acc + inv.netAmount, 0);
-    // FIX CEO-07: cashInflow now uses actual cash_paid field so split invoices
-    // don't inflate the cash figure with their full netAmount
-    const cashInflow = forwardSales.reduce((acc, inv) => {
-      const cp = Number(inv.cashPaid || 0);
-      if (cp > 0) return acc + cp;
-      // Only count full amount as cash if explicitly a pure Cash invoice
-      if (inv.paymentMode === 'Cash') return acc + inv.netAmount;
-      return acc;
-    }, 0);
-    // Bank/Card inflow: sum card_paid + bank_paid across all forward sales
-    const bankCardInflow = forwardSales.reduce((acc, inv) => {
-      const card = Number(inv.cardPaid || 0);
-      const bank = Number(inv.bankPaid || 0);
-      if (card > 0 || bank > 0) return acc + card + bank;
-      if (inv.paymentMode === 'Bank/Card') return acc + inv.netAmount;
-      return acc;
-    }, 0);
-    const creditUdhaar = forwardSales.reduce((acc, inv) => {
-      const due = Number(inv.dueAmount || 0);
-      if (due > 0) return acc + due;
-      if (inv.paymentMode === 'Credit') return acc + inv.netAmount;
-      return acc;
-    }, 0);
-    const totalUnits = forwardSales.reduce(
-      (acc, inv) => acc + (inv.items && inv.items.length > 0 ? inv.items.reduce((s, it) => s + (Number(it.qty) || 1), 0) : (inv.itemsCount || 1)),
-      0
-    );
-    const totalReturnsValue = returnInvoices.reduce((acc, inv) => acc + inv.netAmount, 0);
+    const summary = calculateSalesSummary(invoiceLikes);
 
     return {
-      netSales,
-      cashInflow,
-      bankCardInflow,
-      creditUdhaar,
-      totalUnits,
-      completedCount: forwardSales.length,
-      returnsCount: returnInvoices.length,
-      totalReturnsValue,
+      netSales: summary.netSales,
+      cashInflow: summary.physicalCash,
+      bankCardInflow: summary.digitalPaid,
+      creditUdhaar: summary.creditAmount,
+      totalUnits: summary.totalItemsCount,
+      completedCount: summary.completedCount,
+      returnsCount: summary.returnCount,
+      totalReturnsValue: summary.returnsTotal,
     };
   }, [filteredInvoices]);
 

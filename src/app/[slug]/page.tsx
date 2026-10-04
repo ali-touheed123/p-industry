@@ -713,6 +713,7 @@ export default function TenantAppPage({ params }: PageProps) {
               onStockUpdated={refreshItems}
               pendingOrdersCount={pendingOrdersCount}
               onNavigateToOrders={() => setActiveTab('orders')}
+              shiftId={activeShift?.id || null}
             />
           )}
           {activeTab === 'sales' && (

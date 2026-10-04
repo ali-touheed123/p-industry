@@ -107,10 +107,12 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
             );
 
             // Match invoices: prefer shift_id; date fallback only when sole shift on that day
-            const shiftInvoices = allInvoices.filter((i: any) =>
-              (i.shift_id && i.shift_id === s.id) ||
-              (!i.shift_id && isOnlyShiftOnDay && (i.date === shiftDate || i.created_at?.split('T')[0] === shiftDate))
-            );
+            // Task 9.1: exclude cancelled invoices from all shift reconciliation
+            const shiftInvoices = allInvoices.filter((i: any) => {
+              if ((i.status || '').toLowerCase() === 'cancelled') return false;
+              return (i.shift_id && i.shift_id === s.id) ||
+                (!i.shift_id && isOnlyShiftOnDay && (i.date === shiftDate || i.created_at?.split('T')[0] === shiftDate));
+            });
 
             // Match token transactions for this shift; same date-fallback guard
             const shiftTokens = allTokens.filter((t: any) =>
@@ -176,10 +178,19 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
 
             const totalExpensesAmt = shiftExpenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0);
 
+            // Task 9.3: For closed shifts, expected_cash from the server already includes supplier cash deduction
+            // (computed via PATCH /api/shifts which uses shift_id-scoped purchase filter).
+            // For open shifts, we use the client formula matching ShiftDrawer.tsx (no separate supplier lookup needed here).
+
             const openAmt = Number(s.opening_cash || 0);
             const closeAmt = isOpen ? 0 : Number(s.actual_cash !== undefined && s.actual_cash !== null ? s.actual_cash : openAmt);
-            // Fix #2: Fallback formula must match ShiftDrawer exactly (include cashReturns and tokensRedeemedAmt)
-            const expCash = Number(s.expected_cash !== undefined && s.expected_cash !== null && !isOpen ? s.expected_cash : Math.max(0, openAmt + cashSales - cashReturns - totalExpensesAmt - tokensRedeemedAmt));
+            // Task 9.2: Fix double return deduction — cashSales already subtracts cashReturns (lines 127-141).
+            // The fallback formula must NOT subtract cashReturns again.
+            // For closed shifts: use server-computed expected_cash (includes supplier cash deduction).
+            // For open shifts: use client formula (matches ShiftDrawer) with no double deduction.
+            const expCash = Number(s.expected_cash !== undefined && s.expected_cash !== null && !isOpen
+              ? s.expected_cash
+              : Math.max(0, openAmt + cashSales - totalExpensesAmt - tokensRedeemedAmt));
             const variance = isOpen ? 0 : (closeAmt - expCash);
             const varianceStatus: 'MATCHED' | 'SHORT' | 'EXCESS' =
               isOpen ? 'MATCHED' : (variance === 0 ? 'MATCHED' : (variance < 0 ? 'SHORT' : 'EXCESS'));

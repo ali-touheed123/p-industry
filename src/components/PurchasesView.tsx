@@ -40,6 +40,7 @@ interface PurchasesViewProps {
   onStockUpdated?: () => void;
   pendingOrdersCount?: number;
   onNavigateToOrders?: () => void;
+  shiftId?: string | null;
 }
 
 interface PurchaseLineItem {
@@ -107,6 +108,7 @@ export default function PurchasesView({
   onStockUpdated,
   pendingOrdersCount = 0,
   onNavigateToOrders,
+  shiftId = null,
 }: PurchasesViewProps) {
   // Mode toggle: Purchase Invoice vs Purchase Return
   const [purchaseType, setPurchaseType] = useState<'purchase' | 'return'>('purchase');
@@ -359,6 +361,7 @@ export default function PurchasesView({
           due_amount: Math.max(0, netBillValue - paidAmount),
           payment_type: paymentMode,
           created_by: staffName,
+          shift_id: shiftId || null,
           items: items,
           applied_token_ids: selectedTokenIds,
         }),

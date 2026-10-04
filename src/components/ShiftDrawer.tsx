@@ -201,8 +201,12 @@ export default function ShiftDrawer({
   // Dynamic Sales & Returns breakdown from live invoices (frozen to snapshot if closed)
   const openingCash = closedShiftSnapshot ? closedShiftSnapshot.openingCash : (shift?.opening_cash || 0);
   
-  const salesInvoices = activeInvoices.filter(i => (i.invoice_type || 'sales') !== 'return');
-  const returnInvoices = activeInvoices.filter(i => (i.invoice_type || 'sales') === 'return');
+  // Task 9.1: Exclude cancelled/voided invoices from reconciliation
+  const activeNonCancelledInvoices = activeInvoices.filter(
+    i => (i.status || '').toLowerCase() !== 'cancelled' && (i.status || '').toLowerCase() !== 'void'
+  );
+  const salesInvoices = activeNonCancelledInvoices.filter(i => (i.invoice_type || 'sales') !== 'return');
+  const returnInvoices = activeNonCancelledInvoices.filter(i => (i.invoice_type || 'sales') === 'return');
 
   const grossSales = salesInvoices.length > 0
     ? salesInvoices.reduce((s, i) => s + Number(i.grandTotal || i.net_total || 0), 0)
