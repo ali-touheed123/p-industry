@@ -85,6 +85,20 @@ const SHADE_COLOR_MAP: Record<string, string> = {
 
 
 
+function generatePurchaseInvoiceNo(): string {
+  const today = new Date();
+  const datePart = today.toISOString().slice(0, 10).replace(/-/g, '');
+  const randPart = Math.floor(0x1000 + Math.random() * 0xf000).toString(16).toUpperCase();
+  return `P-INV-${datePart}-${randPart}`;
+}
+
+function generatePoNumber(): string {
+  const today = new Date();
+  const datePart = today.toISOString().slice(0, 10).replace(/-/g, '');
+  const randPart = Math.floor(0x1000 + Math.random() * 0xf000).toString(16).toUpperCase();
+  return `PO-${datePart}-${randPart}`;
+}
+
 export default function PurchasesView({
   tenantId,
   tenantName = 'Karachi Branch',
@@ -100,26 +114,14 @@ export default function PurchasesView({
 
   // Record & Meta
   const [recordNo, setRecordNo] = useState<string>('01');
-  // Task 7.3 (FINDING-PROC-003): Use timestamp + 4 random hex digits.
-  // Format: P-INV-YYYYMMDD-XXXX gives ~65,536 unique values per day per branch,
-  // eliminating the collision risk of the previous 9,000-value random space.
-  const [purchaseInvNo, setPurchaseInvNo] = useState<string>(() => {
-    const today = new Date();
-    const datePart = today.toISOString().slice(0, 10).replace(/-/g, '');
-    const randPart = Math.floor(0x1000 + Math.random() * 0xf000).toString(16).toUpperCase();
-    return `P-INV-${datePart}-${randPart}`;
-  });
+  // Task 7.3 & Residual-002: Collision-resistant timestamp + 4 hex random digits (~61,440 space/day)
+  const [purchaseInvNo, setPurchaseInvNo] = useState<string>(generatePurchaseInvoiceNo);
   const [invoiceDate, setInvoiceDate] = useState<string>(
     () => new Date().toISOString().split('T')[0]
   );
   const [selectedCompany, setSelectedCompany] = useState<string>('');
-  // Task 7.3 (FINDING-PROC-003): Same collision-resistant scheme for PO number.
-  const [poNumber, setPoNumber] = useState<string>(() => {
-    const today = new Date();
-    const datePart = today.toISOString().slice(0, 10).replace(/-/g, '');
-    const randPart = Math.floor(0x1000 + Math.random() * 0xf000).toString(16).toUpperCase();
-    return `PO-${datePart}-${randPart}`;
-  });
+  // Task 7.3 & Residual-002: Collision-resistant PO identifier
+  const [poNumber, setPoNumber] = useState<string>(generatePoNumber);
   const [selectedGodown, setSelectedGodown] = useState<string>('SHOP - Main Retail Floor');
 
   // Supplier state
@@ -322,7 +324,8 @@ export default function PurchasesView({
   const handleNewPurchase = () => {
     const nextRecord = (parseInt(recordNo, 10) + 1).toString();
     setRecordNo(nextRecord);
-    setPurchaseInvNo(`P-INV-${1080 + parseInt(nextRecord, 10)}`);
+    setPurchaseInvNo(generatePurchaseInvoiceNo());
+    setPoNumber(generatePoNumber());
     setItems([]);
     setAdditionalDiscount(0);
     setCartageFreight(0);
@@ -547,7 +550,7 @@ export default function PurchasesView({
                 type="text"
                 value={purchaseInvNo}
                 onChange={(e) => setPurchaseInvNo(e.target.value)}
-                style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A', background: 'transparent', border: 'none', outline: 'none', width: '95px' }}
+                style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A', background: 'transparent', border: 'none', outline: 'none', width: '180px' }}
               />
             </div>
 

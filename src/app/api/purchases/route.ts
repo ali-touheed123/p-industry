@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
 
@@ -253,102 +253,24 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    const isReturn = purchase.purchase_type === 'return';
-
-    // Fetch line items to reverse their stock deltas
-    const { data: lineItems } = await supabaseAdmin
-      .from('purchase_items')
-      .select('item_id, item_code, qty')
-      .eq('purchase_id', id);
-
-    if (lineItems && lineItems.length > 0) {
-      for (const lineItem of lineItems) {
-        // Cancelling a purchase: reverse the stock change made at creation.
-        // Purchase originally added stock (+qty), so cancellation removes it (-qty).
-        // Purchase return originally removed stock (-qty), so cancellation restores it (+qty).
-        const reverseDelta = isReturn
-          ? Number(lineItem.qty || 0)
-          : -Number(lineItem.qty || 0);
-
-        if (lineItem.item_id) {
-          await supabaseAdmin.rpc('adjust_item_stock', {
-            p_item_id:   lineItem.item_id,
-            p_qty_delta: reverseDelta,
-          });
-        } else if (lineItem.item_code) {
-          await supabaseAdmin.rpc('adjust_item_stock_by_code', {
-            p_tenant_id: purchase.tenant_id,
-            p_item_code: lineItem.item_code,
-            p_qty_delta: reverseDelta,
-          });
-        }
+    // Task 7.2 Residual (RESIDUAL-PROC-001): Execute entire cancellation sequence inside
+    // a single atomic PostgreSQL transaction (cancel_purchase_atomic). If stock reversal,
+    // supplier balance rollback, or deletion fails, all changes are rolled back automatically.
+    const { data: cancelResult, error: cancelError } = await supabaseAdmin.rpc(
+      'cancel_purchase_atomic',
+      {
+        p_tenant_id: purchase.tenant_id,
+        p_purchase_id: id,
       }
-    }
+    );
 
-    // Reverse supplier balance
-    if (purchase.supplier_id) {
-      const { data: supplier } = await supabaseAdmin
-        .from('suppliers')
-        .select('current_balance')
-        .eq('id', purchase.supplier_id)
-        .eq('tenant_id', purchase.tenant_id)
-        .single();
+    if (cancelError) throw cancelError;
 
-      if (supplier) {
-        const currentBal = Number(supplier.current_balance) || 0;
-        let newBalance: number;
-
-        if (isReturn) {
-          // The return had reduced the balance; restore it
-          const paidAmt = Number(purchase.paid_amount) || 0;
-          const returnCredit = Math.max(0, Number(purchase.net_total) - paidAmt);
-          newBalance = currentBal + returnCredit;
-        } else {
-          // The purchase had increased the balance; remove it
-          const dueAmt = Number(purchase.due_amount) || 0;
-          const netTotal = Number(purchase.net_total) || 0;
-          const paidAmt = Number(purchase.paid_amount) || 0;
-          const debtAdded = dueAmt > 0 ? dueAmt : Math.max(0, netTotal - paidAmt);
-          newBalance = currentBal - debtAdded;
-        }
-
-        await supabaseAdmin
-          .from('suppliers')
-          .update({ current_balance: newBalance })
-          .eq('id', purchase.supplier_id)
-          .eq('tenant_id', purchase.tenant_id);
-      }
-    }
-
-    // Delete line items then the purchase header
-    await supabaseAdmin
-      .from('purchase_items')
-      .delete()
-      .eq('purchase_id', id);
-
-    const { error: deleteErr } = await supabaseAdmin
-      .from('purchases')
-      .delete()
-      .eq('id', id)
-      .eq('tenant_id', purchase.tenant_id);
-
-    if (deleteErr) throw deleteErr;
-
-    // Audit log
-    try {
-      await supabaseAdmin.from('audit_logs').insert({
-        tenant_id:   purchase.tenant_id,
-        action:      'Purchase Cancelled',
-        action_type: 'purchase_cancel',
-        entity_type: 'purchase',
-        entity_id:   id,
-        details:     { purchase_id: id, original_type: purchase.purchase_type },
-      });
-    } catch {
-      // Non-blocking
-    }
-
-    return NextResponse.json({ success: true, message: 'Purchase cancelled successfully' });
+    return NextResponse.json({
+      success: true,
+      message: 'Purchase cancelled successfully',
+      result: cancelResult,
+    });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

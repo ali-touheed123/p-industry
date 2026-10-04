@@ -1,4 +1,4 @@
-﻿-- Migration: 20261005_02_create_purchase_atomic.sql
+-- Migration: 20261005_02_create_purchase_atomic.sql
 -- Purpose: Task 7.1 — Encapsulate purchase creation in a single atomic PostgreSQL
 --          transaction to prevent partial-failure inventory/ledger desynchronization.
 -- Fixes: FINDING-PROC-001
@@ -166,22 +166,26 @@ BEGIN
 
     IF v_item_id IS NOT NULL THEN
       SELECT id, stock_qty INTO v_db_item
-        FROM items WHERE id = v_item_id FOR UPDATE;
-      IF FOUND THEN
-        UPDATE items
-           SET stock_qty = GREATEST(0, COALESCE(v_db_item.stock_qty, 0) + v_qty_delta)
-         WHERE id = v_item_id;
+        FROM items
+       WHERE id = v_item_id AND tenant_id = p_tenant_id
+         FOR UPDATE;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'Item with ID % not found for this tenant', v_item_id;
       END IF;
+      UPDATE items
+         SET stock_qty = GREATEST(0, COALESCE(v_db_item.stock_qty, 0) + v_qty_delta)
+       WHERE id = v_db_item.id AND tenant_id = p_tenant_id;
     ELSIF v_item_code IS NOT NULL AND trim(v_item_code) <> '' THEN
       SELECT id, stock_qty INTO v_db_item
         FROM items
        WHERE tenant_id = p_tenant_id AND code = v_item_code
          FOR UPDATE;
-      IF FOUND THEN
-        UPDATE items
-           SET stock_qty = GREATEST(0, COALESCE(v_db_item.stock_qty, 0) + v_qty_delta)
-         WHERE id = v_db_item.id;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'Item with code "%" not found for this tenant', v_item_code;
       END IF;
+      UPDATE items
+         SET stock_qty = GREATEST(0, COALESCE(v_db_item.stock_qty, 0) + v_qty_delta)
+       WHERE id = v_db_item.id AND tenant_id = p_tenant_id;
     END IF;
   END LOOP;
 
