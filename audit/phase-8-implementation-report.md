@@ -55,11 +55,13 @@ No out-of-scope refactoring was performed. No Phase 1–7 protections were alter
 - **Database Changes:**
   - Created function `create_voucher_atomic(UUID, JSONB, UUID[])`.
   - Granted execute privilege to `service_role`.
+  - Applied to Supabase project `ignspvajzblmsbertmmv` via `apply_migration`.
 - **API Changes:**
   - `POST /api/vouchers` now invokes `create_voucher_atomic` RPC.
 - **Verification:**
+  - Successfully deployed to Supabase database.
   - Static analysis confirmed all operations execute within a single transaction; runtime exceptions trigger an automatic engine rollback of all steps.
-- **Result:** COMPLETE.
+- **Result:** COMPLETE & DEPLOYED.
 
 ---
 
