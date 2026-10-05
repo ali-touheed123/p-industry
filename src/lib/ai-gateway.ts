@@ -3,10 +3,10 @@ import { supabaseAdmin } from '@/lib/supabase';
 
 // Gemini Pricing Rates (Per 1 Million Tokens)
 export const GEMINI_PRICING: Record<string, { inputPer1M: number; outputPer1M: number }> = {
-  'gemini-3.5-flash-lite': { inputPer1M: 0.075, outputPer1M: 0.30 },
+  'gemini-3.5-flash-lite': { inputPer1M: 0.30, outputPer1M: 2.50 },
   'gemini-2.0-flash': { inputPer1M: 0.10, outputPer1M: 0.40 },
   'gemini-1.5-flash': { inputPer1M: 0.075, outputPer1M: 0.30 },
-  default: { inputPer1M: 0.10, outputPer1M: 0.40 },
+  default: { inputPer1M: 0.30, outputPer1M: 2.50 },
 };
 
 export function calculateGeminiCost(model: string, inputTokens: number, outputTokens: number): number {
@@ -313,11 +313,21 @@ async function reserveQuota(
         return { allowed: true, ledgerId: newLedger.id, usage: quota };
       }
     }
-  } catch (e) {
-    // Fallthrough to memory
+  } catch (e: any) {
+    console.warn('[AI-GATEWAY] Database quota check encountered an error:', e?.message || e);
   }
 
-  // 3. Resilient In-Memory Reservation
+  // FINDING-AI-001: In production, fail-closed if database reservation is unavailable.
+  // In-memory counters reset on serverless instance restarts, allowing unlimited scans.
+  if (process.env.NODE_ENV === 'production') {
+    return {
+      allowed: false,
+      code: 'AI_GATEWAY_UNAVAILABLE',
+      error: 'AI service quota verification is temporarily unavailable. Please try again shortly.',
+    };
+  }
+
+  // 3. Resilient In-Memory Reservation (For local dev / testing environments only)
   const nowIso = new Date().toISOString();
   const ago1m = new Date(Date.now() - 60 * 1000).toISOString();
   const ago24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -325,6 +335,29 @@ async function reserveQuota(
 
   if (!memoryGlobalSettings.ai_enabled) {
     return { allowed: false, code: 'GLOBAL_AI_DISABLED', error: 'AI services are currently disabled globally by administrator.' };
+  }
+
+  // Global daily & monthly request caps
+  const global24hCount = memoryLedger.filter(
+    (r) => ['reserved', 'success', 'failed'].includes(r.status) && r.requested_at >= ago24h
+  ).length;
+  if (global24hCount >= memoryGlobalSettings.global_daily_request_cap) {
+    return { allowed: false, code: 'GLOBAL_DAILY_QUOTA_EXCEEDED', error: 'Global daily AI request limit reached.' };
+  }
+
+  const global30dCount = memoryLedger.filter(
+    (r) => ['reserved', 'success', 'failed'].includes(r.status) && r.requested_at >= ago30d
+  ).length;
+  if (global30dCount >= memoryGlobalSettings.global_monthly_request_cap) {
+    return { allowed: false, code: 'GLOBAL_MONTHLY_QUOTA_EXCEEDED', error: 'Global monthly AI request limit reached.' };
+  }
+
+  // Global monthly cost ceiling
+  const global30dCost = memoryLedger
+    .filter((r) => r.requested_at >= ago30d)
+    .reduce((sum, r) => sum + (r.estimated_cost || 0), 0);
+  if (global30dCost >= memoryGlobalSettings.global_monthly_cost_cap) {
+    return { allowed: false, code: 'GLOBAL_COST_CAP_EXCEEDED', error: 'Global monthly AI cost ceiling reached.' };
   }
 
   const memShop = getMemoryTenantSettings(tenantId);
@@ -369,6 +402,11 @@ async function reserveQuota(
     estimated_cost: 0,
     metadata: {},
   });
+
+  // Bound in-memory ledger size to avoid memory bloat
+  if (memoryLedger.length > 2000) {
+    memoryLedger.length = 2000;
+  }
 
   const updatedQuota = await getShopAiQuota(tenantId);
   return {

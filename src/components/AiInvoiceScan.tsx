@@ -255,8 +255,8 @@ export default function AiInvoiceScan({
       return;
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-      setErrorMessage('File size must be under 10MB');
+    if (file.size > 5 * 1024 * 1024) {
+      setErrorMessage('File size must be under 5MB');
       return;
     }
 

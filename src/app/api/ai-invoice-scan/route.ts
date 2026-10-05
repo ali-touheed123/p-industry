@@ -105,10 +105,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
+    // FINDING-AI-003: Strict 5MB file size limit before allocating memory buffer
+    const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+    if (file.size > MAX_FILE_SIZE) {
+      return NextResponse.json(
+        { success: false, error: 'File size exceeds maximum allowed limit of 5MB' },
+        { status: 413 }
+      );
+    }
+
+    const mimeType = file.type || 'image/jpeg';
+    if (!mimeType.startsWith('image/')) {
+      return NextResponse.json(
+        { success: false, error: 'Uploaded file is not a valid image. Please upload a JPEG, PNG, or WebP image.' },
+        { status: 400 }
+      );
+    }
+
     // 2. Read image as Base64
     const arrayBuffer = await file.arrayBuffer();
     const base64Data = Buffer.from(arrayBuffer).toString('base64');
-    const mimeType = file.type || 'image/jpeg';
 
     const prompt = `You are an expert invoice parser for a paint and hardware store in Pakistan.
 Carefully examine this invoice image and extract all header and line items.
