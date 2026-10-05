@@ -64,67 +64,51 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
 
           const finalTenants = matchingTenants;
 
-          // Concurrently fetch invoices & client receivables for all sister branches
-          const branchesWithKpis: Branch[] = await Promise.all(
-            finalTenants.map(async (t: any, idx: number) => {
-              let todaySales = 0;
-              let monthlySales = 0;
-              let totalReceivables = 0;
+          // TASK-P11-02: Execute a single aggregated KPI fetch replacing the N+1 multi-branch loop
+          const kpiMap = new Map<string, { todaySales: number; monthlySales: number; totalReceivables: number }>();
+          try {
+            const kpiRes = await fetch('/api/tenants/kpi', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                tenant_ids: finalTenants.map((t: any) => t.id),
+                today: todayIso,
+              }),
+            });
+            const kpiData = await kpiRes.json();
+            if (kpiData.success && Array.isArray(kpiData.kpis)) {
+              kpiData.kpis.forEach((k: any) => {
+                kpiMap.set(k.tenant_id, {
+                  todaySales: Number(k.today_sales || 0),
+                  monthlySales: Number(k.monthly_sales || 0),
+                  totalReceivables: Number(k.total_receivables || 0),
+                });
+              });
+            }
+          } catch (e) {
+            console.error('Failed to load server-side aggregated branch KPIs:', e);
+          }
 
-              try {
-                const [invRes, clientsRes] = await Promise.all([
-                  fetch(`/api/invoices?tenant_id=${t.id}`),
-                  fetch(`/api/clients?tenant_id=${t.id}`),
-                ]);
-                const [invData, clientsData] = await Promise.all([invRes.json(), clientsRes.json()]);
-
-                if (invData.success && Array.isArray(invData.invoices)) {
-                  invData.invoices.forEach((inv: any) => {
-                    const st = (inv.status || '').toLowerCase();
-                    const isRet = (inv.invoice_type || '').toLowerCase() === 'return' || st === 'return';
-                    const invDate = inv.date || (inv.created_at ? inv.created_at.split('T')[0] : '');
-                    const amount = Number(inv.net_total || 0);
-
-                    if (!isRet) {
-                      if (invDate === todayIso) {
-                        todaySales += amount;
-                      }
-                      if (invDate && invDate.substring(0, 7) === todayIso.substring(0, 7)) {
-                        monthlySales += amount;
-                      }
-                    }
-                  });
-                }
-
-                if (clientsData.success && Array.isArray(clientsData.clients)) {
-                  clientsData.clients.forEach((c: any) => {
-                    const bal = Number(c.current_balance || c.balance || 0);
-                    if (bal > 0) totalReceivables += bal;
-                  });
-                }
-              } catch (e) {
-                console.error(`Failed to load KPIs for branch ${t.id}:`, e);
-              }
-
-              return {
-                id: t.id,
-                name: t.name,
-                shortName: t.name.split('—')[0].trim(),
-                city: t.city || city,
-                region: `${t.city || city} • ${t.type?.toUpperCase() || 'BRANCH'}`,
-                code: `PK-${(idx + 1).toString().padStart(2, '0')}`,
-                address: t.address || 'Commercial Market Area',
-                manager: t.owner_name || ownerName,
-                activeRegisters: t.staffCount || 1,
-                todaySales,
-                monthlySales,
-                totalReceivables,
-                healthStatus: t.is_active ? 'Optimal' : 'Attention',
-                inventoryValue: 0,
-                slug: t.slug,
-              };
-            })
-          );
+          const branchesWithKpis: Branch[] = finalTenants.map((t: any, idx: number) => {
+            const branchKpi = kpiMap.get(t.id) || { todaySales: 0, monthlySales: 0, totalReceivables: 0 };
+            return {
+              id: t.id,
+              name: t.name,
+              shortName: t.name.split('—')[0].trim(),
+              city: t.city || city,
+              region: `${t.city || city} • ${t.type?.toUpperCase() || 'BRANCH'}`,
+              code: `PK-${(idx + 1).toString().padStart(2, '0')}`,
+              address: t.address || 'Commercial Market Area',
+              manager: t.owner_name || ownerName,
+              activeRegisters: t.staffCount || 1,
+              todaySales: branchKpi.todaySales,
+              monthlySales: branchKpi.monthlySales,
+              totalReceivables: branchKpi.totalReceivables,
+              healthStatus: t.is_active ? 'Optimal' : 'Attention',
+              inventoryValue: 0,
+              slug: t.slug,
+            };
+          });
 
           setBranches(branchesWithKpis);
 

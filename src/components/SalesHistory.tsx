@@ -250,6 +250,25 @@ export default function SalesHistory({
     }
   };
 
+  // TASK-P11-01: Lazy-fetch invoice items on-demand when expanding row, opening details, or printing
+  const ensureInvoiceItems = async (inv: Invoice): Promise<Invoice> => {
+    if (inv.invoice_items && inv.invoice_items.length > 0) return inv;
+    if (inv.items && inv.items.length > 0) return inv;
+    try {
+      const res = await fetch(`/api/invoices?tenant_id=${tenantId}&id=${inv.id}&include_items=true`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.invoices) && data.invoices[0]) {
+        const fullInv = data.invoices[0];
+        const items = fullInv.invoice_items || fullInv.items || [];
+        setInvoices(prev => prev.map(item => item.id === inv.id ? { ...item, invoice_items: items, items } : item));
+        return { ...inv, invoice_items: items, items };
+      }
+    } catch (err) {
+      console.error('Failed to lazy load invoice line items', err);
+    }
+    return inv;
+  };
+
   // Helper: Strictly Registered Customer Check (Excludes Walk-in)
   const isRegisteredCustomer = (inv: Invoice | null | undefined): boolean => {
     if (!inv) return false;
@@ -599,7 +618,8 @@ export default function SalesHistory({
 
     try {
       setIsGeneratingWhatsApp(true);
-      const blob = await generateReceiptImageBlob(inv, tenantName);
+      const fullInv = await ensureInvoiceItems(inv);
+      const blob = await generateReceiptImageBlob(fullInv, tenantName);
       const imageUrl = URL.createObjectURL(blob);
 
       // Customer phone formatting
@@ -1589,7 +1609,16 @@ export default function SalesHistory({
                           <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                             <button
                               type="button"
-                              onClick={() => setExpandedInvoiceId(isExpanded ? null : inv.id)}
+                              onClick={async () => {
+                                if (isExpanded) {
+                                  setExpandedInvoiceId(null);
+                                } else {
+                                  setExpandedInvoiceId(inv.id);
+                                  if ((!inv.invoice_items || inv.invoice_items.length === 0) && (!inv.items || inv.items.length === 0)) {
+                                    await ensureInvoiceItems(inv);
+                                  }
+                                }
+                              }}
                               title={isExpanded ? 'Collapse items' : 'Expand item details'}
                               style={{
                                 background: isExpanded ? '#0F172A' : '#F1F5F9',
@@ -1802,7 +1831,13 @@ export default function SalesHistory({
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
                               <button
                                 type="button"
-                                onClick={() => setSelectedInvoice(inv)}
+                                onClick={async () => {
+                                  setSelectedInvoice(inv);
+                                  if ((!inv.invoice_items || inv.invoice_items.length === 0) && (!inv.items || inv.items.length === 0)) {
+                                    const full = await ensureInvoiceItems(inv);
+                                    setSelectedInvoice(full);
+                                  }
+                                }}
                                 title="View Complete Bill"
                                 style={{
                                   padding: '5px',
@@ -1819,7 +1854,13 @@ export default function SalesHistory({
 
                               <button
                                 type="button"
-                                onClick={() => setThermalPrintInvoice(inv)}
+                                onClick={async () => {
+                                  setThermalPrintInvoice(inv);
+                                  if ((!inv.invoice_items || inv.invoice_items.length === 0) && (!inv.items || inv.items.length === 0)) {
+                                    const full = await ensureInvoiceItems(inv);
+                                    setThermalPrintInvoice(full);
+                                  }
+                                }}
                                 title="Print Thermal Receipt"
                                 style={{
                                   padding: '5px',

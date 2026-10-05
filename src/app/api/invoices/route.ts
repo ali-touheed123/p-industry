@@ -15,10 +15,11 @@ export async function GET(req: NextRequest) {
     const endDate = searchParams.get('end_date');
     const paymentType = searchParams.get('payment_type');
     const search = searchParams.get('search');
+    const id = searchParams.get('id');
     const cursor = searchParams.get('cursor');
     const limitParam = searchParams.get('limit');
-    // FIX CEO-14 / DB-15: Default raised from 500 to 5000 to prevent silent query truncation on historical views
-    let limit = 5000;
+    // TASK-P11-01: Default limit set to 50 records to prevent multi-megabyte payloads
+    let limit = 50;
     if (limitParam === 'all' || limitParam === 'none') {
       limit = 10000;
     } else if (limitParam) {
@@ -37,16 +38,22 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
+    const includeItems = searchParams.get('include_items') === 'true' || searchParams.get('include_items') === '1';
     const summary = searchParams.get('summary') === 'true' || searchParams.get('summary') === '1' || searchParams.get('select_fields') === 'summary';
 
-    let query: any = summary
-      ? supabaseAdmin.from('invoices').select('*')
-      : supabaseAdmin.from('invoices').select('*, invoice_items(*)');
+    // TASK-P11-01: Only attach child line items when include_items=true is explicitly requested
+    let query: any = (includeItems && !summary)
+      ? supabaseAdmin.from('invoices').select('*, invoice_items(*)')
+      : supabaseAdmin.from('invoices').select('*');
 
     query = query
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
       .limit(limit);
+
+    if (id) {
+      query = query.eq('id', id);
+    }
 
     if (cursor) {
       query = query.lt('created_at', cursor);

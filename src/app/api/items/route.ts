@@ -164,21 +164,33 @@ export async function GET(req: NextRequest) {
     const seriesList = seriesRes.data || [];
     const seriesMap = new Map(seriesList.map(s => [s.id, s.name]));
 
+    // TASK-P11-05: Index token configs by series_id to reduce lookup from O(N * M) to O(N)
+    const configsBySeries = new Map<string, typeof configs>();
+    for (const c of configs) {
+      if (!c.series_id) continue;
+      const group = configsBySeries.get(c.series_id);
+      if (group) {
+        group.push(c);
+      } else {
+        configsBySeries.set(c.series_id, [c]);
+      }
+    }
+
     const enrichedItems = (items || []).map((item) => {
       let hasToken = false;
       let tokenValue = 0;
       const seriesName = item.series_id ? seriesMap.get(item.series_id) : undefined;
 
-      if (item.series_id && configs.length > 0) {
-        const itemUnit = item.pack_size || item.unit || '';
-        const matched = configs.find(c => {
-          if (c.series_id !== item.series_id) return false;
-          return matchUnitToConfig(itemUnit, c.unit_name);
-        });
+      if (item.series_id) {
+        const seriesConfigs = configsBySeries.get(item.series_id);
+        if (seriesConfigs && seriesConfigs.length > 0) {
+          const itemUnit = item.pack_size || item.unit || '';
+          const matched = seriesConfigs.find(c => matchUnitToConfig(itemUnit, c.unit_name));
 
-        if (matched && matched.is_enabled && Number(matched.token_value) > 0) {
-          hasToken = true;
-          tokenValue = Number(matched.token_value);
+          if (matched && matched.is_enabled && Number(matched.token_value) > 0) {
+            hasToken = true;
+            tokenValue = Number(matched.token_value);
+          }
         }
       }
 

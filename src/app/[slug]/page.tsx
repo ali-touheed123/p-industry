@@ -2,18 +2,28 @@
 
 import React, { useState, useEffect, use } from 'react';
 import { Item, Tenant, Shift, PettyExpense, AuditLog } from '@/types';
+import dynamic from 'next/dynamic';
 import PosBilling from '@/components/PosBilling';
-import StockInventory from '@/components/StockInventory';
-import ShiftDrawer from '@/components/ShiftDrawer';
-import CeoDashboard from '@/components/CeoDashboard';
-import FinancialLedgers from '@/components/FinancialLedgers';
-import ClientCreditRecovery from '@/components/ClientCreditRecovery';
-import SalesHistory from '@/components/SalesHistory';
-import HoldInvoices from '@/components/HoldInvoices';
-import PurchasesView from '@/components/PurchasesView';
-import BranchOrders from '@/components/BranchOrders';
-import TokenLedger from '@/components/TokenLedger';
-import TokenManagementView from '@/components/TokenManagementView';
+
+const ViewFallback = () => (
+  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '400px', width: '100%', gap: '12px' }}>
+    <div style={{ width: '32px', height: '32px', border: '3px solid #E2E8F0', borderTopColor: '#0F172A', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+    <span style={{ fontSize: '13px', color: '#64748B', fontWeight: 500 }}>Loading view...</span>
+  </div>
+);
+
+// TASK-P11-03: Code-split secondary views using next/dynamic to minimize initial bundle size and optimize counter TTI
+const StockInventory = dynamic(() => import('@/components/StockInventory'), { loading: () => <ViewFallback /> });
+const ShiftDrawer = dynamic(() => import('@/components/ShiftDrawer'), { loading: () => <ViewFallback /> });
+const CeoDashboard = dynamic(() => import('@/components/CeoDashboard'), { loading: () => <ViewFallback /> });
+const FinancialLedgers = dynamic(() => import('@/components/FinancialLedgers'), { loading: () => <ViewFallback /> });
+const ClientCreditRecovery = dynamic(() => import('@/components/ClientCreditRecovery'), { loading: () => <ViewFallback /> });
+const SalesHistory = dynamic(() => import('@/components/SalesHistory'), { loading: () => <ViewFallback /> });
+const HoldInvoices = dynamic(() => import('@/components/HoldInvoices'), { loading: () => <ViewFallback /> });
+const PurchasesView = dynamic(() => import('@/components/PurchasesView'), { loading: () => <ViewFallback /> });
+const BranchOrders = dynamic(() => import('@/components/BranchOrders'), { loading: () => <ViewFallback /> });
+const TokenLedger = dynamic(() => import('@/components/TokenLedger'), { loading: () => <ViewFallback /> });
+const TokenManagementView = dynamic(() => import('@/components/TokenManagementView'), { loading: () => <ViewFallback /> });
 
 import {
   ShoppingCart,

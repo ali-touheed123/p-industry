@@ -33,7 +33,7 @@ export const ReturnsView: React.FC<ReturnsViewProps> = ({ branch }) => {
       if (!tenantId) return;
       setLoading(true);
       try {
-        const res = await fetch(`/api/invoices?tenant_id=${tenantId}&type=return`);
+        const res = await fetch(`/api/invoices?tenant_id=${tenantId}&type=return&include_items=true`);
         const data = await res.json();
         if (isMounted && data.success && data.invoices) {
           const mapped: ReturnRecord[] = data.invoices.map((inv: any) => {

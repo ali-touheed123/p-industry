@@ -403,9 +403,12 @@ async function reserveQuota(
     metadata: {},
   });
 
-  // Bound in-memory ledger size to avoid memory bloat
-  if (memoryLedger.length > 2000) {
-    memoryLedger.length = 2000;
+  // TASK-P11-04: Bound in-memory ledger ring buffer to max 500 items and evict records older than 30 days
+  if (memoryLedger.length > 500) {
+    memoryLedger.length = 500;
+  }
+  while (memoryLedger.length > 0 && memoryLedger[memoryLedger.length - 1].requested_at < ago30d) {
+    memoryLedger.pop();
   }
 
   const updatedQuota = await getShopAiQuota(tenantId);

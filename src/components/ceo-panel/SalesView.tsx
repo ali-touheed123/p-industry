@@ -38,7 +38,7 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
       if (!tenantId) return;
       setLoading(true);
       try {
-        const res = await fetch(`/api/invoices?tenant_id=${tenantId}`);
+        const res = await fetch(`/api/invoices?tenant_id=${tenantId}&include_items=true`);
         const data = await res.json();
         if (isMounted && data.success && data.invoices) {
           const mapped: Invoice[] = data.invoices.map((inv: any) => {

@@ -107,20 +107,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Template name is required' }, { status: 400 });
     }
 
-    // If this is set as default, reset others
-    if (is_default) {
-      await supabaseAdmin
-        .from('receipt_templates')
-        .update({ is_default: false })
-        .neq('id', '00000000-0000-0000-0000-000000000000');
-    }
-
     const newTemplate = {
       name: name.trim(),
       description: description?.trim() || null,
       paper_size: paper_size || 'thermal_80',
       template_json: template_json || DEFAULT_TEMPLATE_JSON,
-      is_default: Boolean(is_default),
+      is_default: false,
       is_deleted: false,
     };
 
@@ -132,7 +124,19 @@ export async function POST(req: NextRequest) {
 
     if (error) throw error;
 
-    return NextResponse.json({ success: true, template: data }, { status: 201 });
+    let finalTemplate = data;
+    if (is_default && data?.id) {
+      // TASK-P11-11: Atomic default template assignment
+      const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('set_default_receipt_template', {
+        p_template_id: data.id,
+      });
+      if (rpcErr) throw rpcErr;
+      if (rpcData?.template) {
+        finalTemplate = rpcData.template;
+      }
+    }
+
+    return NextResponse.json({ success: true, template: finalTemplate }, { status: 201 });
   } catch (err: any) {
     console.error('Error creating receipt template:', err);
     return NextResponse.json({ success: false, error: err.message || 'Failed to create template' }, { status: 500 });
@@ -154,31 +158,45 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Template ID is required' }, { status: 400 });
     }
 
-    // If setting as default, clear others
-    if (is_default) {
-      await supabaseAdmin
-        .from('receipt_templates')
-        .update({ is_default: false })
-        .neq('id', id);
-    }
-
     const updatePayload: Partial<ReceiptTemplate> = {};
     if (name !== undefined) updatePayload.name = name.trim();
     if (description !== undefined) updatePayload.description = description?.trim() || null;
     if (paper_size !== undefined) updatePayload.paper_size = paper_size;
     if (template_json !== undefined) updatePayload.template_json = template_json;
-    if (is_default !== undefined) updatePayload.is_default = Boolean(is_default);
+    if (is_default !== undefined && !is_default) {
+      updatePayload.is_default = false;
+    }
 
-    const { data, error } = await supabaseAdmin
-      .from('receipt_templates')
-      .update(updatePayload)
-      .eq('id', id)
-      .select()
-      .single();
+    let updatedTemplate: any = null;
+    if (Object.keys(updatePayload).length > 0) {
+      const { data, error } = await supabaseAdmin
+        .from('receipt_templates')
+        .update(updatePayload)
+        .eq('id', id)
+        .select()
+        .single();
 
-    if (error) throw error;
+      if (error) throw error;
+      updatedTemplate = data;
+    }
 
-    return NextResponse.json({ success: true, template: data });
+    if (is_default) {
+      // TASK-P11-11: Atomic procedure resets all others and marks this as default in one transaction
+      const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('set_default_receipt_template', {
+        p_template_id: id,
+      });
+      if (rpcErr) throw rpcErr;
+      if (rpcData?.template) {
+        updatedTemplate = rpcData.template;
+      }
+    }
+
+    if (!updatedTemplate) {
+      const { data: current } = await supabaseAdmin.from('receipt_templates').select('*').eq('id', id).single();
+      updatedTemplate = current;
+    }
+
+    return NextResponse.json({ success: true, template: updatedTemplate });
   } catch (err: any) {
     console.error('Error updating receipt template:', err);
     return NextResponse.json({ success: false, error: err.message || 'Failed to update template' }, { status: 500 });

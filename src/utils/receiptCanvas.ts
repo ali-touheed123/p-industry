@@ -51,12 +51,15 @@ export interface ReceiptInvoiceData {
   invoice_items?: ReceiptItemData[];
 }
 
+export type ReceiptPaperSize = 'thermal_58' | 'thermal_80';
+
 /**
  * Generate a pixel-perfect, crisp Thermal Receipt Image Blob (PNG)
  */
 export async function generateReceiptImageBlob(
   invoice: ReceiptInvoiceData,
-  tenantName: string = 'Pyntflow Paint ERP'
+  tenantName: string = 'Pyntflow Paint ERP',
+  paperSize: ReceiptPaperSize = 'thermal_80'
 ): Promise<Blob> {
   return new Promise((resolve, reject) => {
     try {
@@ -67,8 +70,10 @@ export async function generateReceiptImageBlob(
         throw new Error('Canvas 2D context not available');
       }
 
-      // Base width and dynamic height calculation
-      const width = 440;
+      // Base width and dynamic height calculation (TASK-P11-07: 384px for 58mm, 576px for 80mm)
+      const width = paperSize === 'thermal_58' ? 384 : 576;
+      const qtyX = Math.round(width * 0.63);
+      const maxNameLen = paperSize === 'thermal_58' ? 22 : 36;
       const baseHeaderHeight = 160;
       const itemRowHeight = 44;
       const itemsHeight = items.length * itemRowHeight;
@@ -132,7 +137,7 @@ export async function generateReceiptImageBlob(
       ctx.fillStyle = '#64748B';
       ctx.fillText('ITEM / SHADE', 18, y);
       ctx.textAlign = 'center';
-      ctx.fillText('QTY', 280, y);
+      ctx.fillText('QTY', qtyX, y);
       ctx.textAlign = 'right';
       ctx.fillText('AMOUNT', width - 18, y);
 
@@ -153,14 +158,14 @@ export async function generateReceiptImageBlob(
         ctx.textAlign = 'left';
         ctx.font = 'bold 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
         ctx.fillStyle = '#0F172A';
-        const truncatedName = name.length > 28 ? name.substring(0, 26) + '...' : name;
+        const truncatedName = name.length > maxNameLen ? name.substring(0, maxNameLen - 2) + '...' : name;
         ctx.fillText(truncatedName, 18, y);
 
         // Qty
         ctx.textAlign = 'center';
         ctx.font = '11px "JetBrains Mono", monospace';
         ctx.fillStyle = '#334155';
-        ctx.fillText(`${qty}`, 280, y);
+        ctx.fillText(`${qty}`, qtyX, y);
 
         // Line Total
         ctx.textAlign = 'right';

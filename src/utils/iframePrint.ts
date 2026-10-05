@@ -44,21 +44,29 @@ export function printViaIframe(htmlContent: string): void {
   doc.write(htmlContent);
   doc.close();
 
+  let safetyTimer: ReturnType<typeof setTimeout> | null = null;
+
   // Cleanup: remove iframe after print dialog is dismissed
   const cleanup = () => {
+    if (safetyTimer) {
+      clearTimeout(safetyTimer);
+      safetyTimer = null;
+    }
     setTimeout(() => {
-      iframe.remove();
+      if (iframe.parentNode) {
+        iframe.remove();
+      }
     }, 500);
   };
 
   iframe.contentWindow?.addEventListener('afterprint', cleanup);
 
-  // Safety timeout: always remove after 3 seconds even if afterprint never fires
-  setTimeout(() => {
+  // TASK-P11-06: Extend fallback safety timeout to 30 seconds to prevent premature detachment during slow print dialog interactions
+  safetyTimer = setTimeout(() => {
     if (document.getElementById('__thermal_print_iframe__')) {
       iframe.remove();
     }
-  }, 3000);
+  }, 30000);
 
   // Trigger print — synchronous call inside iframe's window context
   iframe.contentWindow?.focus();
