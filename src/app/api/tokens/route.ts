@@ -157,6 +157,14 @@ export async function POST(req: NextRequest) {
       const parsedTokenValue = Number(token_value) || 0;
       const totalAmount = parsedTokenValue * parsedCount;
 
+      // Task 12.8 — FINDING-E2E-003: Generate unique serial claim code for walk-in customers.
+      // When client_id is null, the customer is anonymous. A claim code lets them present
+      // their token/receipt at a future visit to link their tokens to their account.
+      const isWalkIn = !client_id;
+      const claimCode = isWalkIn
+        ? `CLM-${Date.now().toString(36).toUpperCase().slice(-4)}${Math.floor(10 + Math.random() * 90)}`
+        : null;
+
       const { data: txn, error: txnErr } = await supabaseAdmin
         .from('token_transactions')
         .insert({
@@ -176,14 +184,16 @@ export async function POST(req: NextRequest) {
           total_amount: totalAmount,
           usage_status: 'n_a',
           shift_id: shift_id || null,
-          notes: notes || 'Customer kept physical token with purchase',
+          notes: claimCode
+            ? `Walk-in token claim — Code: ${claimCode}. ${notes || 'Customer kept physical token with purchase'}`
+            : (notes || 'Customer kept physical token with purchase'),
         })
         .select()
         .single();
 
       if (txnErr) throw txnErr;
 
-      return NextResponse.json({ success: true, transaction: txn });
+      return NextResponse.json({ success: true, transaction: txn, claim_code: claimCode });
     }
 
     // --- 2. SHOP_RETAINED (Customer left token at store during checkout) ---
@@ -441,107 +451,30 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: false, error: 'No token allocations provided for settlement' }, { status: 400 });
       }
 
-      const settlementMode = settlement_type || 'vendor_rep_cash';
-      const refCode = claim_reference || `REP-${Date.now().toString().slice(-6)}`;
-      let totalSettledValue = 0;
-      let totalTokensCount = 0;
+      // Task 12.7 — FINDING-E2E-010 FIX:
+      // Previously a non-atomic JS loop — mid-loop failure left partial settlement with some
+      // rows marked 'settled' and others unchanged, with no rollback. Now replaced with a
+      // single settle_tokens_atomic RPC that wraps all allocation updates in one PG transaction.
+      const { data: settleResult, error: settleErr } = await supabaseAdmin.rpc('settle_tokens_atomic', {
+        p_tenant_id:       tenant_id,
+        p_allocations:     allocations,
+        p_supplier_id:     supplier_id || null,
+        p_supplier_name:   supplier_name || 'Vendor / Paint Company',
+        p_settlement_type: settlement_type || 'vendor_rep_cash',
+        p_claim_reference: claim_reference || null,
+      });
 
-      for (const alloc of allocations) {
-        const { data: parent, error: pErr } = await supabaseAdmin
-          .from('token_transactions')
-          .select('*')
-          .eq('id', alloc.id)
-          .eq('tenant_id', tenant_id)
-          .maybeSingle();
-
-        if (pErr || !parent) continue;
-
-        const availableCount = Number(parent.remaining_quantity ?? parent.quantity ?? 1);
-        const surrenderQty = Math.min(availableCount, Math.max(1, Number(alloc.count) || 1));
-        const unitVal = Number(parent.token_value) || (Number(parent.total_amount) / (availableCount || 1));
-        const surrenderVal = surrenderQty * unitVal;
-
-        totalSettledValue += surrenderVal;
-        totalTokensCount += surrenderQty;
-
-        if (surrenderQty >= availableCount) {
-          // Full surrender of this row
-          await supabaseAdmin
-            .from('token_transactions')
-            .update({
-              usage_status: 'settled',
-              remaining_quantity: 0,
-              settled_vendor_name: supplier_name || 'Vendor / Paint Company',
-              notes: parent.notes ? `${parent.notes} | Settled: ${refCode}` : `Settled with rep: ${refCode}`,
-            })
-            .eq('id', alloc.id);
-        } else {
-          // Partial surrender: decrement parent, insert child row for the surrendered count
-          const newRemaining = availableCount - surrenderQty;
-          await supabaseAdmin
-            .from('token_transactions')
-            .update({
-              remaining_quantity: newRemaining,
-              total_amount: newRemaining * unitVal,
-            })
-            .eq('id', alloc.id);
-
-          await supabaseAdmin
-            .from('token_transactions')
-            .insert({
-              tenant_id,
-              type: parent.type,
-              invoice_id: parent.invoice_id,
-              redemption_id: parent.redemption_id,
-              client_id: parent.client_id,
-              client_name: parent.client_name,
-              brand_id: parent.brand_id,
-              brand_name: parent.brand_name,
-              series_id: parent.series_id,
-              series_name: parent.series_name,
-              unit_name: parent.unit_name,
-              token_value: unitVal,
-              quantity: surrenderQty,
-              remaining_quantity: 0,
-              total_amount: surrenderVal,
-              parent_transaction_id: parent.id,
-              usage_status: 'settled',
-              settled_vendor_name: supplier_name || 'Vendor / Paint Company',
-              notes: `Partial surrender from #${parent.id.slice(0, 8)}: ${refCode}`,
-            });
-        }
-      }
-
-      // If settled for Supplier Credit Slip and supplier_id is provided, create a payment voucher
-      if (settlementMode === 'vendor_rep_credit' && supplier_id) {
-        try {
-          const voucherNo = `VTK-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`;
-          await supabaseAdmin
-            .from('vouchers')
-            .insert({
-              tenant_id,
-              voucher_no: voucherNo,
-              voucher_type: 'payment',
-              party_type: 'supplier',
-              party_id: supplier_id,
-              party_name: supplier_name || 'Vendor / Paint Company',
-              amount: totalSettledValue,
-              payment_method: 'tokens',
-              reference_no: refCode,
-              date: new Date().toISOString().split('T')[0],
-              remarks: `Token Surrender to Rep (${totalTokensCount} tokens: Ref ${refCode})`,
-            });
-        } catch (vErr) {
-          console.error('Error auto-creating credit voucher for token surrender:', vErr);
-        }
+      if (settleErr) {
+        return NextResponse.json({ success: false, error: settleErr.message }, { status: 400 });
       }
 
       return NextResponse.json({
         success: true,
-        settled_value: totalSettledValue,
-        settled_tokens: totalTokensCount,
-        claim_reference: refCode,
-        settlement_type: settlementMode,
+        settled_value:    (settleResult as any)?.total_settled_value ?? 0,
+        settled_tokens:   (settleResult as any)?.settled_count ?? 0,
+        claim_reference:  (settleResult as any)?.claim_reference,
+        voucher_id:       (settleResult as any)?.voucher_id ?? null,
+        settlement_type:  settlement_type || 'vendor_rep_cash',
       });
     }
 

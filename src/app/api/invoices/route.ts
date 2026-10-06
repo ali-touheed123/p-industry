@@ -454,49 +454,30 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    // 1. Fetch old invoice and previous line items with strict tenant isolation
-    const { data: oldInvoice, error: fetchErr } = await supabaseAdmin
-      .from('invoices')
-      .select('*, invoice_items(*)')
-      .eq('id', id)
-      .eq('tenant_id', tenant_id)
-      .single();
+    // Task 12.2 — FINDING-E2E-004 FIX:
+    // All 6 sequential steps (stock revert, item delete, item insert, stock apply,
+    // balance delta, header update) now execute inside a single PostgreSQL transaction
+    // via update_invoice_atomic RPC. Partial failure auto-rolls back all changes.
+    const invoiceData = {
+      client_id: client_id || null,
+      client_name,
+      subtotal: Number(subtotal),
+      discount: Number(discount),
+      delivery_charge: Number(delivery_charge),
+      remarks: remarks || null,
+      net_total: Number(net_total),
+      paid_amount: Number(paid_amount),
+      due_amount: Number(due_amount),
+      payment_type,
+      cash_paid: Number(cash_paid),
+      card_paid: Number(card_paid),
+      bank_paid: Number(bank_paid),
+      others_paid: Number(others_paid),
+      status,
+      invoice_type: body.invoice_type || 'sales',
+    };
 
-    if (fetchErr || !oldInvoice) {
-      return NextResponse.json({ success: false, error: 'Original invoice not found' }, { status: 404 });
-    }
-
-    if (oldInvoice.tenant_id !== tenant_id) {
-      return NextResponse.json(
-        { success: false, error: 'Forbidden: Invoice does not belong to authorized tenant' },
-        { status: 403 }
-      );
-    }
-
-    // 2. Revert previous stock deductions for old items atomically
-    if (oldInvoice.invoice_items && oldInvoice.invoice_items.length > 0) {
-      const wasReturn = oldInvoice.invoice_type === 'return';
-      for (const oldIt of oldInvoice.invoice_items) {
-        if (!oldIt.item_id && !oldIt.item_code) continue;
-        const revertDelta = wasReturn ? -Number(oldIt.qty || 0) : Number(oldIt.qty || 0);
-        if (oldIt.item_id) {
-          await supabaseAdmin.rpc('adjust_item_stock', {
-            p_item_id: oldIt.item_id,
-            p_qty_delta: revertDelta,
-          });
-        } else if (oldIt.item_code) {
-          await supabaseAdmin.rpc('adjust_item_stock_by_code', {
-            p_tenant_id: oldInvoice.tenant_id,
-            p_item_code: oldIt.item_code,
-            p_qty_delta: revertDelta,
-          });
-        }
-      }
-    }
-
-    // 3. Prepare and Insert New Invoice Items
     const invoiceItemsToInsert = items.map((it: any) => ({
-      invoice_id: id,
       item_id: it.item_id || it.item?.id || null,
       item_code: it.item_code || it.code || it.item?.code || '',
       item_name: it.item_name || it.productName || it.name || it.item?.name || '',
@@ -510,103 +491,19 @@ export async function PATCH(req: NextRequest) {
       total_price: Number(it.total_price || (it.qty * (it.unit_price || it.rate || 0))) || 0,
     }));
 
-    // Delete old items and insert updated items
-    await supabaseAdmin.from('invoice_items').delete().eq('invoice_id', id);
-    const { error: insertItemsErr } = await supabaseAdmin.from('invoice_items').insert(invoiceItemsToInsert);
-    if (insertItemsErr) throw insertItemsErr;
+    const { data: rpcResult, error: rpcErr } = await supabaseAdmin.rpc('update_invoice_atomic', {
+      p_invoice_id:   id,
+      p_tenant_id:    tenant_id,
+      p_invoice_data: invoiceData,
+      p_items:        invoiceItemsToInsert,
+    });
 
-    // 4. Apply new stock adjustments atomically
-    const isNewReturn = (body.invoice_type || oldInvoice.invoice_type) === 'return';
-    for (const lineItem of invoiceItemsToInsert) {
-      if (!lineItem.item_id && !lineItem.item_code) continue;
-      const newDelta = isNewReturn ? Number(lineItem.qty || 0) : -Number(lineItem.qty || 0);
-      if (lineItem.item_id) {
-        await supabaseAdmin.rpc('adjust_item_stock', {
-          p_item_id: lineItem.item_id,
-          p_qty_delta: newDelta,
-        });
-      } else if (lineItem.item_code) {
-        await supabaseAdmin.rpc('adjust_item_stock_by_code', {
-          p_tenant_id: oldInvoice.tenant_id,
-          p_item_code: lineItem.item_code,
-          p_qty_delta: newDelta,
-        });
-      }
-    }
-
-    // 5. Adjust Client Balance for Difference in Due Amount
-    const oldDue = Number(oldInvoice.due_amount || 0);
-    const newDue = Number(due_amount || 0);
-    const dueDiff = newDue - oldDue;
-
-    if (client_id && dueDiff !== 0) {
-      const { data: client } = await supabaseAdmin
-        .from('clients')
-        .select('current_balance')
-        .eq('id', client_id)
-        .eq('tenant_id', tenant_id)
-        .maybeSingle();
-
-      if (client) {
-        // CALC-01 FIX: Preserve advance credit balances without Math.max(0) clamping
-        const updatedBalance = (Number(client.current_balance) || 0) + dueDiff;
-        await supabaseAdmin
-          .from('clients')
-          .update({ current_balance: updatedBalance })
-          .eq('id', client_id)
-          .eq('tenant_id', tenant_id);
-      }
-    }
-
-    // 6. Update Invoice Record
-    const { data: updatedInvoice, error: updateErr } = await supabaseAdmin
-      .from('invoices')
-      .update({
-        client_id: client_id || null,
-        client_name,
-        subtotal: Number(subtotal),
-        discount: Number(discount),
-        delivery_charge: Number(delivery_charge),
-        remarks: remarks || null,
-        net_total: Number(net_total),
-        paid_amount: Number(paid_amount),
-        due_amount: Number(due_amount),
-        payment_type,
-        cash_paid: Number(cash_paid),
-        card_paid: Number(card_paid),
-        bank_paid: Number(bank_paid),
-        others_paid: Number(others_paid),
-        status,
-      })
-      .eq('id', id)
-      .eq('tenant_id', tenant_id)
-      .select()
-      .single();
-
-    if (updateErr) throw updateErr;
-
-    // 7. Audit Log Entry
-    try {
-      await supabaseAdmin.from('audit_logs').insert({
-        tenant_id,
-        user_name: client_name,
-        action: 'Sales Invoice Updated (Items Added)',
-        action_type: 'update',
-        entity_type: 'invoice',
-        entity_id: id,
-        details: {
-          invoice_no: oldInvoice.invoice_no,
-          previous_net: oldInvoice.net_total,
-          new_net: net_total,
-          items_count: items.length,
-        },
-      });
-    } catch {}
+    if (rpcErr) throw rpcErr;
 
     return NextResponse.json({
       success: true,
       invoice: {
-        ...updatedInvoice,
+        ...((rpcResult as any)?.invoice || {}),
         items: invoiceItemsToInsert,
       },
     });

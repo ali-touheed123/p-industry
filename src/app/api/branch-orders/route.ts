@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import { requireTenantAuth } from '@/lib/session';
+import { requireTenantAuth, getSession } from '@/lib/session';
 
 // GET: Fetch branch orders for a tenant (both sent & received)
 export async function GET(req: NextRequest) {
@@ -229,12 +229,20 @@ export async function PATCH(req: NextRequest) {
       return total;
     };
 
-    // FIX FINDING-API-003: Auth must happen before resource fetch to prevent
-    // unauthenticated enumeration of order IDs via 404 vs 403 response differentiation.
-    const auth = await requireTenantAuth(req, null);
-    if (!auth.authorized) {
-      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    // Task 12.3 — FINDING-E2E-008 FIX: Replace requireTenantAuth(req, null) with getSession.
+    // Passing null to requireTenantAuth skips tenant matching — any authenticated session passes.
+    // getSession enforces authentication without bypassing tenant isolation.
+    // Strict tenant-party validation occurs post-fetch (lines below) after currentOrder is known.
+    // FINDING-API-003 ordering preserved: auth check still occurs before order fetch.
+    const session = await getSession(req);
+    if (!session) {
+      return NextResponse.json({ success: false, error: 'Unauthorized: Valid login session required' }, { status: 401 });
     }
+    if (session.role !== 'developer' && !session.tenantId) {
+      return NextResponse.json({ success: false, error: 'Forbidden: No tenant assigned to this session' }, { status: 403 });
+    }
+    // Wrap session in auth-compatible shape for downstream code that uses auth.session
+    const auth = { authorized: true, session };
 
     // Fetch the current order to validate transition
     const { data: currentOrder, error: fetchErr } = await supabaseAdmin

@@ -55,6 +55,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Tenant ID, Title and Amount are required' }, { status: 400 });
     }
 
+    const parsedAmount = Number(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      return NextResponse.json({ success: false, error: 'Expense amount must be a positive number' }, { status: 400 });
+    }
+
+    // Task 12.10 — FINDING-E2E-012 FIX: Server-side upper-bound guard.
+    // A single petty expense cannot exceed Rs. 50,000 to prevent accidental large entries.
+    // Larger disbursements must go through the main voucher/payment system.
+    const PETTY_EXPENSE_MAX = 50_000;
+    if (parsedAmount > PETTY_EXPENSE_MAX) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Petty expense amount (Rs. ${parsedAmount.toLocaleString()}) exceeds the single-entry limit of Rs. ${PETTY_EXPENSE_MAX.toLocaleString()}. Use the voucher system for larger disbursements.`,
+        },
+        { status: 400 }
+      );
+    }
+
     const auth = await requireTenantAuth(req, tenant_id);
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
@@ -67,7 +86,7 @@ export async function POST(req: NextRequest) {
         shift_id: shift_id || null,
         category,
         title,
-        amount: Number(amount),
+        amount: parsedAmount,
         paid_by: paid_by || null,
         notes: notes || null,
       })

@@ -158,6 +158,18 @@ function buildPosThermalHtml(data: any, tenantName: string = 'PyntFlow Store', s
   const poweredBy = (footer?.showPoweredBy !== false)
     ? `<div style="font-size:8px;color:#aaa;margin-top:2px">${footer?.poweredByText || 'Powered by Pyntflow'}</div>` : '';
 
+  // Task 12.8 — FINDING-E2E-003: Walk-in token claim slip appended to receipt.
+  // Printed only when a claim code was generated (anonymous walk-in who kept their token).
+  const tokenClaimBlock = data.token_claim_code
+    ? `<div style="border:1px dashed #000;padding:8px;margin-top:10px;text-align:center">
+  <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px">&#127915; Token Claim Slip</div>
+  <div style="font-size:9px;color:#555;margin-bottom:6px">Present this code on your next visit to redeem your token</div>
+  <div style="font-size:14px;font-weight:900;letter-spacing:0.1em;border:1px solid #000;padding:4px 8px;display:inline-block;margin:4px 0">${data.token_claim_code}</div>
+  ${data.token_claim_details ? `<div style="font-size:9px;color:#444;margin-top:4px">${data.token_claim_details}</div>` : ''}
+  <div style="font-size:8px;color:#777;margin-top:4px">Keep this receipt — code cannot be reissued</div>
+</div>`
+    : '';
+
   return `
 <div style="text-align:center;border-bottom:1px dashed #000;padding-bottom:8px;margin-bottom:8px">
   <h2 style="font-size:15px;font-weight:900;text-transform:uppercase;letter-spacing:0.05em;margin:0 0 2px 0">${effectiveTenantName}</h2>
@@ -192,6 +204,7 @@ function buildPosThermalHtml(data: any, tenantName: string = 'PyntFlow Store', s
 ${footerLine2 ? `<div style="text-align:center;font-size:9px;color:#777;margin-top:2px">${footerLine2}</div>` : ''}
 ${whatsappRow}
 ${poweredBy}
+${tokenClaimBlock}
 `;
 }
 
@@ -501,6 +514,25 @@ export default function PosBilling({
       });
 
       setLineItems(restoredItems);
+
+      // Task 12.9 — FINDING-E2E-011 FIX: Stock re-check warning after held invoice restore.
+      // Compare each item's held quantity against current live stock.
+      // Items with insufficient stock are listed in a warning so the operator can adjust before selling.
+      const understocked: string[] = [];
+      for (const ri of restoredItems) {
+        const liveStock = typeof ri.item?.stock_qty === 'number' ? ri.item.stock_qty : -1;
+        if (liveStock < 0) continue; // Unknown stock — skip
+        if (liveStock < ri.qty) {
+          const label = ri.productName + (ri.shadeCode && ri.shadeCode !== '—' ? ` (${ri.shadeCode})` : '');
+          understocked.push(`${label}: need ${ri.qty}, have ${liveStock}`);
+        }
+      }
+
+      if (understocked.length > 0) {
+        setNotification(
+          `⚠️ Stock Warning: The following held items may be unavailable — ${understocked.join(' | ')}. Please adjust quantities before completing the sale.`
+        );
+      }
 
       if (restoringHeldOrder.client_name) {
         setCustomerSearch(restoringHeldOrder.client_name);
@@ -1012,7 +1044,7 @@ export default function PosBilling({
           };
         });
 
-        const completedInvoice = {
+        const completedInvoice: any = {
           ...data.invoice,
           invoice_no: finalServerInvoiceNo,
           grandTotal: netTotal,
@@ -1034,6 +1066,21 @@ export default function PosBilling({
           tenantName,
           staffName,
         };
+
+        // Task 12.8 — FINDING-E2E-003: Embed walk-in token claim code in receipt data.
+        // Applicable when: anonymous customer (no account), kept token (tokenAction='keep').
+        // Code is purely for the printed receipt slip so customer can reference it later.
+        const walkInTokenItems = receiptItems.filter(
+          (ci: any) => ci.hasToken && (ci.tokenValue || 0) > 0 && (ci.tokenAction || 'keep') === 'keep' && !selectedClient
+        );
+        if (walkInTokenItems.length > 0) {
+          const code = `CLM-${Date.now().toString(36).toUpperCase().slice(-4)}${Math.floor(10 + Math.random() * 90)}`;
+          const details = walkInTokenItems.map((ci: any) =>
+            `${ci.productName}: ${ci.qty} token(s) @ Rs. ${ci.tokenValue} each`
+          ).join(' | ');
+          completedInvoice.token_claim_code = code;
+          completedInvoice.token_claim_details = details;
+        }
 
         onCompleteSale(completedInvoice);
         if (openPrint) {
