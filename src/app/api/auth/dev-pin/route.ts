@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
     const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || '127.0.0.1';
 
     // 1. Rate Limiting: Max 5 attempts per 15 minutes per IP (Brute-Force Shield)
-    const rateCheck = checkRateLimit(`dev-pin:${ip}`, 5, 15 * 60 * 1000);
+    const rateCheck = await checkRateLimit(`dev-pin:${ip}`, 5, 15 * 60 * 1000);
     if (!rateCheck.success) {
       const waitMin = Math.ceil(rateCheck.retryAfterSec / 60);
       return NextResponse.json(
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Reset rate limiter on valid PIN authentication
-    resetRateLimit(`dev-pin:${ip}`);
+    await resetRateLimit(`dev-pin:${ip}`);
 
     // Sign developer super-admin token valid for 8 hours using strict high-entropy secret
     const token = await new SignJWT({

@@ -493,8 +493,13 @@ export default function StockInventory({
 
     setSubmitting(true);
     const retail = Number(formRetailPrice) || 0;
-    // FIX FINDING-INV-003: Require explicit cost price entry / default strictly to 0 (no arbitrary 75% margin calculation)
     const cost = Number(formCostPrice) || 0;
+
+    if (!editingItemId && cost <= 0) {
+      setFormError('Cost price must be greater than zero');
+      setSubmitting(false);
+      return;
+    }
 
     const payload = {
       tenant_id: tenantId,

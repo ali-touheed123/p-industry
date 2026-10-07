@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
     const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || '127.0.0.1';
     
     // 1. Rate Limiting: max 5 failed/consecutive attempts per 5 mins per IP
-    const limit = checkRateLimit(ip, 5, 5 * 60 * 1000);
+    const limit = await checkRateLimit(ip, 5, 5 * 60 * 1000);
     if (!limit.success) {
       return NextResponse.json(
         { success: false, error: `Too many login attempts. Please wait ${limit.retryAfterSec} seconds before trying again.` },

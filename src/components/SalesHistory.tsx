@@ -2426,6 +2426,32 @@ export default function SalesHistory({
                   </button>
                 )}
 
+                {selectedInvoice.status !== 'cancelled' && (
+                  <button
+                    onClick={() => {
+                      const invToCancel = selectedInvoice;
+                      setSelectedInvoice(null);
+                      setCancelModal({ invoice: invToCancel });
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '8px 14px',
+                      background: '#FEE2E2',
+                      color: '#DC2626',
+                      border: '1px solid #FCA5A5',
+                      borderRadius: '8px',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <XCircle style={{ width: 14, height: 14 }} />
+                    Cancel Invoice
+                  </button>
+                )}
+
                 <button
                   onClick={() => {
                     setThermalPrintInvoice(selectedInvoice);

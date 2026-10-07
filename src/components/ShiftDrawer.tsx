@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { Shift, PettyExpense, Tenant, TokenTransaction } from '@/types';
+import { calculateExpectedClosingCash } from '@/utils/cashReconciliation';
 
 interface Props {
   shift: Shift | null;
@@ -309,11 +310,18 @@ export default function ShiftDrawer({
     return Object.values(groups);
   }, [retainedTransactions]);
 
-  // Exact Daraz Reconciliation Formula:
-  // Expected Cash = Opening Cash + Cash Inflow (Sales) - Cash Outflow (Sales Returns + Supplier Cash + Expenses + Tokens Redeemed Cash)
+  // Standardized Cash Reconciliation Formula (Task 13.1.4 / 13.2.11):
+  // Expected Cash = Opening Cash + Cash Sales - Cash Returns - Supplier Cash - Expenses - Tokens Redeemed
   const expectedCash = Math.max(
     0,
-    openingCash + cashSales - cashReturns - supplierCashPaid - totalExpenses - tokensRedeemed
+    calculateExpectedClosingCash({
+      openingCash,
+      cashSales,
+      cashReturns,
+      expenses: totalExpenses,
+      supplierPayouts: supplierCashPaid,
+      tokenPayouts: tokensRedeemed,
+    })
   );
 
   // BUG FIX #6: Actual Physical Cash does NOT default to expectedCash — requires explicit input

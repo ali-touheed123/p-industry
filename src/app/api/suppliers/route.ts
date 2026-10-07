@@ -3,11 +3,22 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
 import { generateUniqueCode } from '@/lib/utils';
 
-// GET: Fetch suppliers for a tenant
+// GET: Fetch suppliers for a tenant (with optional cursor pagination)
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const tenantId = searchParams.get('tenant_id');
+    const cursor = searchParams.get('cursor');
+    const limitParam = searchParams.get('limit');
+    let limit = 50;
+    if (limitParam === 'all' || limitParam === 'none') {
+      limit = 10000;
+    } else if (limitParam) {
+      const parsed = parseInt(limitParam, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        limit = Math.min(parsed, 10000);
+      }
+    }
 
     if (!tenantId) {
       return NextResponse.json({ success: false, error: 'Tenant ID required' }, { status: 400 });
@@ -18,15 +29,30 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    const { data: suppliers, error } = await supabaseAdmin
+    let query = supabaseAdmin
       .from('suppliers')
       .select('*')
       .eq('tenant_id', tenantId)
-      .order('name', { ascending: true });
+      .order('name', { ascending: true })
+      .limit(limit);
 
+    if (cursor) {
+      query = query.gt('name', cursor);
+    }
+
+    const { data: suppliers, error } = await query;
     if (error) throw error;
 
-    return NextResponse.json({ success: true, suppliers: suppliers || [] });
+    const supplierList = suppliers || [];
+    const hasMore = supplierList.length === limit;
+    const nextCursor = hasMore && supplierList.length > 0 ? supplierList[supplierList.length - 1].name : null;
+
+    return NextResponse.json({
+      success: true,
+      suppliers: supplierList,
+      has_more: hasMore,
+      next_cursor: nextCursor,
+    });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

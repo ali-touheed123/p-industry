@@ -3,11 +3,22 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
 import { generateUniqueCode } from '@/lib/utils';
 
-// GET: Fetch clients for a tenant
+// GET: Fetch clients for a tenant (with optional cursor pagination)
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const tenantId = searchParams.get('tenant_id');
+    const cursor = searchParams.get('cursor');
+    const limitParam = searchParams.get('limit');
+    let limit = 50;
+    if (limitParam === 'all' || limitParam === 'none') {
+      limit = 10000;
+    } else if (limitParam) {
+      const parsed = parseInt(limitParam, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        limit = Math.min(parsed, 10000);
+      }
+    }
 
     if (!tenantId) {
       return NextResponse.json({ success: false, error: 'Tenant ID required' }, { status: 400 });
@@ -18,15 +29,30 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    const { data: clients, error } = await supabaseAdmin
+    let query = supabaseAdmin
       .from('clients')
       .select('*')
       .eq('tenant_id', tenantId)
-      .order('name', { ascending: true });
+      .order('name', { ascending: true })
+      .limit(limit);
 
+    if (cursor) {
+      query = query.gt('name', cursor);
+    }
+
+    const { data: clients, error } = await query;
     if (error) throw error;
 
-    return NextResponse.json({ success: true, clients: clients || [] });
+    const clientList = clients || [];
+    const hasMore = clientList.length === limit;
+    const nextCursor = hasMore && clientList.length > 0 ? clientList[clientList.length - 1].name : null;
+
+    return NextResponse.json({
+      success: true,
+      clients: clientList,
+      has_more: hasMore,
+      next_cursor: nextCursor,
+    });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
@@ -87,19 +113,24 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { id, tenant_id, credit_limit, name, phone, address, city } = body;
+    const { id, credit_limit, name, phone, address, city } = body;
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Client ID is required' }, { status: 400 });
     }
 
-    let targetTenantId = tenant_id;
-    if (!targetTenantId) {
-      const { data: existingClient } = await supabaseAdmin.from('clients').select('tenant_id').eq('id', id).maybeSingle();
-      targetTenantId = existingClient?.tenant_id;
+    // Fetch record first — prevents null-scope auth bypass when client not found
+    const { data: existingClient } = await supabaseAdmin
+      .from('clients')
+      .select('tenant_id')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (!existingClient) {
+      return NextResponse.json({ success: false, error: 'Client not found' }, { status: 404 });
     }
 
-    const auth = await requireTenantAuth(req, targetTenantId);
+    const auth = await requireTenantAuth(req, existingClient.tenant_id);
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
@@ -111,13 +142,59 @@ export async function PATCH(req: NextRequest) {
     if (address !== undefined) updates.address = address || null;
     if (city !== undefined) updates.city = city || null;
 
-    let query = supabaseAdmin.from('clients').update(updates).eq('id', id);
-    if (tenant_id) query = query.eq('tenant_id', tenant_id);
+    // Scope update to tenant as defence-in-depth
+    const { data: client, error } = await supabaseAdmin
+      .from('clients')
+      .update(updates)
+      .eq('id', id)
+      .eq('tenant_id', existingClient.tenant_id)
+      .select()
+      .single();
 
-    const { data: client, error } = await query.select().single();
     if (error) throw error;
 
     return NextResponse.json({ success: true, client });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
+
+// DELETE: Soft-delete a client (preserves ledger / invoice history)
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Client ID is required' }, { status: 400 });
+    }
+
+    // Fetch record first — prevents null-scope auth bypass when client not found
+    const { data: existingClient } = await supabaseAdmin
+      .from('clients')
+      .select('tenant_id')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (!existingClient) {
+      return NextResponse.json({ success: false, error: 'Client not found' }, { status: 404 });
+    }
+
+    const auth = await requireTenantAuth(req, existingClient.tenant_id);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
+    // Soft-delete: preserve financial history, do not hard-delete
+    const { error } = await supabaseAdmin
+      .from('clients')
+      .update({ is_deleted: true })
+      .eq('id', id)
+      .eq('tenant_id', existingClient.tenant_id);
+
+    if (error) throw error;
+
+    return NextResponse.json({ success: true, message: 'Client deleted successfully' });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

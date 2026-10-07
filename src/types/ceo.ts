@@ -1,3 +1,7 @@
+import type { Invoice as SystemInvoice, InvoiceItem as SystemInvoiceItem } from './index';
+
+export type { SystemInvoice, SystemInvoiceItem };
+
 export interface Branch {
   id: string;
   name: string;

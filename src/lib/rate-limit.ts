@@ -1,3 +1,5 @@
+import { supabaseAdmin } from './supabase';
+
 interface RateLimitRecord {
   count: number;
   resetAt: number;
@@ -6,14 +8,35 @@ interface RateLimitRecord {
 const tracker = new Map<string, RateLimitRecord>();
 
 /**
- * In-memory sliding window rate limiter for login & sensitive endpoints.
- * Max 5 failed/total attempts per 5 minutes per IP address.
+ * Cold-start resistant rate limiter using Supabase PostgreSQL persistent store
+ * with in-memory fallback for emergency resilience.
+ * Task 13.1.3 (MF-SEC-001)
  */
-export function checkRateLimit(ip: string, maxAttempts = 5, windowMs = 5 * 60 * 1000) {
+export async function checkRateLimit(ip: string, maxAttempts = 5, windowMs = 5 * 60 * 1000) {
+  const windowSeconds = Math.ceil(windowMs / 1000);
+
+  try {
+    const { data, error } = await supabaseAdmin.rpc('check_rate_limit_atomic', {
+      p_key: ip,
+      p_max_attempts: maxAttempts,
+      p_window_seconds: windowSeconds,
+    });
+
+    if (!error && data) {
+      return {
+        success: Boolean(data.allowed),
+        remaining: Number(data.remaining ?? 0),
+        retryAfterSec: Number(data.retry_after_sec ?? 0),
+      };
+    }
+  } catch (err) {
+    console.warn('[RateLimit] Database rate limit check failed, falling back to local memory store', err);
+  }
+
+  // Fallback to in-memory sliding window tracker if DB is unavailable
   const now = Date.now();
   const record = tracker.get(ip);
 
-  // Clean up expired entries periodically
   if (tracker.size > 5000) {
     for (const [key, val] of tracker.entries()) {
       if (now > val.resetAt) tracker.delete(key);
@@ -35,8 +58,13 @@ export function checkRateLimit(ip: string, maxAttempts = 5, windowMs = 5 * 60 * 
 }
 
 /**
- * Resets rate limit for an IP upon successful login.
+ * Resets rate limit for an IP upon successful authentication.
  */
-export function resetRateLimit(ip: string) {
+export async function resetRateLimit(ip: string) {
   tracker.delete(ip);
+  try {
+    await supabaseAdmin.rpc('reset_rate_limit_atomic', { p_key: ip });
+  } catch (err) {
+    console.warn('[RateLimit] Database rate limit reset failed', err);
+  }
 }

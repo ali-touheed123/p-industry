@@ -17,13 +17,55 @@ export interface UserSession {
   tenantId?: string;
   tenantSlug?: string;
   ceoTenants?: Array<{ id: string; slug: string; name?: string }>;
+  jti?: string;
 }
 
 /**
- * Creates an encrypted JWT session token.
+ * Checks if a JWT session (by JTI) has been explicitly revoked on the server.
+ */
+export async function isSessionRevoked(jti: string): Promise<boolean> {
+  if (!jti) return false;
+  try {
+    const { data } = await supabaseAdmin
+      .from('revoked_sessions')
+      .select('jti')
+      .eq('jti', jti)
+      .maybeSingle();
+    return Boolean(data);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Revokes a session by adding its JTI to the revoked_sessions table.
+ */
+export async function revokeSession(jti: string, userId?: string, expiresAtSec?: number): Promise<void> {
+  if (!jti) return;
+  try {
+    const expiresAt = expiresAtSec
+      ? new Date(expiresAtSec * 1000).toISOString()
+      : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    await supabaseAdmin
+      .from('revoked_sessions')
+      .insert({
+        jti,
+        user_id: userId || null,
+        expires_at: expiresAt,
+      });
+  } catch (err) {
+    console.error('[SessionRevocation] Failed to revoke session token:', err);
+  }
+}
+
+/**
+ * Creates an encrypted JWT session token with a unique JTI claim.
  */
 export async function createSessionToken(payload: UserSession): Promise<string> {
-  return new SignJWT({ ...payload })
+  const jti = payload.jti || crypto.randomUUID();
+  return new SignJWT({ ...payload, jti })
+    .setJti(jti)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('7d')
@@ -33,6 +75,7 @@ export async function createSessionToken(payload: UserSession): Promise<string> 
 /**
  * Validates session from incoming request (cookies or Authorization header).
  * Supports both standard user sessions and developer admin tokens.
+ * Checks server-side revocation list.
  */
 export async function getSession(req: NextRequest): Promise<UserSession | null> {
   const userCookie = req.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -61,6 +104,12 @@ export async function getSession(req: NextRequest): Promise<UserSession | null> 
   if (primaryToken) {
     try {
       const { payload } = await jwtVerify(primaryToken, getJwtSecret());
+      const jti = (payload as any).jti || (payload as any).jti_claim;
+
+      if (jti && (await isSessionRevoked(jti))) {
+        return null;
+      }
+
       return payload as unknown as UserSession;
     } catch {
       // Invalid user token

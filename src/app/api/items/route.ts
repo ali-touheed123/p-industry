@@ -311,8 +311,12 @@ export async function POST(req: NextRequest) {
         if (!row.name?.trim() || !row.code?.trim()) continue; // skip empty rows silently
 
         const retail = Number(row.retail_price) || 0;
-        // FIX FINDING-INV-003: Default cost to 0 — no arbitrary margin calculation (retail * 0.75 removed)
         const cost = Number(row.cost_price) || 0;
+
+        if (cost <= 0) {
+          errors.push({ row: i + 1, code: row.code?.trim() || '', error: 'Cost price must be greater than zero' });
+          continue;
+        }
 
         const result = await insertOneItem({
           code: row.code.trim(),
@@ -362,6 +366,10 @@ export async function POST(req: NextRequest) {
 
     const retail = Number(retail_price) || 0;
     const cost = Number(cost_price) || 0;
+
+    if (cost <= 0) {
+      return NextResponse.json({ success: false, error: 'Cost price must be greater than zero' }, { status: 400 });
+    }
 
     const sisterTenants = await getSisterTenants();
     const result = await insertOneItem({

@@ -5,6 +5,7 @@ import { Branch, DayCloseRecord } from '@/types/ceo';
 import { formatCurrency } from '@/data/ceoMockData';
 import { CheckCircle2, AlertTriangle, Users, Coffee, CalendarCheck } from 'lucide-react';
 import { DatePeriodFilter } from './DatePeriodFilter';
+import { calculateExpectedClosingCash } from '@/utils/cashReconciliation';
 
 interface DayCloseViewProps {
   branch: Branch;
@@ -190,7 +191,12 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
             // For open shifts: use client formula (matches ShiftDrawer) with no double deduction.
             const expCash = Number(s.expected_cash !== undefined && s.expected_cash !== null && !isOpen
               ? s.expected_cash
-              : Math.max(0, openAmt + cashSales - totalExpensesAmt - tokensRedeemedAmt));
+              : Math.max(0, calculateExpectedClosingCash({
+                  openingCash: openAmt,
+                  cashSales,
+                  expenses: totalExpensesAmt,
+                  tokenPayouts: tokensRedeemedAmt,
+                })));
             const variance = isOpen ? 0 : (closeAmt - expCash);
             const varianceStatus: 'MATCHED' | 'SHORT' | 'EXCESS' =
               isOpen ? 'MATCHED' : (variance === 0 ? 'MATCHED' : (variance < 0 ? 'SHORT' : 'EXCESS'));

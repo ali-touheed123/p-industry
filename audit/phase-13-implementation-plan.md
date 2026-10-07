@@ -1,465 +1,307 @@
-# PHASE 13 IMPLEMENTATION PLAN — MASTER CROSS-MODULE REMEDIATION ROADMAP
+# PHASE 13 — MASTER REMEDIATION IMPLEMENTATION PLAN
 
-**Date:** October 3, 2026  
-**Auditor:** Master Forensic Auditor  
+**Date:** October 8, 2026  
+**Author:** Lead Systems Architect & Master Forensic Auditor  
 **Project:** PyntFlow POS & Industrial ERP (`p-industry`)  
-**Phase:** PHASE 13 — Final Cross-Module Reconciliation Forensic Audit  
-**Execution Rule Adherence:** STRICT AUDIT ONLY — ZERO IMPLEMENTATION CHANGES  
+**Phase:** PHASE 13 — Remediation Implementation Plan  
+**Execution Rule Adherence:** STRICT PLANNING ONLY — ZERO CODE OR MIGRATIONS EXECUTED  
 
 ---
 
-## 1. Executive Summary & Remediation Strategy
+## 1. Executive Summary
 
-This Master Cross-Module Implementation Plan establishes the authoritative remediation roadmap derived from the Phase 13 Final Reconciliation. All 47 surviving verified findings are mapped into 4 sequential execution waves ordered strictly by technical dependency, systemic risk, and security severity.
+This Master Remediation Implementation Plan translates the authoritative findings of `audit/phase-13-audit-report.md` into an actionable, dependency-aware remediation roadmap for Phase 13.
 
-Remediation must proceed wave-by-wave. No downstream wave may begin until the preceding wave has passed full unit, integration, and security verification.
+### Audit Result Reconciliation
+The Phase 13 forensic audit reconciled 38 master tasks against current source code, database migrations, and live Supabase PostgreSQL function catalogs:
+- **22 Tasks (`ALREADY IMPLEMENTED`)**: Fully implemented during Phases 7–12. No remediation required.
+- **1 Task (`SUPERSEDED`)**: Task 13.4.6 (Held Invoice Inventory TTL Reservation) was superseded by Phase 12's live stock re-check and warning notification on restore.
+- **8 Tasks (`PARTIALLY IMPLEMENTED`)**: Foundational work complete; targeted remediation required only for remaining gaps.
+- **7 Tasks (`NOT IMPLEMENTED`)**: Genuinely open findings requiring complete implementation.
 
-> [!IMPORTANT]
-> **AUDIT-ONLY GOVERNANCE:** This document is an architectural blueprint. Absolutely no code, database migrations, package dependencies, or configuration changes may be applied during the audit phase.
-
----
-
-## 2. Master Execution Waves Overview
-
-- **WAVE 1: Critical Security, IDOR & Transaction Isolation (P1 — Immediate Gate)**  
-  Targets the 4 CRITICAL vulnerabilities that threaten multi-tenant isolation, core financial ledgers, and authentication integrity.
-- **WAVE 2: High Operational & Financial Integrity (P2 — High Priority)**  
-  Resolves the 16 HIGH severity defects across perimeter edge defense, purchase shift bleed, invoice edit atomicity, and performance fan-outs.
-- **WAVE 3: Concurrency, AI Quotas & Database Integrity (P3 — Medium Priority)**  
-  Addresses the 15 MEDIUM severity findings regarding session invalidation, AI gateway persistence, secondary RPC atomicity, and UI workflow gaps.
-- **WAVE 4: Thermal Printing, UI Polish & Legacy Cleanup (P4 — Maintenance & Polish)**  
-  Finalizes the 12 LOW severity items including slip canvas layout scaling, identifier collision resistance, dead code removal, and header modernization.
+### Final Phase 13 Objective
+To execute targeted remediation for the **7 open** and **8 partial** items without re-implementing already verified architecture, maintaining 100% backward compatibility, and enforcing zero regressions across POS checkout, inventory movement, and financial ledgers.
 
 ---
 
-## 3. Wave 1: Critical Security, IDOR & Transaction Isolation (P1)
+## 2. Scope Classification
 
-### Task 13.1.1: Record Ownership Filter Enforcement for Client & Supplier IDOR
-- **Final Finding ID:** `MF-AUTH-001`
-- **Original Finding IDs:** `SEC-009`, `FINDING-AUTH-001`, `FINDING-API-001`, `MF-002`
-- **Exact Location:** `src/app/api/clients/route.ts`, `src/app/api/suppliers/route.ts`
-- **Root Cause:** Route handlers authenticate caller tenant, but execute update queries on target ID without `.eq('tenant_id', tenantId)`, permitting cross-tenant record tampering.
-- **Proposed Remediation:** Append `.eq('tenant_id', auth.tenantId)` to all `PATCH` and `DELETE` queries in both endpoints.
-- **Dependencies:** None.
-- **Verification Criteria:** Issue `PATCH /api/clients` with valid Tenant A session targeting Tenant B `client_id`; verify HTTP 404/403 and zero database row mutation.
-- **Rollback Considerations:** Pure query filter addition; easily reverted via git commit rollback.
-
-### Task 13.1.2: Atomic Supplier Purchase Order RPC (`create_purchase_atomic`)
-- **Final Finding ID:** `MF-ATOM-001`
-- **Original Finding IDs:** `MF-001`, `FINDING-API-005`, `FINDING-PROC-001`, `FINDING-E2E-001`
-- **Exact Location:** `supabase/migrations/`, `src/app/api/purchases/route.ts`
-- **Root Cause:** Sequential JavaScript calls handle purchase header insert, item inserts, stock increments, supplier balance update, and token retention mark-used.
-- **Proposed Remediation:** Author a PostgreSQL PL/pgSQL function `create_purchase_atomic(p_purchase_data, p_items, p_token_ids)` executing all operations within a single transaction with automatic rollback on exception. Update `src/app/api/purchases/route.ts` to call this RPC.
-- **Dependencies:** Database migration.
-- **Verification Criteria:** Simulate mid-flight database error during purchase creation; confirm zero orphaned records, zero partial stock increases, and untouched token statuses.
-- **Rollback Considerations:** Retain legacy route logic behind feature flag until migration is verified.
-
-### Task 13.1.3: Distributed Rate Limiting & Cold-Start Persistence
-- **Final Finding ID:** `MF-SEC-001`
-- **Original Finding IDs:** `SEC-003`, `FINDING-API-017`
-- **Exact Location:** `src/lib/rate-limit.ts`
-- **Root Cause:** In-memory `Map` resets on serverless cold starts, permitting brute-force credential stuffing.
-- **Proposed Remediation:** Migrate rate limiter to Upstash Redis or Supabase PostgreSQL unlogged rate-limit table with TTL index.
-- **Dependencies:** Upstash Redis credentials or Supabase rate-limit table migration.
-- **Verification Criteria:** Trigger serverless cold start; verify rate-limit counter retains count and blocks requests exceeding threshold.
-- **Rollback Considerations:** Retain in-memory fallback if external rate limit store is unreachable.
-
-### Task 13.1.4: Harmonize Core Cash Reconciliation & Movement Formulas
-- **Final Finding ID:** `MF-FIN-001`
-- **Original Finding IDs:** `FINDING-REP-001`
-- **Exact Location:** `src/app/api/shifts/route.ts`, `src/components/ShiftDrawer.tsx`, `src/components/FinancialLedgers.tsx`
-- **Root Cause:** Cash returns, petty expenses, and supplier cash payments are double-subtracted or handled asymmetrically between drawer and ledgers.
-- **Proposed Remediation:** Establish single mathematical specification for Expected Cash: `Opening Cash + Cash Sales - Cash Returns - Petty Expenses - Supplier Cash Payouts - Token Cash Payouts`. Centralize calculation into shared utility `src/utils/cashReconciliation.ts`.
-- **Dependencies:** None.
-- **Verification Criteria:** Execute complete shift with split sales, return, petty expense, and supplier payout; verify drawer expected cash matches financial ledger to the exact cent.
-- **Rollback Considerations:** Revert utility import in UI components.
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        PHASE 13 TASK CLASSIFICATION                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│ 🟢 ALREADY IMPLEMENTED (22 Tasks) — No Remediation Action Needed        │
+│    13.1.2, 13.2.1, 13.2.2, 13.2.3, 13.2.4, 13.2.5, 13.2.6, 13.2.7,       │
+│    13.2.9, 13.2.10, 13.2.12, 13.2.13, 13.2.14, 13.3.1, 13.3.2, 13.3.4,    │
+│    13.3.9, 13.3.11, 13.3.13, 13.4.2, 13.4.3, 13.4.4, 13.4.5, 13.4.7        │
+├─────────────────────────────────────────────────────────────────────────┤
+│ 🟡 PARTIALLY IMPLEMENTED (8 Tasks) — Target Remaining Scope Only         │
+│    13.1.1, 13.2.8, 13.2.11, 13.3.6, 13.3.8, 13.3.10, 13.4.8, 13.4.9      │
+├─────────────────────────────────────────────────────────────────────────┤
+│ 🔴 NOT IMPLEMENTED (7 Tasks) — Full Remediation Required                │
+│    13.1.3, 13.1.4, 13.3.3, 13.3.5, 13.3.7, 13.3.12, 13.4.1               │
+├─────────────────────────────────────────────────────────────────────────┤
+│ ⚪ SUPERSEDED (1 Task) — Preserved Phase 12 Resolution                   │
+│    13.4.6 (Replaced by live stock re-check on restore in PosBilling.tsx)│
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 4. Wave 2: High Operational & Financial Integrity (P2)
+## 3. Remediation Matrix
 
-### Task 13.2.1: Enforce Tenant Scope on Inventory Item Mutations
-- **Final Finding ID:** `MF-AUTH-002`
-- **Original Finding IDs:** `FINDING-AUTH-002`, `FINDING-API-002`, `FINDING-INV-001`
-- **Exact Location:** `src/app/api/items/route.ts`
-- **Root Cause:** `PATCH /api/items` updates records by `id` without verifying `tenant_id`.
-- **Proposed Remediation:** Add `.eq('tenant_id', auth.tenantId)` filter to all `PATCH` and `DELETE` item operations.
-- **Dependencies:** None.
-- **Verification Criteria:** Attempt modifying item of another tenant; verify operation fails with HTTP 404/403.
-- **Rollback Considerations:** Standard route query rollback.
-
-### Task 13.2.2: Strict Authentication & Scoping on Branch Orders
-- **Final Finding ID:** `MF-AUTH-003`
-- **Original Finding IDs:** `SEC-006`, `FINDING-API-003`, `FINDING-E2E-008`
-- **Exact Location:** `src/app/api/branch-orders/route.ts`
-- **Root Cause:** Branch orders fetched from DB before tenant authentication check; defensive null auth fallback present.
-- **Proposed Remediation:** Relocate `requireTenantAuth` check to top of handler; eliminate null auth fallback.
-- **Dependencies:** None.
-- **Verification Criteria:** Invoke endpoint without valid bearer token; ensure instant 401 without database query execution.
-- **Rollback Considerations:** Standard handler rollback.
-
-### Task 13.2.3: Atomic Invoice Modification RPC (`edit_invoice_atomic`)
-- **Final Finding ID:** `MF-ATOM-002`
-- **Original Finding IDs:** `SEC-008`, `FINDING-API-004`, `FINDING-E2E-004`
-- **Exact Location:** `supabase/migrations/`, `src/app/api/invoices/route.ts`
-- **Root Cause:** Multi-step stock revert and re-deduction loops executed in Node.js runtime.
-- **Proposed Remediation:** Create `edit_invoice_atomic` PL/pgSQL function to reverse prior line items, deduct new line items, and adjust customer balance in a single database transaction.
-- **Dependencies:** Database migration.
-- **Verification Criteria:** Simulate mid-edit failure; verify stock levels and customer balances remain at original values.
-- **Rollback Considerations:** Retain prior handler as fallback.
-
-### Task 13.2.4: Centralized Edge Route Perimeter Middleware
-- **Final Finding ID:** `MF-ARCH-001`
-- **Original Finding IDs:** `SEC-001`, `FINDING-ARCH-001`
-- **Exact Location:** `src/middleware.ts` (New file)
-- **Root Cause:** Missing Next.js Edge Middleware allows unauthenticated requests to reach API route handlers before rejection.
-- **Proposed Remediation:** Implement `src/middleware.ts` validating session cookies/JWT on protected paths (`/api/*`, `/[slug]/*`) while whitelisting public login routes.
-- **Dependencies:** Next.js Edge runtime compatibility.
-- **Verification Criteria:** Request protected route without session cookie; verify Edge layer returns 401/302 before hitting route handlers.
-- **Rollback Considerations:** Delete or disable middleware file.
-
-### Task 13.2.5: Purge Hardcoded Developer PIN (`dev2026`)
-- **Final Finding ID:** `MF-SEC-002`
-- **Original Finding IDs:** `SEC-004`, `FINDING-ARCH-002`, `FINDING-ARCH-003`
-- **Exact Location:** `src/lib/auth-passwords.ts:25-27`, `src/app/api/auth/dev-pin/route.ts`
-- **Root Cause:** Fallback to static string `dev2026` in code.
-- **Proposed Remediation:** Require `DEV_MASTER_PIN` in environment variables; disable developer PIN route entirely when `NODE_ENV === 'production'`.
-- **Dependencies:** Environment configuration.
-- **Verification Criteria:** Send `dev2026` in production mode; verify immediate 403 Forbidden.
-- **Rollback Considerations:** Environment variable adjustment.
-
-### Task 13.2.6: Redact Staff Records from Unauthenticated Tenant Slug Route
-- **Final Finding ID:** `MF-SEC-003`
-- **Original Finding IDs:** `SEC-005`, `FINDING-API-009`
-- **Exact Location:** `src/app/api/tenants/route.ts`
-- **Root Cause:** Public `GET ?slug=` query returns full tenant record including staff UUIDs and names.
-- **Proposed Remediation:** Restrict public response to `id`, `name`, `slug`, `branding`, and `active_status`; require authenticated session for staff list.
-- **Dependencies:** Verify frontend login screen only consumes whitelisted tenant branding fields.
-- **Verification Criteria:** Query `GET /api/tenants?slug=demo`; verify staff list is omitted or requires bearer token.
-- **Rollback Considerations:** Standard route handler rollback.
-
-### Task 13.2.7: Scope Shift Reconciliation to Explicit `shift_id`
-- **Final Finding ID:** `MF-SHFT-001`
-- **Original Finding IDs:** `FINDING-REP-004`, `FINDING-E2E-002`, `MF-005`
-- **Exact Location:** `supabase/migrations/`, `src/app/api/purchases/route.ts`, `src/app/api/shifts/route.ts`
-- **Root Cause:** Purchases table lacks `shift_id`; shift drawer queries purchases by timestamp `.gte('created_at', startTime)`, leaking late-night purchases across shifts.
-- **Proposed Remediation:** Add `shift_id UUID REFERENCES shifts(id)` to `purchases` table. Pass `shift_id` on purchase creation. Query shift cash deductions by `shift_id`.
-- **Dependencies:** Database migration.
-- **Verification Criteria:** Create cash purchase backdated or during an overlapping shift; verify it is attributed exclusively to the assigned `shift_id`.
-- **Rollback Considerations:** Allow nullable `shift_id` during transition.
-
-### Task 13.2.8: Cursor Pagination for Invoices & Financial Ledgers
-- **Final Finding ID:** `MF-PERF-001`
-- **Original Finding IDs:** `PERF-001`, `FINDING-REP-007`, `FINDING-API-016`
-- **Exact Location:** `src/app/api/invoices/route.ts`, `src/app/api/clients/route.ts`
-- **Root Cause:** Default 500-1000 record limits without pagination causes high memory usage and latency.
-- **Proposed Remediation:** Implement keyset cursor pagination (`created_at`, `id`) with max page size of 100 records.
-- **Dependencies:** Update frontend infinite scrolling / paginated table components.
-- **Verification Criteria:** Load ledger with 5,000 records; verify API returns exactly page size with `next_cursor`.
-- **Rollback Considerations:** Standard query parameter adjustment.
-
-### Task 13.2.9: Consolidate N+1 KPI Fetching in CEO Executive Suite
-- **Final Finding ID:** `MF-PERF-002`
-- **Original Finding IDs:** `PERF-002`
-- **Exact Location:** `src/app/api/ceo/executive-suite/route.ts`
-- **Root Cause:** Sequentially fires database queries per branch inside loop.
-- **Proposed Remediation:** Replace loop with single aggregated SQL query grouping metrics by `branch_id`.
-- **Dependencies:** None.
-- **Verification Criteria:** Compare response time and DB query count on tenant with 10 branches; confirm 1 query instead of 10.
-- **Rollback Considerations:** Standard query refactor rollback.
-
-### Task 13.2.10: Dynamic Splitting for Monolithic POS & Inventory Bundles
-- **Final Finding ID:** `MF-PERF-003`
-- **Original Finding IDs:** `PERF-003`
-- **Exact Location:** `src/app/[slug]/page.tsx`, `src/components/PosBilling.tsx`, `src/components/StockInventory.tsx`
-- **Root Cause:** Heavy client components (2000+ lines) loaded statically on initial page load.
-- **Proposed Remediation:** Implement `next/dynamic` with SSR disabled for modals and secondary views (Day Close, Thermal Settings, Barcode Generator).
-- **Dependencies:** None.
-- **Verification Criteria:** Verify initial bundle size reduction in Next.js build stats.
-- **Rollback Considerations:** Revert dynamic imports to static imports.
-
-### Task 13.2.11: Standardize Gross vs Net Sales and Tax/Discount Formulas
-- **Final Finding IDs:** `MF-FIN-002`, `MF-FIN-003`
-- **Original Finding IDs:** `FINDING-REP-002`, `FINDING-REP-003`, `FINDING-REP-005`
-- **Exact Location:** `src/components/ShiftDrawer.tsx`, `src/components/DayClose.tsx`, `src/components/FinancialLedgers.tsx`
-- **Root Cause:** Divergent mathematical definitions of Gross Sales and inconsistent treatment of delivery charges.
-- **Proposed Remediation:** Define enterprise accounting standard:  
-  - `Gross Sales = Sum(Item Line Totals before invoice-level discount)`  
-  - `Net Sales = Gross Sales - Invoice Discounts + Delivery Charges`  
-  - Ensure all reports, drawers, and dashboards consume these shared formulas.
-- **Dependencies:** None.
-- **Verification Criteria:** Compare totals across Sales History, Shift Drawer, and Day Close; ensure exact mathematical parity.
-- **Rollback Considerations:** Component math revert.
-
-### Task 13.2.12: Sanitize PostgREST Search Wildcards
-- **Final Finding ID:** `MF-SEC-004`
-- **Original Finding IDs:** `SEC-007`, `FINDING-API-007`, `FINDING-API-008`
-- **Exact Location:** `src/app/api/invoices/route.ts`, `src/app/api/tenants/route.ts`
-- **Root Cause:** Raw user input interpolated into PostgREST `ilike.%${search}%` filter.
-- **Proposed Remediation:** Sanitize user input by escaping `%`, `_`, and commas prior to query generation.
-- **Dependencies:** Sanitization utility.
-- **Verification Criteria:** Pass search query containing `%` and commas; verify query executes as literal search without filter syntax errors.
-- **Rollback Considerations:** Utility removal.
-
-### Task 13.2.13: Fix POS Sales Return Line Total Math & Event Listener Leak
-- **Final Finding IDs:** `MF-UI-001`, `MF-UI-002`
-- **Original Finding IDs:** `FINDING-POS-001`, `FINDING-POS-002`
-- **Exact Location:** `src/components/PosBilling.tsx`
-- **Root Cause:** Return quantity calculation produces inverted line total; window keyboard shortcut listener missing cleanup return in `useEffect`.
-- **Proposed Remediation:** Correct sign handling in cart line total calculation; return `() => window.removeEventListener(...)` in `useEffect`.
-- **Dependencies:** None.
-- **Verification Criteria:** Add return item to cart, verify total deductions; navigate away and inspect attached window listeners in Chrome DevTools.
-- **Rollback Considerations:** Component revert.
-
-### Task 13.2.14: Atomic Inter-Branch Stock Transfer RPC (`transfer_stock_atomic`)
-- **Final Finding ID:** `MF-ATOM-003`
-- **Original Finding IDs:** `SEC-016`, `FINDING-API-006`, `FINDING-E2E-009`
-- **Exact Location:** `supabase/migrations/`, `src/app/api/branch-orders/route.ts`
-- **Root Cause:** Dispatch and Receive iterate through items without database transaction wrapping.
-- **Proposed Remediation:** Implement `transfer_stock_atomic(p_order_id, p_action)` executing dispatch/receive and inventory movements in a single transaction.
-- **Dependencies:** Database migration.
-- **Verification Criteria:** Simulate network failure during 10-item transfer dispatch; verify neither source nor destination stock changes partially.
-- **Rollback Considerations:** Retain legacy sequential handlers.
+| Task ID | Finding Ref | Existing State | Remaining Remediation Work | Priority | Dependencies | Verification Method |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **13.1.1** | `MF-AUTH-001` | `suppliers/route.ts` scoped. `clients/route.ts` only scopes `tenant_id` if provided in body. | Enforce unconditional `.eq('tenant_id', auth.tenantId)` on `clients/route.ts` `PATCH` & add soft `DELETE`. | P1 | None | HTTP 403 cross-tenant PATCH test |
+| **13.1.3** | `MF-SEC-001` | In-memory `Map` in `rate-limit.ts` resets on serverless cold starts. | Build persistent Supabase PostgreSQL `rate_limit_entries` table & atomic check RPC. | P3 | None | Cold-start simulated hit limit test |
+| **13.1.4** | `MF-FIN-001` | `salesMath.ts` handles sales metrics; shift cash drawer formula duplicated. | Create `src/utils/cashReconciliation.ts` for drawer expected cash & wire into `ShiftDrawer` & `DayClose`. | P2 | 13.2.11 | Cash drawer ledger balance match |
+| **13.2.8** | `MF-PERF-001` | `invoices/route.ts` has keyset cursor pagination (`next_cursor`, `limit: 50`). | Add keyset cursor pagination (`created_at`, `id`) to client and supplier ledger query endpoints. | P4 | None | Payload size < 50KB & pagination test |
+| **13.2.11** | `MF-FIN-002/003` | `salesMath.ts` used in `SalesHistory`, `SalesView`, `OverviewView`. | Refactor `ShiftDrawer.tsx` and `DayClose.tsx` to consume `salesMath.ts` functions. | P2 | None | Formula audit parity check |
+| **13.3.3** | `MF-AUTH-004` | 7-day JWTs without server-side revocation mechanism. | Create `revoked_sessions` table in Supabase, lookup check in `session.ts`, populate on `POST /api/auth/logout`. | P3 | None | Logout token reuse rejection test (401) |
+| **13.3.5** | `MF-SEC-005` | `src/lib/supabase.ts` uses fallback `'service_key_placeholder'`. | Add strict startup assertion throwing a fatal error if `SUPABASE_SERVICE_ROLE_KEY` is missing or placeholder. | P1 | None | Node process startup error test |
+| **13.3.6** | `MF-DEP-001` | `pg` moved to `devDependencies` in `package.json`. | Verify zero imports of `pg` / `@types/pg` in codebase and purge package references from `package.json`. | P4 | None | `npm ls pg` & clean build |
+| **13.3.7** | `MF-UI-003` | Backend RPC `cancel_invoice_atomic` active; frontend UI missing. | Add "Cancel Invoice" button & supervisor PIN modal in `SalesHistory.tsx` invoking `cancel_invoice_atomic`. | P2 | None | UI cancellation click-through test |
+| **13.3.8** | `MF-DB-001` | `adjust_item_stock` RPC clamps to 0 via `GREATEST(0, ...)`. | Confirm business decision: preserve `GREATEST(0, ...)` clamping for checkout resilience or parameterize strict floor. | P4 | None | DB RPC behavior confirmation |
+| **13.3.10** | `MF-PERF-004` | API token config O(N) indexing done in `items/route.ts`. | Verify UI component category rendering in `StockInventory.tsx` and optimize category map if needed. | P4 | None | Component render time profiling |
+| **13.3.12** | `MF-INV-001` | `items/route.ts` permits `cost_price = 0` (L315). | Enforce `cost_price > 0` validation on server (`items/route.ts`) & client (`StockInventory.tsx`) for new items. | P2 | None | Zero cost item creation rejection test |
+| **13.4.1** | `MF-SEC-006/007` | `next.config.ts` has HSTS & Permissions-Policy; CSP missing. | Add Content-Security-Policy header in `next.config.ts` and remove deprecated `X-XSS-Protection` header. | P3 | None | SecurityHeaders.com / HTTP response check |
+| **13.4.8** | `MF-DEP-002/LEG-001` | Dead route `app/api/route.ts` deleted; `--webpack` retained. | **INTENTIONALLY RETAINED**: Keep `--webpack` in `package.json` due to Windows SWC native module constraints. | P4 | None | Windows build stability check |
+| **13.4.9** | `MF-ARCH-002/DB-002` | Legacy SQL archived to `supabase/migrations/archive/`. | Consolidate duplicated TypeScript interfaces between `src/types/index.ts` and `src/types/ceo.ts`. | P4 | None | `npx tsc --noEmit` exit 0 |
 
 ---
 
-## 5. Wave 3: Concurrency, AI Quotas & Database Integrity (P3)
+## 4. Detailed Implementation Plan
 
-### Task 13.3.1: Atomic Voucher Creation RPC (`create_voucher_atomic`)
-- **Final Finding ID:** `MF-ATOM-004`
-- **Original Finding IDs:** `SEC-012`, `FINDING-LEDG-001`, `FINDING-E2E-006`
-- **Exact Location:** `supabase/migrations/`, `src/app/api/vouchers/route.ts`
-- **Root Cause:** Token validation, voucher insertion, and token marking run sequentially.
-- **Proposed Remediation:** Wrap voucher creation and token status updates in `create_voucher_atomic` PL/pgSQL RPC.
-- **Dependencies:** Database migration.
-- **Verification Criteria:** Attempt duplicate voucher creation on same token concurrently; confirm only one succeeds with 409 Conflict.
-- **Rollback Considerations:** Route rollback.
+### 4.1 Task 13.1.1 — Client IDOR Tenant Scoping (`MF-AUTH-001`) [P1 - Critical]
+- **Objective**: Prevent cross-tenant record tampering by enforcing unconditional `tenant_id` equality filters on all client update and delete queries.
+- **Current Implementation**: `suppliers/route.ts` enforces `.eq('tenant_id', existingSupplier.tenant_id)` in PATCH and DELETE. `clients/route.ts` line 115 only applies `.eq('tenant_id', tenant_id)` if `tenant_id` is supplied in the request body, and lacks a DELETE handler.
+- **Target Files**: `src/app/api/clients/route.ts`
+- **Remediation Actions**:
+  1. Modify `PATCH` handler in `src/app/api/clients/route.ts`:
+     - Unconditionally append `.eq('tenant_id', targetTenantId)` to the update query.
+  2. Implement `DELETE` handler in `src/app/api/clients/route.ts`:
+     - Fetch existing client by ID, verify `existingClient.tenant_id` via `requireTenantAuth`.
+     - Perform soft-delete (`is_deleted = true`) scoped to `.eq('id', id).eq('tenant_id', existingClient.tenant_id)`.
+- **Acceptance Criteria**: `PATCH` or `DELETE` requests targeting another tenant's `client_id` return HTTP 403 / 404 without mutating data.
 
-### Task 13.3.2: Atomic Token Vendor Settlement RPC (`settle_vendor_atomic`)
-- **Final Finding ID:** `MF-ATOM-005`
-- **Original Finding IDs:** `FINDING-E2E-010`
-- **Exact Location:** `supabase/migrations/`, `src/app/api/tokens/route.ts`
-- **Root Cause:** Vendor settlement processes batch updates in iterative loop.
-- **Proposed Remediation:** Implement `settle_vendor_atomic(p_tenant_id, p_vendor_id, p_token_ids)` executing batch status updates inside single transaction.
-- **Dependencies:** Database migration.
-- **Verification Criteria:** Process 100 tokens with 1 invalid ID; ensure entire batch rolls back cleanly.
-- **Rollback Considerations:** Route rollback.
+### 4.2 Task 13.1.3 — Distributed Rate Limiting via Supabase PostgreSQL (`MF-SEC-001`) [P3 - Medium]
+- **Objective**: Replace in-memory sliding window rate limiter with a persistent, cold-start resistant Supabase PostgreSQL store.
+- **Architecture Decision**: **Use Supabase PostgreSQL** (Do NOT use Redis or Upstash).
+- **Database Objects Required**:
+  - Table: `rate_limit_entries` (`key TEXT PRIMARY KEY`, `count INT`, `reset_at TIMESTAMPTZ`, `updated_at TIMESTAMPTZ`).
+  - Stored Function: `check_rate_limit_atomic(p_key TEXT, p_max_attempts INT, p_window_seconds INT)` returning `(allowed BOOLEAN, remaining INT, retry_after_sec INT)`.
+- **Target Files**: `supabase/migrations/20261008_01_rate_limit_system.sql`, `src/lib/rate-limit.ts`
+- **Remediation Actions**:
+  1. Author migration creating `rate_limit_entries` table with unlogged storage optimization and periodic cleanup trigger.
+  2. Implement `check_rate_limit_atomic` PL/pgSQL function using `INSERT ... ON CONFLICT (key) DO UPDATE` with row locking (`FOR UPDATE`).
+  3. Refactor `src/lib/rate-limit.ts` to execute `supabaseAdmin.rpc('check_rate_limit_atomic', ...)` with fallback to fail-closed in production.
+- **Acceptance Criteria**: Rate limits persist across serverless restarts and enforce max 5 attempts per 15 minutes per IP/key.
 
-### Task 13.3.3: Server-Side Session Revocation Mechanism
-- **Final Finding ID:** `MF-AUTH-004`
-- **Original Finding IDs:** `SEC-010`, `FINDING-AUTH-003`
-- **Exact Location:** `supabase/migrations/`, `src/lib/session.ts`, `src/app/api/auth/logout/route.ts`
-- **Root Cause:** 7-day stateless JWT cannot be revoked on logout.
-- **Proposed Remediation:** Maintain `revoked_sessions` or `session_nonces` table in Supabase; check session validity during auth validation.
-- **Dependencies:** Database migration.
-- **Verification Criteria:** Logout from device; attempt using previous JWT; verify request is rejected with 401 Unauthorized.
-- **Rollback Considerations:** Feature flag bypass.
+### 4.3 Task 13.1.4 — Centralized Cash Reconciliation Formula (`MF-FIN-001`) [P2 - High]
+- **Objective**: Establish a single authoritative cash reconciliation utility across cashier shift drawers, day close, and financial ledgers.
+- **Formula Requirement**:
+  $$\text{Expected Closing Cash} = \text{Opening Cash} + \text{Cash Sales} - \text{Cash Returns} - \text{Petty Expenses} - \text{Supplier Cash Payouts} - \text{Token Cash Payouts}$$
+- **Target Files**: `src/utils/cashReconciliation.ts` (New), `src/components/ShiftDrawer.tsx`, `src/components/DayClose.tsx`
+- **Remediation Actions**:
+  1. Create `src/utils/cashReconciliation.ts` exporting `calculateExpectedClosingCash(params)`.
+  2. Import and replace inline calculations in `ShiftDrawer.tsx` and `DayClose.tsx`.
+- **Acceptance Criteria**: Zero cash discrepancy between cashier drawer closing preview and manager day close ledger summaries.
 
-### Task 13.3.4: Persistent Supabase-Backed AI Quota Ledger
-- **Final Finding ID:** `MF-AI-001`
-- **Original Finding IDs:** `SEC-011`, `FINDING-PERF-004`, `FINDING-DB-004`
-- **Exact Location:** `src/lib/ai-gateway.ts`
-- **Root Cause:** In-memory fallback allows quota bypass on serverless cold starts.
-- **Proposed Remediation:** Ensure all AI token tracking strictly persists to `ai_usage_ledger` in Supabase; fail closed rather than in-memory fallback if quota tracking fails.
-- **Dependencies:** Verify Supabase connection reliability.
-- **Verification Criteria:** Simulate serverless restart; verify AI quota limit remains enforced.
-- **Rollback Considerations:** Gateway config revert.
+### 4.4 Task 13.2.8 — Cursor Pagination for Client & Supplier Ledgers (`MF-PERF-001`) [P4 - Low]
+- **Objective**: Extend keyset cursor pagination to client and supplier ledger listing endpoints to eliminate unbounded DB payload transfers.
+- **Current Implementation**: `invoices/route.ts` already has cursor pagination (`next_cursor`, `has_more`, `limit: 50`).
+- **Target Files**: `src/app/api/clients/route.ts`, `src/app/api/suppliers/route.ts`
+- **Remediation Actions**:
+  1. Add `cursor` and `limit` (default 50, max 200) query parameter handling to `GET /api/clients` and `GET /api/suppliers`.
+  2. Return structured pagination metadata (`next_cursor`, `has_more`).
+- **Acceptance Criteria**: JSON responses return $\le 50$ records with `next_cursor` when requesting un-capped ledger views.
 
-### Task 13.3.5: Strict Environment Assertion for Supabase Service Role Key
-- **Final Finding ID:** `MF-SEC-005`
-- **Original Finding IDs:** `SEC-014`
-- **Exact Location:** `src/lib/supabase.ts`
-- **Root Cause:** Falls back to placeholder dummy string if environment variable is missing.
-- **Proposed Remediation:** Throw an explicit, fatal startup exception if `SUPABASE_SERVICE_ROLE_KEY` is undefined or placeholder.
-- **Dependencies:** Environment verification.
-- **Verification Criteria:** Start app without env variable; verify app fails fast with clear error message.
-- **Rollback Considerations:** Code revert.
+### 4.5 Task 13.2.11 — Standardize Sales Math across Shift Drawer & Day Close (`MF-FIN-002/003`) [P2 - High]
+- **Objective**: Wire `src/utils/salesMath.ts` into remaining reporting and shift drawer components.
+- **Current Implementation**: `salesMath.ts` is already used in `SalesHistory.tsx`, `SalesView.tsx`, and `OverviewView.tsx`.
+- **Target Files**: `src/components/ShiftDrawer.tsx`, `src/components/DayClose.tsx`
+- **Remediation Actions**:
+  1. Refactor gross sales, net sales, tax, and discount calculation blocks in `ShiftDrawer.tsx` and `DayClose.tsx` to call `calculateSalesSummary()` from `@/utils/salesMath`.
+- **Acceptance Criteria**: All reporting screens produce 100% identical gross vs net sales and discount totals for any given date range.
 
-### Task 13.3.6: Purge Unused `pg` Dependency
-- **Final Finding ID:** `MF-DEP-001`
-- **Original Finding IDs:** `FINDING-DEP-001`
-- **Exact Location:** `package.json`, `package-lock.json`
-- **Root Cause:** `pg` package installed during unauthorized previous audit session; unreferenced in application.
-- **Proposed Remediation:** Run `npm uninstall pg @types/pg`.
-- **Dependencies:** None.
-- **Verification Criteria:** Ensure project builds and tests pass cleanly without `pg`.
-- **Rollback Considerations:** `npm install pg`.
+### 4.6 Task 13.3.3 — Server-Side Session Revocation Mechanism (`MF-AUTH-004`) [P3 - Medium]
+- **Objective**: Implement server-side JWT session revocation to support explicit user logout and immediate token invalidation.
+- **Database Objects Required**:
+  - Table: `revoked_sessions` (`jti TEXT PRIMARY KEY`, `user_id UUID`, `revoked_at TIMESTAMPTZ`, `expires_at TIMESTAMPTZ`).
+  - Index: `idx_revoked_sessions_expires ON revoked_sessions(expires_at)`.
+- **Target Files**: `supabase/migrations/20261008_02_revoked_sessions.sql`, `src/lib/session.ts`, `src/app/api/auth/logout/route.ts`
+- **Remediation Actions**:
+  1. Create `revoked_sessions` table migration.
+  2. Update `createSessionToken` in `src/lib/session.ts` to include unique `jti` (UUID) claim.
+  3. Add `isSessionRevoked(jti)` check in `getSession()` in `src/lib/session.ts`.
+  4. Update `POST /api/auth/logout` to insert the session `jti` into `revoked_sessions`.
+- **Acceptance Criteria**: Transmitting a previously valid JWT after `POST /api/auth/logout` returns HTTP 401 Unauthorized.
 
-### Task 13.3.7: Implement Frontend Invoice Cancellation Workflow
-- **Final Finding ID:** `MF-UI-003`
-- **Original Finding IDs:** `FINDING-REP-006`
-- **Exact Location:** `src/components/SalesHistory.tsx`
-- **Root Cause:** Backend cancellation API exists, but UI has no trigger button.
-- **Proposed Remediation:** Add "Cancel Invoice" button in `SalesHistory.tsx` with supervisor PIN modal calling `POST /api/invoices/cancel`.
-- **Dependencies:** Verified backend RPC `cancel_invoice_atomic`.
-- **Verification Criteria:** Cancel invoice from UI; verify inventory restored, balance reversed, and status set to 'cancelled'.
-- **Rollback Considerations:** Remove UI button.
+### 4.7 Task 13.3.5 — Strict Supabase Service Role Key Startup Assertion (`MF-SEC-005`) [P1 - Critical]
+- **Objective**: Fail immediately at server startup if `SUPABASE_SERVICE_ROLE_KEY` is unconfigured or set to placeholder string.
+- **Target Files**: `src/lib/supabase.ts`
+- **Remediation Actions**:
+  1. Inspect `process.env.SUPABASE_SERVICE_ROLE_KEY` on module load.
+  2. Throw fatal `Error('[FATAL SECURITY EXCEPTION] SUPABASE_SERVICE_ROLE_KEY is unconfigured or invalid placeholder.')` if key is missing, empty, or equals `'service_key_placeholder'`.
+- **Acceptance Criteria**: Node.js server crashes immediately on initialization if service role key is unconfigured.
 
-### Task 13.3.8: Negative Stock Floor Constraint in `adjust_item_stock` RPC
-- **Final Finding ID:** `MF-DB-001`
-- **Original Finding IDs:** `FINDING-DB-002`
-- **Exact Location:** `supabase/migrations/`
-- **Root Cause:** `adjust_item_stock` RPC permits negative stock levels.
-- **Proposed Remediation:** Add optional `p_allow_negative BOOLEAN DEFAULT false` parameter and enforce `CHECK (stock >= 0)` when false.
-- **Dependencies:** Database migration.
-- **Verification Criteria:** Attempt stock adjustment exceeding available inventory; confirm exception raised.
-- **Rollback Considerations:** Update RPC default to true if needed.
+### 4.8 Task 13.3.6 — Purge Unused `pg` Dependency (`MF-DEP-001`) [P4 - Low]
+- **Objective**: Completely remove unused `pg` and `@types/pg` dependencies from `package.json`.
+- **Current Implementation**: Moved to `devDependencies` in Phase 11.
+- **Target Files**: `package.json`
+- **Remediation Actions**:
+  1. Verify zero imports of `'pg'` across `src/`.
+  2. Remove `"pg": "^8.23.1"` from `devDependencies` in `package.json`.
+- **Acceptance Criteria**: `npm ls pg` returns empty and `npx tsc --noEmit` succeeds with exit code 0.
 
-### Task 13.3.9: Extend Iframe Thermal Printer Cleanup Safety Timeout
-- **Final Finding ID:** `MF-PRINT-001`
-- **Original Finding IDs:** `PERF-006`, `FINDING-PRINT-003`, `MF-007`
-- **Exact Location:** `src/utils/iframePrint.ts`
-- **Root Cause:** 3-second cleanup timer removes print iframe before slow browser dialog completes.
-- **Proposed Remediation:** Extend cleanup safety timer to 30 seconds; listen for `afterprint` event on window.
-- **Dependencies:** None.
-- **Verification Criteria:** Hold browser print dialog open for 15 seconds; confirm print completes normally without iframe detachment error.
-- **Rollback Considerations:** Revert timeout value.
+### 4.9 Task 13.3.7 — Frontend Invoice Cancellation Workflow (`MF-UI-003`) [P2 - High]
+- **Objective**: Provide a supervisor PIN-guarded "Cancel Invoice" button in Sales History connected to `cancel_invoice_atomic`.
+- **Current Implementation**: Backend RPC `cancel_invoice_atomic` is fully operational in PostgreSQL and `invoices/route.ts` `DELETE` handler.
+- **Target Files**: `src/components/SalesHistory.tsx`
+- **Remediation Actions**:
+  1. Add "Cancel Invoice" action button to invoice detail modal in `SalesHistory.tsx`.
+  2. Trigger Supervisor PIN modal prompting for cancellation reason.
+  3. Send `DELETE /api/invoices?id=<id>&tenant_id=<tenant_id>&reason=<reason>`.
+  4. Refresh sales table and display success notification upon completion.
+- **Acceptance Criteria**: Cashier can successfully cancel an invoice with supervisor approval, triggering backend stock & balance reversal.
 
-### Task 13.3.10: Optimize Catalog Item Category Enrichment
-- **Final Finding ID:** `MF-PERF-004`
-- **Original Finding IDs:** `FINDING-PERF-005`
-- **Exact Location:** `src/components/StockInventory.tsx`
-- **Root Cause:** Nested loops over items and categories in rendering cycle.
-- **Proposed Remediation:** Build `categoryMap = new Map()` before render pass to achieve O(1) category lookups.
-- **Dependencies:** None.
-- **Verification Criteria:** Measure render time on catalog with 2,000 items; verify 0 lag.
-- **Rollback Considerations:** Component revert.
+### 4.10 Task 13.3.8 — Clarify & Confirm Stock Floor Constraint Behavior (`MF-DB-001`) [P4 - Low]
+- **Objective**: Confirm business decision regarding stock deduction floor clamping vs exception throwing in `adjust_item_stock` RPC.
+- **Current Implementation**: `adjust_item_stock` in `20260925_05_atomic_stock_adjust.sql` clamps stock to 0 via `GREATEST(0, v_current + p_qty_delta)` to prevent negative inventory without crashing cashier checkout.
+- **Action**: Preserve existing `GREATEST(0, ...)` clamping behavior as the accepted ERP checkout resilience strategy and document as confirmed business behavior.
 
-### Task 13.3.11: Strict Auth Fallbacks in Items & Held Invoices
-- **Final Finding ID:** `MF-DEF-001`
-- **Original Finding IDs:** `FINDING-API-010`, `FINDING-API-011`
-- **Exact Location:** `src/app/api/held-invoices/route.ts`, `src/app/api/items/route.ts`
-- **Root Cause:** Defensive programming returns default/empty tenant strings on undefined auth context.
-- **Proposed Remediation:** Eliminate permissive fallbacks; throw explicit 401 Unauthorized when auth context is undefined.
-- **Dependencies:** None.
-- **Verification Criteria:** Transmit request with malformed auth context; verify explicit 401.
-- **Rollback Considerations:** Handler revert.
+### 4.11 Task 13.3.10 — Verify Catalog Item Category Map Optimization (`MF-PERF-004`) [P4 - Low]
+- **Objective**: Verify whether component-level category map pre-computation in `StockInventory.tsx` is required.
+- **Current Implementation**: API-level token config map indexing (`configsBySeries = new Map()`) was completed in `items/route.ts` in Phase 11.
+- **Action**: Profile `StockInventory.tsx` rendering. If category lookup is $\le 2\text{ms}$, preserve existing component code without unnecessary churn.
 
-### Task 13.3.12: Mandatory Positive Cost Price Validation
-- **Final Finding ID:** `MF-INV-001`
-- **Original Finding IDs:** `FINDING-INV-003`
-- **Exact Location:** `src/components/StockInventory.tsx`, `src/app/api/items/route.ts`
-- **Root Cause:** Allows zero cost price fallback during item creation.
-- **Proposed Remediation:** Enforce validation requiring `cost_price > 0` before saving inventory item.
-- **Dependencies:** None.
-- **Verification Criteria:** Attempt creating item with 0 or negative cost; confirm client and server validation error.
-- **Rollback Considerations:** Revert validation rule.
+### 4.12 Task 13.3.12 — Mandatory Positive Cost Price Validation (`MF-INV-001`) [P2 - High]
+- **Objective**: Prevent accidental zero or negative item cost price entries during catalog creation.
+- **Target Files**: `src/app/api/items/route.ts`, `src/components/StockInventory.tsx`
+- **Remediation Actions**:
+  1. In `POST /api/items` (single and bulk mode): reject new item creation if `cost_price <= 0` with HTTP 400 error (`"Cost price must be a positive number greater than 0"`).
+  2. In `StockInventory.tsx`: add client-side form validation blocking submit if `cost_price <= 0`.
+  3. Preserve historical catalog items with zero cost price without invalidating existing records.
+- **Acceptance Criteria**: Creating a new product with `cost_price = 0` returns HTTP 400 error.
 
-### Task 13.3.13: Cart State Key Uniqueness & Handover Concurrency Controls
-- **Final Finding IDs:** `MF-POS-001`, `MF-POS-002`, `MF-POS-003`
-- **Original Finding IDs:** `FINDING-POS-003`, `FINDING-POS-004`, `FINDING-POS-005`
-- **Exact Location:** `src/components/PosBilling.tsx`, `src/app/[slug]/page.tsx`
-- **Root Cause:** React key collisions on custom units; stale tender override; shift opening race condition.
-- **Proposed Remediation:** Generate unique line UUIDs for cart keys; dynamically recalculate tender balance when cart modifies; enforce single-active-shift DB constraint.
-- **Dependencies:** Database constraint on active shifts.
-- **Verification Criteria:** Add duplicate item with custom unit; verify no React key warnings; open two cashier sessions simultaneously; confirm second session receives active shift warning.
-- **Rollback Considerations:** Component revert.
+### 4.13 Task 13.4.1 — Modernize HTTP Security Headers & CSP (`MF-SEC-006/007`) [P3 - Medium]
+- **Objective**: Configure a robust Content-Security-Policy (CSP) in `next.config.ts` and remove deprecated legacy security headers.
+- **Current Implementation**: `next.config.ts` includes `Permissions-Policy`, `HSTS`, `X-Frame-Options`, `X-Content-Type-Options`. CSP is missing and deprecated `X-XSS-Protection` is present.
+- **Target Files**: `next.config.ts`
+- **Remediation Actions**:
+  1. Remove `X-XSS-Protection` header from `next.config.ts`.
+  2. Add `Content-Security-Policy` header:
+     ```text
+     default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://*.supabase.co; frame-ancestors 'none';
+     ```
+- **Acceptance Criteria**: Security headers check passes without deprecated headers and includes valid CSP.
 
----
+### 4.14 Task 13.4.8 — Document Retained `--webpack` Flag (`MF-DEP-002 / MF-LEG-001`) [P4 - Low / Intentionally Retained]
+- **Status**: **INTENTIONALLY RETAINED / DEFERRED**
+- **Rationale**: Phase 11 evaluated Turbopack on Windows and verified that SWC native node addons fail on Windows hosts (`not a valid Win32 application`), requiring `--webpack` to remain in `package.json` for development server stability. Dead boilerplate route `src/app/api/route.ts` was already deleted.
 
-## 6. Wave 4: Thermal Printing, UI Polish & Legacy Cleanup (P4)
-
-### Task 13.4.1: Modernize HTTP Security Headers & Remove Deprecated Directives
-- **Final Finding IDs:** `MF-SEC-006`, `MF-SEC-007`
-- **Original Finding IDs:** `SEC-002`, `SEC-013`, `SEC-015`, `FINDING-ARCH-005`
-- **Exact Location:** `next.config.ts`
-- **Root Cause:** Missing Content-Security-Policy; deprecated `X-XSS-Protection` header used.
-- **Proposed Remediation:** Implement modern CSP policy; remove `X-XSS-Protection`; add `Permissions-Policy`.
-- **Dependencies:** Verify external CDN/fonts in CSP directives.
-- **Verification Criteria:** Inspect network headers with `curl -I`; verify headers comply with modern security baselines.
-- **Rollback Considerations:** `next.config.ts` revert.
-
-### Task 13.4.2: High-Entropy Identifier Generation (Anti-Collision)
-- **Final Finding ID:** `MF-COLL-001`
-- **Original Finding IDs:** `SEC-017`, `FINDING-API-013`, `FINDING-PROC-003`, `FINDING-LEDG-002`
-- **Exact Location:** `src/app/api/vouchers/route.ts`, `src/components/PosBilling.tsx`
-- **Root Cause:** 4-digit random numbers (`Math.floor(1000 + Math.random() * 9000)`) risk collision.
-- **Proposed Remediation:** Replace with `nanoid(8)` or PostgreSQL sequence-backed format (`VCH-2026-XXXX`).
-- **Dependencies:** None.
-- **Verification Criteria:** Generate 10,000 codes in test script; verify zero duplicate collisions.
-- **Rollback Considerations:** Code revert.
-
-### Task 13.4.3: Dynamic Canvas Width Scaling for 58mm Thermal Printers
-- **Final Finding ID:** `MF-PRINT-002`
-- **Original Finding IDs:** `PERF-007`, `FINDING-PRINT-002`, `MF-006`
-- **Exact Location:** `src/utils/receiptCanvas.ts`
-- **Root Cause:** Hardcoded 600px width causes text clipping on 58mm printer slips.
-- **Proposed Remediation:** Pass `paperWidth` parameter (576px for 80mm, 384px for 58mm) and scale font sizes dynamically.
-- **Dependencies:** None.
-- **Verification Criteria:** Generate receipt preview on 58mm setting; verify zero line clipping.
-- **Rollback Considerations:** Utility revert.
-
-### Task 13.4.4: Atomic Default Receipt Template Toggle
-- **Final Finding ID:** `MF-PRINT-003`
-- **Original Finding IDs:** `LEG-002`, `FINDING-PRINT-001`, `MF-004`
-- **Exact Location:** `src/app/api/receipt-templates/route.ts`
-- **Root Cause:** Two-step un-isolated update resets existing default before setting new default.
-- **Proposed Remediation:** Wrap default template toggle in single database update transaction.
-- **Dependencies:** None.
-- **Verification Criteria:** Toggle default template; verify system always retains exactly one default template.
-- **Rollback Considerations:** Route revert.
-
-### Task 13.4.5: Walk-In Token Retention Claim Code Slip
-- **Final Finding ID:** `MF-E2E-001`
-- **Original Finding IDs:** `FINDING-E2E-003`, `MF-008`
-- **Exact Location:** `src/components/PosBilling.tsx`, `src/utils/receiptCanvas.ts`
-- **Root Cause:** Walk-in customers retaining tokens receive no claim receipt.
-- **Proposed Remediation:** Generate unique claim serial code and render dedicated token claim block on POS thermal receipt.
-- **Dependencies:** None.
-- **Verification Criteria:** Perform walk-in sale with retained tokens; verify receipt includes printed token claim voucher code.
-- **Rollback Considerations:** Component revert.
-
-### Task 13.4.6: Optional Inventory Reservation for Held Invoices
-- **Final Finding ID:** `MF-E2E-002`
-- **Original Finding IDs:** `FINDING-E2E-005`
-- **Exact Location:** `src/app/api/held-invoices/route.ts`
-- **Root Cause:** Held invoices do not reserve stock.
-- **Proposed Remediation:** Add optional `reserve_stock` boolean flag to held invoice schema with automatic 2-hour TTL expiration.
-- **Dependencies:** Database schema update.
-- **Verification Criteria:** Hold cart with reserved stock flag; confirm available stock drops; verify stock restored on hold cancellation.
-- **Rollback Considerations:** Route rollback.
-
-### Task 13.4.7: Supervisor Amount Guard for Petty Expenses
-- **Final Finding ID:** `MF-E2E-003`
-- **Original Finding IDs:** `FINDING-E2E-007`
-- **Exact Location:** `src/app/api/petty-expenses/route.ts`, `src/components/ShiftDrawer.tsx`
-- **Root Cause:** Accepts arbitrary expense amounts without supervisor authorization.
-- **Proposed Remediation:** Require supervisor PIN for petty expense amounts exceeding configurable threshold (e.g. 5,000 PKR).
-- **Dependencies:** None.
-- **Verification Criteria:** Enter expense above threshold; verify supervisor PIN modal triggers.
-- **Rollback Considerations:** Component revert.
-
-### Task 13.4.8: Clean Up Dev Script & Dead Boilerplate Routes
-- **Final Finding IDs:** `MF-DEP-002`, `MF-LEG-001`
-- **Original Finding IDs:** `FINDING-DEP-002`, `FINDING-LEG-001`
-- **Exact Location:** `package.json`, `src/app/api/route.ts`
-- **Root Cause:** Deprecated `--webpack` parameter; dead root API route.
-- **Proposed Remediation:** Remove `--webpack` from `package.json`; delete dead boilerplate `src/app/api/route.ts`.
-- **Dependencies:** None.
-- **Verification Criteria:** Run `npm run dev`; confirm no deprecation warnings and API routes function normally.
-- **Rollback Considerations:** Git restore.
-
-### Task 13.4.9: Unify TypeScript Interface Definitions & Migration Archive
-- **Final Finding IDs:** `MF-ARCH-002`, `MF-DB-002`
-- **Original Finding IDs:** `FINDING-ARCH-004`, `FINDING-DB-003`
-- **Exact Location:** `src/types/`, `supabase/migrations/`
-- **Root Cause:** Dual type declarations (`index.ts` vs `ceo.ts`); unversioned legacy SQL files.
-- **Proposed Remediation:** Consolidate shared interfaces into `src/types/schema.ts`; move unversioned migrations to `supabase/migrations/legacy/`.
-- **Dependencies:** TypeScript type check pass.
-- **Verification Criteria:** Run `npx tsc --noEmit`; verify zero compiler errors.
-- **Rollback Considerations:** Git restore.
+### 4.15 Task 13.4.9 — Consolidate Duplicate TypeScript Interfaces (`MF-ARCH-002 / MF-DB-002`) [P4 - Low]
+- **Objective**: Consolidate duplicated TypeScript interfaces between `src/types/index.ts` and `src/types/ceo.ts`.
+- **Target Files**: `src/types/index.ts`, `src/types/ceo.ts`
+- **Remediation Actions**:
+  1. Re-export shared types (`Invoice`, `InvoiceItem`, `Customer`, `Supplier`) from `src/types/index.ts` inside `src/types/ceo.ts`.
+  2. Eliminate duplicate interface definitions while preserving backward compatibility.
+- **Acceptance Criteria**: `npx tsc --noEmit` exits with 0 errors.
 
 ---
 
-## 7. Refuted Finding Register (Do Not Implement)
+## 5. Database Plan
 
-| Finding ID | Original IDs | Reason Refuted / No Action |
-|---|---|---|
-| **MF-REFUTED-001** | `MF-003`, `FINDING-DB-001` | **CONTRADICTED BY CODEBASE:** Inspection of `src/app/api/token-redemptions/route.ts` line 114 proves `redeem_tokens_atomic` RPC is already actively utilized with full transaction encapsulation and row-level locking. No fix required. |
+### 5.1 Migrations Required
+1. `supabase/migrations/20261008_01_rate_limit_system.sql`
+   - Creates `rate_limit_entries` table.
+   - Creates `check_rate_limit_atomic` PL/pgSQL RPC function.
+2. `supabase/migrations/20261008_02_revoked_sessions.sql`
+   - Creates `revoked_sessions` table with index on `expires_at`.
+
+### 5.2 RLS & Security Considerations
+- `rate_limit_entries` and `revoked_sessions` tables are restricted to `service_role` execution only (no public RLS exposure).
 
 ---
 
-## 8. Summary of Zero Implementation Changes
+## 6. Dependency & Ordering Plan
 
-`ZERO IMPLEMENTATION CHANGES PERFORMED — AUDIT ONLY`  
-This implementation plan serves exclusively as an architectural remediation specification. No code, configuration, database records, or migrations were modified during this phase.
+```
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                      REMEDIATION EXECUTION PHASING                            │
+├───────────────────────────────────────────────────────────────────────────────┤
+│ PHASE 13A: CRITICAL SECURITY & IDOR (Priority 1)                              │
+│   • Task 13.1.1 — Client IDOR Tenant Scoping                                  │
+│   • Task 13.3.5 — Strict Supabase Service Role Key Assertion                  │
+├───────────────────────────────────────────────────────────────────────────────┤
+│ PHASE 13B: OPERATIONAL & FINANCIAL INTEGRITY (Priority 2)                     │
+│   • Task 13.1.4 — Centralized Cash Reconciliation Utility                     │
+│   • Task 13.2.11 — Standardize Sales Math across ShiftDrawer & DayClose       │
+│   • Task 13.3.7 — Frontend Invoice Cancellation Workflow UI                   │
+│   • Task 13.3.12 — Mandatory Positive Cost Price Validation                   │
+├───────────────────────────────────────────────────────────────────────────────┤
+│ PHASE 13C: ARCHITECTURE & SECURITY HARDENING (Priority 3)                     │
+│   • Task 13.1.3 — Persistent Supabase PostgreSQL Rate Limiting                │
+│   • Task 13.3.3 — Server-Side Session Revocation System                       │
+│   • Task 13.4.1 — Modernize Security Headers & Content-Security-Policy       │
+├───────────────────────────────────────────────────────────────────────────────┤
+│ PHASE 13D: CODE HYGIENE & POLISH (Priority 4)                                 │
+│   • Task 13.2.8 — Cursor Pagination for Client & Supplier Ledgers            │
+│   • Task 13.3.6 — Purge `pg` Dependency from package.json                     │
+│   • Task 13.4.9 — Consolidate Duplicate TypeScript Interfaces                 │
+└───────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 7. Regression Protection
+
+1. **POS Checkout Isolation**: `create_invoice_atomic` and `PosBilling.tsx` static mounting preserved without modification.
+2. **Token System Preservation**: `redeem_tokens_atomic` and physical token claim workflows untouched.
+3. **Database Transaction Safety**: All new migrations execute inside explicit transactional bounds with zero schema breaking changes.
+
+---
+
+## 8. Verification Strategy
+
+1. **TypeScript Typecheck**:
+   ```bash
+   npx tsc --noEmit
+   ```
+   Must exit with code 0 (0 errors).
+
+2. **Production Webpack Build**:
+   ```bash
+   node ./node_modules/next/dist/bin/next build --webpack
+   ```
+   Must compile all 34 static and dynamic routes cleanly.
+
+3. **Database RPC Verification**:
+   - Verify `check_rate_limit_atomic` and `revoked_sessions` table in live PostgreSQL schema via MCP tools.
+
+4. **Security Verification**:
+   - Test cross-tenant `PATCH /api/clients` rejection (HTTP 403).
+   - Test rate limit lockout persistence across serverless cold starts.
+   - Test session token reuse post-logout (HTTP 401).
+
+---
+
+## 9. Git & Scope Rules
+
+- **Zero Implementation Code Modified During Planning**: No application files modified during this planning step.
+- **Strict File Boundary**: Only authorized target files for the 15 unresolved tasks will be touched during remediation.
+- **No Direct Push to Main**: All changes committed locally after verification.
+
+---
+
+## 10. Deferred & Out of Scope
+
+- **22 Already Implemented Tasks**: 13.1.2, 13.2.1, 13.2.2, 13.2.3, 13.2.4, 13.2.5, 13.2.6, 13.2.7, 13.2.9, 13.2.10, 13.2.12, 13.2.13, 13.2.14, 13.3.1, 13.3.2, 13.3.4, 13.3.9, 13.3.11, 13.3.13, 13.4.2, 13.4.3, 13.4.4, 13.4.5, 13.4.7.
+- **Superseded Task 13.4.6**: Held invoice stock reservation superseded by Phase 12 live stock warning on restore.
+- **Intentionally Retained `--webpack` (Task 13.4.8)**: Retained due to Windows host SWC native addon requirements.
+- **Task 13.3.8 (Stock Floor Clamping)**: `GREATEST(0, ...)` clamping retained as accepted ERP checkout resilience policy.
+- **Task 13.3.10 (Catalog Category Map)**: API O(N) indexing complete; component UI pre-computation deferred if performance is optimal.
+
+---
+
+`ZERO IMPLEMENTATION CHANGES PERFORMED — PLANNING ONLY`
