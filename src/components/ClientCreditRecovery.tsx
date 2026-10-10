@@ -1,6 +1,17 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import {
+  Download,
+  Landmark,
+  AlertTriangle,
+  TrendingUp,
+  Search,
+  MessageSquare,
+  CreditCard,
+  Target,
+  X
+} from 'lucide-react';
 import { Client } from '@/types';
 
 interface Props {
@@ -267,7 +278,7 @@ export default function ClientCreditRecovery({
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <button onClick={handleExportCSV} className="btn btn-secondary-outline">
-            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>download</span>
+            <Download size={16} />
             Export Aging Report
           </button>
         </div>
@@ -278,7 +289,7 @@ export default function ClientCreditRecovery({
         <div className="kpi-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <span className="kpi-label">TOTAL RECEIVABLES (MARKET UDHAAR)</span>
-            <span className="material-symbols-outlined" style={{ color: 'var(--on-surface-variant)', fontSize: 22 }}>account_balance</span>
+            <Landmark size={22} style={{ color: 'var(--on-surface-variant)' }} />
           </div>
           <div className="kpi-value font-mono">Rs. {totalReceivables.toLocaleString()}</div>
           <div className="text-muted" style={{ fontSize: '12px', marginTop: '4px' }}>
@@ -289,7 +300,7 @@ export default function ClientCreditRecovery({
         <div className="kpi-card" style={{ borderLeft: '4px solid var(--error)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <span className="kpi-label">CRITICAL OVERDUE (90% OF LIMIT)</span>
-            <span className="material-symbols-outlined" style={{ color: 'var(--error)', fontSize: 22 }}>warning</span>
+            <AlertTriangle size={22} style={{ color: 'var(--error)' }} />
           </div>
           <div className="kpi-value font-mono" style={{ color: 'var(--error)' }}>
             Rs. {criticalTotal.toLocaleString()}
@@ -302,7 +313,7 @@ export default function ClientCreditRecovery({
         <div className="kpi-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <span className="kpi-label">ESTIMATED RECOVERY RATE</span>
-            <span className="material-symbols-outlined" style={{ color: '#16a34a', fontSize: 22 }}>trending_up</span>
+            <TrendingUp size={22} style={{ color: '#16a34a' }} />
           </div>
           <div className="kpi-value font-mono" style={{ color: '#16a34a' }}>{recoveryRate}%</div>
           <div style={{ height: 6, background: 'var(--surface-container)', borderRadius: 'var(--radius-full)', overflow: 'hidden', marginTop: 6 }}>
@@ -343,7 +354,7 @@ export default function ClientCreditRecovery({
             </div>
 
             <div style={{ width: '220px', position: 'relative' }}>
-              <span className="material-symbols-outlined" style={{ position: 'absolute', left: '0.625rem', top: '50%', transform: 'translateY(-50%)', fontSize: 18, color: 'var(--on-surface-variant)' }}>search</span>
+              <Search size={16} style={{ position: 'absolute', left: '0.625rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--on-surface-variant)', pointerEvents: 'none' }} />
               <input
                 type="text"
                 className="form-input"
@@ -401,14 +412,14 @@ export default function ClientCreditRecovery({
                       </span>
                     </td>
                     <td className="text-center">
-                      <div style={{ display: 'flex', justifyContent: 'center', gap: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'center', gap: '6px' }}>
                         <button
                           onClick={() => handleSendWhatsAppReminder(client)}
                           disabled={client.totalDue <= 0}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#16a34a', opacity: client.totalDue <= 0 ? 0.3 : 1 }}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#16a34a', opacity: client.totalDue <= 0 ? 0.3 : 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                           title="Send WhatsApp Reminder"
                         >
-                          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>chat</span>
+                          <MessageSquare size={17} />
                         </button>
                         <button
                           onClick={() => {
@@ -416,10 +427,10 @@ export default function ClientCreditRecovery({
                             setPaymentAmount(client.totalDue.toString());
                           }}
                           disabled={client.totalDue <= 0}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--secondary)', opacity: client.totalDue <= 0 ? 0.3 : 1 }}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--secondary)', opacity: client.totalDue <= 0 ? 0.3 : 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                           title="Receive Payment"
                         >
-                          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>payments</span>
+                          <CreditCard size={17} />
                         </button>
                       </div>
                     </td>
@@ -470,7 +481,7 @@ export default function ClientCreditRecovery({
           {/* Monthly Collections Card — real data */}
           <div className="card" style={{ padding: '1.25rem' }}>
             <h3 className="headline-sm" style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span className="material-symbols-outlined" style={{ fontSize: 20, color: 'var(--secondary)' }}>track_changes</span>
+              <Target size={20} style={{ color: 'var(--secondary)' }} />
               This Month Collections
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem', fontSize: '13px' }}>
@@ -514,7 +525,7 @@ export default function ClientCreditRecovery({
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <h3 className="headline-sm">Collect Overdue Payment</h3>
               <button onClick={() => setSelectedClientForPayment(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--on-surface-variant)' }}>
-                <span className="material-symbols-outlined">close</span>
+                <X size={18} />
               </button>
             </div>
 

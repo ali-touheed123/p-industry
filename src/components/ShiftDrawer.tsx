@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { X } from 'lucide-react';
 import { Shift, PettyExpense, Tenant, TokenTransaction } from '@/types';
 import { calculateExpectedClosingCash } from '@/utils/cashReconciliation';
 
@@ -1288,7 +1289,7 @@ export default function ShiftDrawer({
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <h3 className="headline-sm">Record Petty Expense</h3>
               <button onClick={() => setShowExpenseModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--on-surface-variant)' }}>
-                <span className="material-symbols-outlined">close</span>
+                <X size={18} />
               </button>
             </div>
             {/* BUG FIX #4: Show error message */}
@@ -1364,7 +1365,7 @@ export default function ShiftDrawer({
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <h3 className="headline-sm">Confirm Shift Close</h3>
               <button onClick={() => setShowCloseConfirmModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--on-surface-variant)' }}>
-                <span className="material-symbols-outlined">close</span>
+                <X size={18} />
               </button>
             </div>
 

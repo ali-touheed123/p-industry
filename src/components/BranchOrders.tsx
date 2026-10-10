@@ -2,7 +2,32 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Item, Tenant, BranchOrder } from '@/types';
-import { Search, Package, Plus, Trash2, X, Check, ShoppingBag, Layers, AlertCircle } from 'lucide-react';
+import {
+  Search,
+  Package,
+  Plus,
+  Minus,
+  Trash2,
+  X,
+  Check,
+  Building2,
+  Store,
+  ArrowRightLeft,
+  Truck,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  FileText,
+  Send,
+  Inbox,
+  Palette,
+  PackageSearch,
+  AlertCircle,
+  Info,
+  ArrowRight,
+  Layers,
+  Sparkles,
+} from 'lucide-react';
 
 interface OrderDestination {
   id: string;
@@ -71,14 +96,16 @@ export default function BranchOrders({
     const q = productSearch.trim().toLowerCase();
     if (!q) return items.slice(0, 50); // Show first 50 items by default
 
-    return items.filter(it => {
-      const codeMatch = (it.code || '').toLowerCase().includes(q);
-      const nameMatch = (it.name || '').toLowerCase().includes(q);
-      const catMatch = (it.category || '').toLowerCase().includes(q);
-      const shadeMatch = (it.shade_code || '').toLowerCase().includes(q);
-      const packMatch = (it.pack_size || '').toLowerCase().includes(q);
-      return codeMatch || nameMatch || catMatch || shadeMatch || packMatch;
-    }).slice(0, 60);
+    return items
+      .filter(it => {
+        const codeMatch = (it.code || '').toLowerCase().includes(q);
+        const nameMatch = (it.name || '').toLowerCase().includes(q);
+        const catMatch = (it.category || '').toLowerCase().includes(q);
+        const shadeMatch = (it.shade_code || '').toLowerCase().includes(q);
+        const packMatch = (it.pack_size || '').toLowerCase().includes(q);
+        return codeMatch || nameMatch || catMatch || shadeMatch || packMatch;
+      })
+      .slice(0, 60);
   }, [items, productSearch]);
 
   // Add Item to Order Cart (unconstrained by local stock — allows requisitioning when local stock is 0)
@@ -87,7 +114,6 @@ export default function BranchOrders({
     setOrderCart(prev => {
       const existingIdx = prev.findIndex(ci => ci.item.id === item.id);
       if (existingIdx >= 0) {
-        // Increment quantity requested from destination warehouse/branch
         return prev.map((ci, idx) =>
           idx === existingIdx ? { ...ci, qty: ci.qty + 1 } : ci
         );
@@ -104,9 +130,7 @@ export default function BranchOrders({
     setOrderCart(prev => {
       const cartItem = prev[idx];
       if (!cartItem) return prev;
-      return prev.map((ci, i) =>
-        i === idx ? { ...ci, qty: newQty } : ci
-      );
+      return prev.map((ci, i) => (i === idx ? { ...ci, qty: newQty } : ci));
     });
   };
 
@@ -218,7 +242,9 @@ export default function BranchOrders({
       const data = await res.json();
       if (data.success) {
         const totalUnits = orderCart.reduce((sum, ci) => sum + ci.qty, 0);
-        setFormSuccess(`Order ${data.order.order_no} placed successfully! (${orderCart.length} products, ${totalUnits} units requested from ${selectedDest.name})`);
+        setFormSuccess(
+          `Order ${data.order.order_no} placed successfully! (${orderCart.length} products, ${totalUnits} units requested from ${selectedDest.name})`
+        );
         setOrderCart([]);
         setNotes('');
         await fetchOrders();
@@ -256,7 +282,6 @@ export default function BranchOrders({
   // Filter orders into my requests vs incoming
   const myRequests = orders.filter(o => {
     if (o.from_tenant_id !== tenantId) return false;
-    // If internal order within same tenant, check if created by my counter
     if (o.to_tenant_id === tenantId) {
       return !staffUsername || o.from_counter === staffUsername;
     }
@@ -265,7 +290,6 @@ export default function BranchOrders({
 
   const incomingOrders = orders.filter(o => {
     if (o.to_tenant_id !== tenantId) return false;
-    // If internal order within same tenant, check if targeted to my counter
     if (o.from_tenant_id === tenantId) {
       return !staffUsername || o.target_counter === staffUsername || !o.target_counter;
     }
@@ -273,355 +297,718 @@ export default function BranchOrders({
   });
 
   const pendingIncomingCount = incomingOrders.filter(o => o.status === 'pending').length;
+  const totalCartUnits = orderCart.reduce((sum, ci) => sum + ci.qty, 0);
+  const selectedDest = destinations.find(d => d.id === selectedDestId);
 
   // Status badge styling
-  const getStatusStyle = (status: string) => {
-    const map: Record<string, { bg: string; color: string; border: string }> = {
-      pending:    { bg: '#FEF3C7', color: '#92400E', border: '#FDE68A' },
-      accepted:   { bg: '#DBEAFE', color: '#1E40AF', border: '#BFDBFE' },
-      dispatched: { bg: '#E0E7FF', color: '#3730A3', border: '#C7D2FE' },
-      received:   { bg: '#D1FAE5', color: '#065F46', border: '#A7F3D0' },
-      rejected:   { bg: '#FEE2E2', color: '#991B1B', border: '#FECACA' },
-    };
-    return map[status] || map.pending;
+  const getStatusConfig = (status: string) => {
+    switch (status) {
+      case 'accepted':
+        return {
+          bg: '#EFF6FF',
+          color: '#1D4ED8',
+          border: '#BFDBFE',
+          icon: CheckCircle2,
+          label: 'Accepted',
+        };
+      case 'dispatched':
+        return {
+          bg: '#EEF2FF',
+          color: '#4338CA',
+          border: '#C7D2FE',
+          icon: Truck,
+          label: 'Dispatched',
+        };
+      case 'received':
+        return {
+          bg: '#ECFDF5',
+          color: '#047857',
+          border: '#A7F3D0',
+          icon: Check,
+          label: 'Received',
+        };
+      case 'rejected':
+        return {
+          bg: '#FEF2F2',
+          color: '#B91C1C',
+          border: '#FECACA',
+          icon: XCircle,
+          label: 'Rejected',
+        };
+      default:
+        return {
+          bg: '#FFFBEB',
+          color: '#B45309',
+          border: '#FDE68A',
+          icon: Clock,
+          label: 'Pending Approval',
+        };
+    }
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-      {/* Page Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '12px' }}>
-        <div>
-          <h1 className="page-title">Branch Orders</h1>
-          <p className="page-subtitle">
-            Order products from other branches or counters when out of stock
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', width: '100%' }}>
+      {/* ── Page Header & Controls ── */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          flexWrap: 'wrap',
+          gap: '1rem',
+          paddingBottom: '0.25rem',
+        }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div
+              style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '8px',
+                backgroundColor: '#FFF7ED',
+                color: '#EA580C',
+                border: '1px solid #FFEDD5',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <ArrowRightLeft size={18} />
+            </div>
+            <h1 className="page-title" style={{ margin: 0, fontSize: '22px', fontWeight: 800 }}>
+              Branch Orders &amp; Inter-Transfer
+            </h1>
+          </div>
+          <p className="page-subtitle" style={{ margin: 0, color: '#64748B', fontSize: '13px' }}>
+            Requisition stock from central godowns, warehouses, or sister branches when local counter stock is depleted.
           </p>
         </div>
-        {pendingIncomingCount > 0 && (
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          {/* Active Branch Context Pill */}
           <div
             style={{
-              background: '#FEF3C7',
-              border: '1px solid #FDE68A',
-              borderRadius: '8px',
-              padding: '8px 16px',
-              fontSize: '13px',
-              fontWeight: 700,
-              color: '#92400E',
-              display: 'flex',
+              display: 'inline-flex',
               alignItems: 'center',
-              gap: '8px',
-            }}
-          >
-            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#F59E0B', animation: 'pulse 2s infinite' }} />
-            {pendingIncomingCount} pending incoming order{pendingIncomingCount > 1 ? 's' : ''}
-          </div>
-        )}
-      </div>
-
-      {/* Tab Switcher */}
-      <div style={{ display: 'flex', gap: '4px', background: '#F1F5F9', padding: '4px', borderRadius: '10px', width: 'fit-content' }}>
-        {([
-          { id: 'place' as const, label: '+ Place Order' },
-          { id: 'my_requests' as const, label: `My Requests (${myRequests.length})` },
-          { id: 'incoming' as const, label: `Incoming Orders (${incomingOrders.length})`, badge: pendingIncomingCount },
-        ]).map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            style={{
-              padding: '8px 18px',
+              gap: '6px',
+              padding: '6px 12px',
+              backgroundColor: '#F8FAFC',
+              border: '1px solid #E2E8F0',
               borderRadius: '8px',
               fontSize: '12px',
-              fontWeight: activeTab === tab.id ? 700 : 500,
+              color: '#334155',
+              fontWeight: 600,
+            }}
+          >
+            <Building2 size={14} style={{ color: '#F97316' }} />
+            <span>Requesting Branch:</span>
+            <strong style={{ color: '#0F172A' }}>{tenantName}</strong>
+          </div>
+
+          {/* Pending Alerts Pill */}
+          {pendingIncomingCount > 0 && (
+            <button
+              onClick={() => setActiveTab('incoming')}
+              style={{
+                background: '#FEF3C7',
+                border: '1px solid #FDE68A',
+                borderRadius: '8px',
+                padding: '6px 12px',
+                fontSize: '12px',
+                fontWeight: 700,
+                color: '#92400E',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                cursor: 'pointer',
+              }}
+            >
+              <span
+                style={{
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  background: '#F59E0B',
+                  animation: 'pulse 2s infinite',
+                }}
+              />
+              {pendingIncomingCount} Action Required on Incoming
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── Segmented Navigation Tabs ── */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          borderBottom: '1px solid #E2E8F0',
+          paddingBottom: '0.75rem',
+          flexWrap: 'wrap',
+          gap: '12px',
+        }}
+      >
+        <div
+          style={{
+            display: 'inline-flex',
+            backgroundColor: '#F1F5F9',
+            padding: '4px',
+            borderRadius: '10px',
+            gap: '4px',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setActiveTab('place')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '7px 16px',
+              borderRadius: '8px',
+              fontSize: '13px',
+              fontWeight: activeTab === 'place' ? 700 : 500,
               border: 'none',
               cursor: 'pointer',
-              background: activeTab === tab.id ? '#FFFFFF' : 'transparent',
-              color: activeTab === tab.id ? '#0F172A' : '#64748B',
-              boxShadow: activeTab === tab.id ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+              backgroundColor: activeTab === 'place' ? '#FFFFFF' : 'transparent',
+              color: activeTab === 'place' ? '#0F172A' : '#64748B',
+              boxShadow: activeTab === 'place' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <Plus size={14} style={{ color: activeTab === 'place' ? '#F97316' : 'inherit' }} />
+            <span>Place Order</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('my_requests')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '7px 16px',
+              borderRadius: '8px',
+              fontSize: '13px',
+              fontWeight: activeTab === 'my_requests' ? 700 : 500,
+              border: 'none',
+              cursor: 'pointer',
+              backgroundColor: activeTab === 'my_requests' ? '#FFFFFF' : 'transparent',
+              color: activeTab === 'my_requests' ? '#0F172A' : '#64748B',
+              boxShadow: activeTab === 'my_requests' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <Send size={14} style={{ color: activeTab === 'my_requests' ? '#2563EB' : 'inherit' }} />
+            <span>My Requests</span>
+            <span
+              style={{
+                fontSize: '11px',
+                fontWeight: 700,
+                backgroundColor: activeTab === 'my_requests' ? '#E2E8F0' : '#E2E8F0',
+                color: '#334155',
+                padding: '1px 6px',
+                borderRadius: '9999px',
+                marginLeft: '2px',
+              }}
+            >
+              {myRequests.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('incoming')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '7px 16px',
+              borderRadius: '8px',
+              fontSize: '13px',
+              fontWeight: activeTab === 'incoming' ? 700 : 500,
+              border: 'none',
+              cursor: 'pointer',
+              backgroundColor: activeTab === 'incoming' ? '#FFFFFF' : 'transparent',
+              color: activeTab === 'incoming' ? '#0F172A' : '#64748B',
+              boxShadow: activeTab === 'incoming' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
               transition: 'all 0.15s ease',
               position: 'relative',
             }}
           >
-            {tab.label}
-            {Boolean(tab.badge && tab.badge > 0) && (
-              <span
-                style={{
-                  position: 'absolute',
-                  top: '-4px',
-                  right: '-4px',
-                  width: '18px',
-                  height: '18px',
-                  borderRadius: '50%',
-                  background: '#F97316',
-                  color: '#FFFFFF',
-                  fontSize: '10px',
-                  fontWeight: 800,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                {tab.badge}
-              </span>
-            )}
+            <Inbox size={14} style={{ color: activeTab === 'incoming' ? '#059669' : 'inherit' }} />
+            <span>Incoming Orders</span>
+            <span
+              style={{
+                fontSize: '11px',
+                fontWeight: 700,
+                backgroundColor: pendingIncomingCount > 0 ? '#F97316' : '#E2E8F0',
+                color: pendingIncomingCount > 0 ? '#FFFFFF' : '#334155',
+                padding: '1px 6px',
+                borderRadius: '9999px',
+                marginLeft: '2px',
+              }}
+            >
+              {incomingOrders.length}
+            </span>
           </button>
-        ))}
+        </div>
+
+        <div style={{ fontSize: '12px', color: '#64748B' }}>
+          Catalog: <strong style={{ color: '#0F172A' }}>{items.length}</strong> Products Indexed
+        </div>
       </div>
 
-      {/* ═══ TAB: Place Order ═══ */}
+      {/* ═══ TAB 1: Place New Order (2-Column Responsive Workspace) ═══ */}
       {activeTab === 'place' && (
-        <div className="card" style={{ padding: '1.5rem', maxWidth: '640px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '1.25rem' }}>
-            <span style={{ fontSize: '20px' }}>📦</span>
-            <h3 className="headline-sm">Place New Branch Order</h3>
-          </div>
-
+        <form onSubmit={handlePlaceOrder} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           {formError && (
-            <div style={{ background: '#FEE2E2', border: '1px solid rgba(220,38,38,0.3)', borderRadius: '8px', padding: '10px 14px', fontSize: '13px', color: '#991B1B', marginBottom: '1rem' }}>
-              {formError}
+            <div
+              style={{
+                background: '#FEF2F2',
+                border: '1px solid #FECACA',
+                borderRadius: '10px',
+                padding: '12px 16px',
+                fontSize: '13px',
+                color: '#991B1B',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <AlertCircle size={18} style={{ flexShrink: 0 }} />
+              <div>{formError}</div>
             </div>
           )}
 
           {formSuccess && (
-            <div style={{ background: '#D1FAE5', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '8px', padding: '10px 14px', fontSize: '13px', color: '#065F46', marginBottom: '1rem' }}>
-              ✅ {formSuccess}
+            <div
+              style={{
+                background: '#ECFDF5',
+                border: '1px solid #A7F3D0',
+                borderRadius: '10px',
+                padding: '12px 16px',
+                fontSize: '13px',
+                color: '#065F46',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <CheckCircle2 size={18} style={{ flexShrink: 0 }} />
+              <div>{formSuccess}</div>
             </div>
           )}
 
-          <form onSubmit={handlePlaceOrder} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {/* Source Branch / Counter */}
-            <div>
-              <label className="form-label">Order From (Source Branch / Counter) *</label>
-              {destinations.length > 0 ? (
-                <select
-                  className="form-select"
-                  value={selectedDestId}
-                  onChange={e => setSelectedDestId(e.target.value)}
-                  required
-                >
-                  {destinations.map(d => (
-                    <option key={d.id} value={d.id}>
-                      {d.type === 'counter' ? '🏪 ' : '🏢 '}
-                      {d.name} — {d.subtitle}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <div style={{ padding: '14px', background: '#F8FAFC', borderRadius: '10px', border: '1px dashed #CBD5E1', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <div style={{ fontSize: '13px', color: '#475569', fontWeight: 600 }}>
-                    🏢 Koi doosri branch ya counter register nahi hai
+          {/* Grid Layout: Left Column (Builder) + Right Column (Manifest) */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+              gap: '1.25rem',
+              alignItems: 'start',
+            }}
+          >
+            {/* ── LEFT COLUMN: Route Selection & Catalog Search ── */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {/* Card 1: Source Branch & Route */}
+              <div className="card" style={{ padding: '1.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Building2 size={18} style={{ color: '#EA580C' }} />
+                    <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: '#0F172A' }}>
+                      Transfer Route &amp; Source
+                    </h3>
                   </div>
-                  <div style={{ fontSize: '12px', color: '#64748B', lineHeight: 1.4 }}>
-                    Dusri branch (e.g. Branch 2, Branch 3 ya Central Godown) se samaan mangwane ke liye, Developer Panel me <strong>+ Create Branch</strong> ya <strong>+ Add Counter</strong> karein.
-                  </div>
-                  <a
-                    href="/dev"
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      fontSize: '12px',
-                      fontWeight: 700,
-                      color: '#F97316',
-                      textDecoration: 'none',
-                      marginTop: '4px',
-                    }}
-                  >
-                    + Open Developer Panel to Add Branch / Counter →
-                  </a>
+                  <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 600 }}>Step 1 of 2</span>
                 </div>
-              )}
-            </div>
 
-            {/* Product Search & Multi-Item Requisition Cart */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <label className="form-label" style={{ margin: 0 }}>
-                  Search &amp; Add Products *
-                </label>
-                <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 600 }}>
-                  {items.length} Products in Catalog
-                </span>
-              </div>
-
-              {/* Search Combobox Input */}
-              <div ref={searchRef} style={{ position: 'relative' }}>
-                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                  <Search
-                    style={{
-                      position: 'absolute',
-                      left: '12px',
-                      width: '16px',
-                      height: '16px',
-                      color: '#94A3B8',
-                      pointerEvents: 'none',
-                    }}
-                  />
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={productSearch}
-                    onChange={e => {
-                      setProductSearch(e.target.value);
-                      setIsSearchOpen(true);
-                    }}
-                    onFocus={() => setIsSearchOpen(true)}
-                    placeholder="Search by SKU code, name, category, or shade (e.g. RG100, Plastic Emulsion)..."
-                    style={{ paddingLeft: '38px', paddingRight: productSearch ? '36px' : '12px' }}
-                  />
-                  {productSearch && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProductSearch('');
-                        setIsSearchOpen(false);
-                      }}
+                <div>
+                  <label className="form-label" style={{ marginBottom: '6px' }}>
+                    Order From (Source Branch / Counter / Godown) *
+                  </label>
+                  {destinations.length > 0 ? (
+                    <select
+                      className="form-select"
+                      value={selectedDestId}
+                      onChange={e => setSelectedDestId(e.target.value)}
+                      required
+                      style={{ height: '42px', fontSize: '13px' }}
+                    >
+                      {destinations.map(d => (
+                        <option key={d.id} value={d.id}>
+                          {d.name} — {d.subtitle}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div
                       style={{
-                        position: 'absolute',
-                        right: '10px',
-                        background: 'transparent',
-                        border: 'none',
-                        color: '#94A3B8',
-                        cursor: 'pointer',
-                        padding: '4px',
+                        padding: '14px',
+                        background: '#F8FAFC',
+                        borderRadius: '10px',
+                        border: '1px dashed #CBD5E1',
                         display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
+                        flexDirection: 'column',
+                        gap: '8px',
                       }}
                     >
-                      <X style={{ width: '14px', height: '14px' }} />
-                    </button>
+                      <div style={{ fontSize: '13px', color: '#475569', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Building2 size={16} />
+                        Koi doosri branch ya counter register nahi hai
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#64748B', lineHeight: 1.4 }}>
+                        Dusri branch se maal mangwane ke liye Developer Panel me branch register karein.
+                      </div>
+                      <a
+                        href="/dev"
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          fontSize: '12px',
+                          fontWeight: 700,
+                          color: '#F97316',
+                          textDecoration: 'none',
+                        }}
+                      >
+                        Open Developer Panel to Add Branch →
+                      </a>
+                    </div>
                   )}
                 </div>
 
-                {/* Instant Search Results Dropdown */}
-                {isSearchOpen && (
+                {/* Transfer Visual Badge */}
+                {selectedDest && (
                   <div
                     style={{
-                      position: 'absolute',
-                      top: '100%',
-                      left: 0,
-                      right: 0,
-                      marginTop: '6px',
-                      backgroundColor: '#FFFFFF',
+                      marginTop: '0.875rem',
+                      padding: '10px 12px',
+                      backgroundColor: '#F8FAFC',
+                      borderRadius: '8px',
                       border: '1px solid #E2E8F0',
-                      borderRadius: '12px',
-                      boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)',
-                      maxHeight: '260px',
-                      overflowY: 'auto',
-                      zIndex: 50,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      fontSize: '12px',
                     }}
                   >
-                    {filteredProducts.length === 0 ? (
-                      <div style={{ padding: '16px', textAlign: 'center', color: '#94A3B8', fontSize: '13px' }}>
-                        No products match &ldquo;{productSearch}&rdquo;
-                      </div>
-                    ) : (
-                      <div style={{ padding: '6px' }}>
-                        <div style={{ padding: '6px 10px', fontSize: '11px', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                          Select Product to Add ({filteredProducts.length} results)
-                        </div>
-                        {filteredProducts.map(it => {
-                          const isAlreadyInCart = orderCart.some(ci => ci.item.id === it.id);
-                          return (
-                            <div
-                              key={it.id}
-                              onClick={() => handleAddItemToCart(it)}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                padding: '10px 12px',
-                                borderRadius: '8px',
-                                cursor: 'pointer',
-                                transition: 'background-color 0.12s ease',
-                                backgroundColor: isAlreadyInCart ? '#F0FDF4' : 'transparent',
-                                border: isAlreadyInCart ? '1px solid #BBF7D0' : '1px solid transparent',
-                                marginBottom: '4px',
-                              }}
-                              onMouseEnter={e => {
-                                if (!isAlreadyInCart) e.currentTarget.style.backgroundColor = '#F8FAFC';
-                              }}
-                              onMouseLeave={e => {
-                                if (!isAlreadyInCart) e.currentTarget.style.backgroundColor = 'transparent';
-                              }}
-                            >
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, flex: 1 }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                  <span
-                                    style={{
-                                      fontSize: '11px',
-                                      fontWeight: 800,
-                                      fontFamily: 'monospace',
-                                      backgroundColor: '#F1F5F9',
-                                      color: '#0F172A',
-                                      padding: '2px 6px',
-                                      borderRadius: '4px',
-                                    }}
-                                  >
-                                    {it.code}
-                                  </span>
-                                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#0F172A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                    {it.name}
-                                  </span>
-                                </div>
-                                <div style={{ fontSize: '11px', color: '#64748B', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <span>{it.category || 'General'}</span>
-                                  <span>•</span>
-                                  <span>{it.pack_size || it.unit || 'Can'}</span>
-                                  {it.shade_code && (
-                                    <>
-                                      <span>•</span>
-                                      <span style={{ color: '#D97706', fontWeight: 600 }}>Shade: {it.shade_code}</span>
-                                    </>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '12px' }}>
-                                <span
-                                  style={{
-                                    fontSize: '11px',
-                                    fontWeight: 700,
-                                    padding: '2px 8px',
-                                    borderRadius: '9999px',
-                                    backgroundColor: it.stock_qty > 0 ? '#E0F2FE' : '#FEE2E2',
-                                    color: it.stock_qty > 0 ? '#0369A1' : '#B91C1C',
-                                  }}
-                                >
-                                  Local: {it.stock_qty}
-                                </span>
-                                <div
-                                  style={{
-                                    width: '24px',
-                                    height: '24px',
-                                    borderRadius: '6px',
-                                    backgroundColor: isAlreadyInCart ? '#22C55E' : '#F97316',
-                                    color: '#FFFFFF',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                  }}
-                                >
-                                  {isAlreadyInCart ? <Check style={{ width: '14px', height: '14px', strokeWidth: 3 }} /> : <Plus style={{ width: '14px', height: '14px', strokeWidth: 3 }} />}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#475569' }}>
+                      <Store size={14} style={{ color: '#0284C7' }} />
+                      <span>Origin:</span>
+                      <strong style={{ color: '#0F172A' }}>{selectedDest.name}</strong>
+                    </div>
+                    <ArrowRight size={14} style={{ color: '#94A3B8' }} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#475569' }}>
+                      <Building2 size={14} style={{ color: '#EA580C' }} />
+                      <span>Destination:</span>
+                      <strong style={{ color: '#0F172A' }}>{tenantName}</strong>
+                    </div>
                   </div>
                 )}
               </div>
 
-              {/* Order Requisition Items Table */}
-              <div style={{ marginTop: '0.25rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <label className="form-label" style={{ margin: 0, fontSize: '12px' }}>
-                    Order Items ({orderCart.length} selected)
-                  </label>
+              {/* Card 2: Product Search & Requisition Catalog */}
+              <div className="card" style={{ padding: '1.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <PackageSearch size={18} style={{ color: '#EA580C' }} />
+                    <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: '#0F172A' }}>
+                      Product Catalog &amp; Requisition Picker
+                    </h3>
+                  </div>
+                  <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 600 }}>Step 2 of 2</span>
+                </div>
+
+                {/* Combobox Search Input */}
+                <div ref={searchRef} style={{ position: 'relative', marginBottom: '1rem' }}>
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    <Search
+                      size={16}
+                      style={{
+                        position: 'absolute',
+                        left: '12px',
+                        color: '#94A3B8',
+                        pointerEvents: 'none',
+                      }}
+                    />
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={productSearch}
+                      onChange={e => {
+                        setProductSearch(e.target.value);
+                        setIsSearchOpen(true);
+                      }}
+                      onFocus={() => setIsSearchOpen(true)}
+                      placeholder="Search by SKU, shade, name, or category (e.g. RG100, Emulsion)..."
+                      style={{ paddingLeft: '38px', paddingRight: productSearch ? '36px' : '12px', height: '42px', fontSize: '13px' }}
+                    />
+                    {productSearch && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProductSearch('');
+                          setIsSearchOpen(false);
+                        }}
+                        style={{
+                          position: 'absolute',
+                          right: '10px',
+                          background: 'transparent',
+                          border: 'none',
+                          color: '#94A3B8',
+                          cursor: 'pointer',
+                          padding: '4px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Search Results Dropdown Overlay */}
+                  {isSearchOpen && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        right: 0,
+                        marginTop: '6px',
+                        backgroundColor: '#FFFFFF',
+                        border: '1px solid #CBD5E1',
+                        borderRadius: '10px',
+                        boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)',
+                        maxHeight: '280px',
+                        overflowY: 'auto',
+                        zIndex: 60,
+                      }}
+                    >
+                      {filteredProducts.length === 0 ? (
+                        <div style={{ padding: '20px', textAlign: 'center', color: '#94A3B8', fontSize: '13px' }}>
+                          No products found matching &ldquo;{productSearch}&rdquo;
+                        </div>
+                      ) : (
+                        <div style={{ padding: '6px' }}>
+                          <div
+                            style={{
+                              padding: '6px 10px',
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              color: '#64748B',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.05em',
+                            }}
+                          >
+                            Catalog Matches ({filteredProducts.length} items)
+                          </div>
+                          {filteredProducts.map(it => {
+                            const isAlreadyInCart = orderCart.some(ci => ci.item.id === it.id);
+                            return (
+                              <div
+                                key={it.id}
+                                onClick={() => handleAddItemToCart(it)}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  padding: '8px 12px',
+                                  borderRadius: '8px',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.12s ease',
+                                  backgroundColor: isAlreadyInCart ? '#F0FDF4' : 'transparent',
+                                  border: isAlreadyInCart ? '1px solid #BBF7D0' : '1px solid transparent',
+                                  marginBottom: '3px',
+                                }}
+                                onMouseEnter={e => {
+                                  if (!isAlreadyInCart) e.currentTarget.style.backgroundColor = '#F8FAFC';
+                                }}
+                                onMouseLeave={e => {
+                                  if (!isAlreadyInCart) e.currentTarget.style.backgroundColor = 'transparent';
+                                }}
+                              >
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, flex: 1 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span
+                                      style={{
+                                        fontSize: '11px',
+                                        fontWeight: 800,
+                                        fontFamily: 'JetBrains Mono, monospace',
+                                        backgroundColor: '#F1F5F9',
+                                        color: '#0F172A',
+                                        padding: '1px 6px',
+                                        borderRadius: '4px',
+                                      }}
+                                    >
+                                      {it.code}
+                                    </span>
+                                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#0F172A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                      {it.name}
+                                    </span>
+                                  </div>
+                                  <div style={{ fontSize: '11px', color: '#64748B', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span>{it.category || 'General'}</span>
+                                    <span>•</span>
+                                    <span>{it.pack_size || it.unit || 'Can'}</span>
+                                    {it.shade_code && (
+                                      <>
+                                        <span>•</span>
+                                        <span style={{ color: '#D97706', fontWeight: 600 }}>Shade: {it.shade_code}</span>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '12px' }}>
+                                  <span
+                                    style={{
+                                      fontSize: '11px',
+                                      fontWeight: 700,
+                                      padding: '2px 8px',
+                                      borderRadius: '9999px',
+                                      backgroundColor: it.stock_qty > 0 ? '#E0F2FE' : '#FEE2E2',
+                                      color: it.stock_qty > 0 ? '#0369A1' : '#B91C1C',
+                                    }}
+                                  >
+                                    Local: {it.stock_qty}
+                                  </span>
+                                  <div
+                                    style={{
+                                      width: '24px',
+                                      height: '24px',
+                                      borderRadius: '6px',
+                                      backgroundColor: isAlreadyInCart ? '#16A34A' : '#EA580C',
+                                      color: '#FFFFFF',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                    }}
+                                  >
+                                    {isAlreadyInCart ? <Check size={14} /> : <Plus size={14} />}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Quick Catalog Picker Grid / Table */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: '#475569' }}>
+                      Frequently Requisitioned Products
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#94A3B8' }}>Click item to add or increment</span>
+                  </div>
+
+                  <div
+                    style={{
+                      maxHeight: '320px',
+                      overflowY: 'auto',
+                      border: '1px solid #E2E8F0',
+                      borderRadius: '8px',
+                    }}
+                  >
+                    {items.slice(0, 15).map(it => {
+                      const inCart = orderCart.find(ci => ci.item.id === it.id);
+                      return (
+                        <div
+                          key={it.id}
+                          onClick={() => handleAddItemToCart(it)}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '8px 12px',
+                            borderBottom: '1px solid #F1F5F9',
+                            cursor: 'pointer',
+                            backgroundColor: inCart ? '#F0FDF4' : 'transparent',
+                            transition: 'background-color 0.1s ease',
+                          }}
+                          onMouseEnter={e => {
+                            if (!inCart) e.currentTarget.style.backgroundColor = '#F8FAFC';
+                          }}
+                          onMouseLeave={e => {
+                            if (!inCart) e.currentTarget.style.backgroundColor = 'transparent';
+                          }}
+                        >
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '11px', fontWeight: 700, color: '#F97316' }}>
+                                {it.code}
+                              </span>
+                              <span style={{ fontSize: '12px', fontWeight: 600, color: '#0F172A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {it.name}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#64748B' }}>
+                              {it.pack_size || it.unit || 'Can'} • Local: {it.stock_qty}
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            {inCart && (
+                              <span
+                                style={{
+                                  fontSize: '11px',
+                                  fontWeight: 800,
+                                  backgroundColor: '#DCFCE7',
+                                  color: '#166534',
+                                  padding: '2px 6px',
+                                  borderRadius: '4px',
+                                }}
+                              >
+                                In Cart: {inCart.qty}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              style={{
+                                width: '24px',
+                                height: '24px',
+                                borderRadius: '4px',
+                                border: '1px solid #E2E8F0',
+                                backgroundColor: '#FFFFFF',
+                                color: '#EA580C',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <Plus size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ── RIGHT COLUMN: Order Manifest, Quantity Controls, Notes & Primary CTA ── */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <div className="card" style={{ padding: '1.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Layers size={18} style={{ color: '#EA580C' }} />
+                    <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: '#0F172A' }}>
+                      Requisition Manifest
+                    </h3>
+                  </div>
                   {orderCart.length > 0 && (
                     <button
                       type="button"
@@ -629,10 +1016,11 @@ export default function BranchOrders({
                       style={{
                         background: 'transparent',
                         border: 'none',
-                        color: '#EF4444',
-                        fontSize: '11px',
+                        color: '#DC2626',
+                        fontSize: '12px',
                         fontWeight: 600,
                         cursor: 'pointer',
+                        padding: 0,
                       }}
                     >
                       Clear All
@@ -640,31 +1028,46 @@ export default function BranchOrders({
                   )}
                 </div>
 
+                {/* Items List or Professional Empty State */}
                 {orderCart.length === 0 ? (
                   <div
                     style={{
-                      padding: '24px',
-                      borderRadius: '12px',
+                      padding: '36px 20px',
+                      borderRadius: '10px',
                       backgroundColor: '#F8FAFC',
                       border: '1.5px dashed #CBD5E1',
                       textAlign: 'center',
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: 'center',
-                      gap: '6px',
+                      gap: '8px',
+                      marginBottom: '1rem',
                     }}
                   >
-                    <Package style={{ width: '28px', height: '28px', color: '#94A3B8' }} />
-                    <p style={{ fontSize: '13px', color: '#64748B', fontWeight: 600, margin: 0 }}>
+                    <div
+                      style={{
+                        width: '44px',
+                        height: '44px',
+                        borderRadius: '50%',
+                        backgroundColor: '#E2E8F0',
+                        color: '#64748B',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Package size={22} />
+                    </div>
+                    <div style={{ fontSize: '14px', fontWeight: 700, color: '#334155' }}>
                       No products added to requisition yet
-                    </p>
-                    <p style={{ fontSize: '11px', color: '#94A3B8', margin: 0 }}>
-                      Type above in the search box to add products to this branch transfer
-                    </p>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#64748B', maxWidth: '300px', lineHeight: 1.4 }}>
+                      Select items from the catalog or use the product search bar on the left to build this branch transfer.
+                    </div>
                   </div>
                 ) : (
-                  <div style={{ border: '1px solid #E2E8F0', borderRadius: '12px', overflow: 'hidden', backgroundColor: '#FFFFFF' }}>
-                    <div style={{ maxHeight: '240px', overflowY: 'auto' }}>
+                  <div style={{ border: '1px solid #E2E8F0', borderRadius: '10px', overflow: 'hidden', marginBottom: '1rem' }}>
+                    <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
                       {orderCart.map((ci, idx) => (
                         <div
                           key={ci.item.id}
@@ -672,14 +1075,14 @@ export default function BranchOrders({
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
-                            padding: '10px 14px',
+                            padding: '10px 12px',
                             borderBottom: idx === orderCart.length - 1 ? 'none' : '1px solid #F1F5F9',
-                            gap: '12px',
+                            gap: '10px',
                           }}
                         >
                           <div style={{ minWidth: 0, flex: 1 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <span style={{ fontSize: '11px', fontWeight: 700, fontFamily: 'monospace', color: '#F97316' }}>
+                              <span style={{ fontSize: '11px', fontWeight: 700, fontFamily: 'JetBrains Mono, monospace', color: '#EA580C' }}>
                                 {ci.item.code}
                               </span>
                               <span style={{ fontSize: '13px', fontWeight: 600, color: '#0F172A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -691,8 +1094,8 @@ export default function BranchOrders({
                             </div>
                           </div>
 
-                          {/* Quantity Stepper */}
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                          {/* Stepper Controls */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
                             <button
                               type="button"
                               onClick={() => handleUpdateCartQty(idx, Math.max(1, ci.qty - 1))}
@@ -700,7 +1103,7 @@ export default function BranchOrders({
                                 width: '28px',
                                 height: '28px',
                                 borderRadius: '6px',
-                                border: '1px solid #E2E8F0',
+                                border: '1px solid #CBD5E1',
                                 backgroundColor: '#F8FAFC',
                                 color: '#0F172A',
                                 fontWeight: 700,
@@ -710,7 +1113,7 @@ export default function BranchOrders({
                                 justifyContent: 'center',
                               }}
                             >
-                              -
+                              <Minus size={13} />
                             </button>
                             <input
                               type="number"
@@ -718,7 +1121,7 @@ export default function BranchOrders({
                               value={ci.qty}
                               onChange={e => handleUpdateCartQty(idx, parseInt(e.target.value) || 1)}
                               style={{
-                                width: '54px',
+                                width: '48px',
                                 height: '28px',
                                 textAlign: 'center',
                                 borderRadius: '6px',
@@ -726,6 +1129,7 @@ export default function BranchOrders({
                                 fontSize: '13px',
                                 fontWeight: 700,
                                 color: '#0F172A',
+                                fontFamily: 'JetBrains Mono, monospace',
                               }}
                             />
                             <button
@@ -735,7 +1139,7 @@ export default function BranchOrders({
                                 width: '28px',
                                 height: '28px',
                                 borderRadius: '6px',
-                                border: '1px solid #E2E8F0',
+                                border: '1px solid #CBD5E1',
                                 backgroundColor: '#F8FAFC',
                                 color: '#0F172A',
                                 fontWeight: 700,
@@ -745,7 +1149,7 @@ export default function BranchOrders({
                                 justifyContent: 'center',
                               }}
                             >
-                              +
+                              <Plus size={13} />
                             </button>
                             <button
                               type="button"
@@ -765,17 +1169,17 @@ export default function BranchOrders({
                               }}
                               title="Remove item"
                             >
-                              <Trash2 style={{ width: '13px', height: '13px' }} />
+                              <Trash2 size={13} />
                             </button>
                           </div>
                         </div>
                       ))}
                     </div>
 
-                    {/* Order Cart Total Bar */}
+                    {/* Order Cart Subtotals */}
                     <div
                       style={{
-                        padding: '8px 14px',
+                        padding: '10px 14px',
                         backgroundColor: '#F8FAFC',
                         borderTop: '1px solid #E2E8F0',
                         display: 'flex',
@@ -786,87 +1190,174 @@ export default function BranchOrders({
                         fontWeight: 600,
                       }}
                     >
-                      <span>Total: {orderCart.length} Unique Item(s)</span>
-                      <span style={{ color: '#0F172A', fontWeight: 700 }}>
-                        {orderCart.reduce((sum, ci) => sum + ci.qty, 0)} Total Units
+                      <span>Unique Products: {orderCart.length}</span>
+                      <span style={{ color: '#0F172A', fontWeight: 800, fontSize: '13px', fontFamily: 'JetBrains Mono, monospace' }}>
+                        {totalCartUnits} Total Units
                       </span>
                     </div>
                   </div>
                 )}
+
+                {/* Notes Input */}
+                <div style={{ marginBottom: '1rem' }}>
+                  <label className="form-label" style={{ marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <FileText size={14} style={{ color: '#64748B' }} />
+                    Order Notes / Urgency (Optional)
+                  </label>
+                  <textarea
+                    className="form-input"
+                    value={notes}
+                    onChange={e => setNotes(e.target.value)}
+                    placeholder="e.g. Urgently needed for customer contractor order, please dispatch via Suzuki"
+                    rows={2}
+                    style={{ resize: 'vertical', minHeight: '52px', fontSize: '13px' }}
+                  />
+                </div>
+
+                {/* Primary CTA Button */}
+                <button
+                  type="submit"
+                  disabled={submitting || destinations.length === 0 || orderCart.length === 0}
+                  className="btn btn-primary btn-lg"
+                  style={{
+                    width: '100%',
+                    height: '46px',
+                    fontSize: '14px',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                  }}
+                >
+                  <Send size={16} />
+                  {submitting
+                    ? 'Transmitting Requisition...'
+                    : `Place Branch Order (${orderCart.length} Items • ${totalCartUnits} Units)`}
+                </button>
+
+                {/* Help Footnote */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '8px',
+                    marginTop: '1rem',
+                    padding: '8px 10px',
+                    backgroundColor: '#F8FAFC',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    color: '#64748B',
+                  }}
+                >
+                  <Info size={14} style={{ flexShrink: 0, marginTop: '2px', color: '#0284C7' }} />
+                  <div>
+                    Requisitions are instantly routed to the source branch counter &amp; godown. They will confirm availability and dispatch stock.
+                  </div>
+                </div>
               </div>
             </div>
-
-            {/* Notes */}
-            <div>
-              <label className="form-label">Order Notes / Urgency (optional)</label>
-              <textarea
-                className="form-input"
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                placeholder="e.g. Urgently needed for customer contractor order, please dispatch via Suzuki"
-                rows={2}
-                style={{ resize: 'vertical', minHeight: '48px' }}
-              />
-            </div>
-
-            {/* Submit */}
-            <button
-              type="submit"
-              disabled={submitting || destinations.length === 0 || orderCart.length === 0}
-              className="btn btn-primary btn-lg"
-              style={{ marginTop: '0.5rem', width: '100%' }}
-            >
-              {submitting
-                ? 'Placing Order...'
-                : `📤 Place Branch Order (${orderCart.length} Items • ${orderCart.reduce((sum, ci) => sum + ci.qty, 0)} Units)`}
-            </button>
-          </form>
-        </div>
+          </div>
+        </form>
       )}
 
-      {/* ═══ TAB: My Requests ═══ */}
+      {/* ═══ TAB 2: My Requests ═══ */}
       {activeTab === 'my_requests' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {myRequests.length === 0 ? (
-            <div className="card" style={{ padding: '2rem', textAlign: 'center' }}>
-              <p style={{ fontSize: '14px', color: '#94A3B8' }}>No orders placed yet from this branch/counter.</p>
+            <div
+              className="card"
+              style={{
+                padding: '3rem 2rem',
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <div
+                style={{
+                  width: '48px',
+                  height: '48px',
+                  borderRadius: '50%',
+                  backgroundColor: '#F1F5F9',
+                  color: '#94A3B8',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Send size={24} />
+              </div>
+              <h4 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: '#334155' }}>
+                No outgoing branch requisitions found
+              </h4>
+              <p style={{ fontSize: '13px', color: '#64748B', margin: 0, maxWidth: '400px' }}>
+                You haven&apos;t placed any orders to other branches yet. Use the &ldquo;+ Place Order&rdquo; tab to request stock.
+              </p>
             </div>
           ) : (
             myRequests.map(order => {
-              const statusStyle = getStatusStyle(order.status);
+              const statusCfg = getStatusConfig(order.status);
+              const StatusIcon = statusCfg.icon;
               const targetTitle = order.target_counter
                 ? `${order.to_tenant?.name || 'Branch'} — ${order.target_counter.toUpperCase()}`
-                : (order.to_tenant?.name || 'Unknown Branch');
+                : order.to_tenant?.name || 'Unknown Branch';
+              const itemsList =
+                (order.items && order.items.length > 0 ? order.items : (order as any).branch_order_items) || [];
+              const totalUnits = itemsList.reduce((sum: number, it: any) => sum + (it.qty || 0), 0);
+
               return (
-                <div key={order.id} className="card" style={{ padding: '1rem 1.25rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
-                    {/* Left: Order details */}
-                    <div style={{ flex: 1, minWidth: '200px' }}>
+                <div key={order.id} className="card" style={{ padding: '1.25rem' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-start',
+                      flexWrap: 'wrap',
+                      gap: '12px',
+                    }}
+                  >
+                    {/* Left: Order Info & Manifest */}
+                    <div style={{ flex: 1, minWidth: '260px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-                        <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '13px', fontWeight: 700, color: '#0F172A' }}>
+                        <span
+                          style={{
+                            fontFamily: 'JetBrains Mono, monospace',
+                            fontSize: '14px',
+                            fontWeight: 800,
+                            color: '#0F172A',
+                          }}
+                        >
                           {order.order_no}
                         </span>
                         <span
                           style={{
-                            fontSize: '10px',
+                            fontSize: '11px',
                             fontWeight: 700,
-                            textTransform: 'uppercase',
-                            padding: '2px 8px',
-                            borderRadius: '4px',
-                            background: statusStyle.bg,
-                            color: statusStyle.color,
-                            border: `1px solid ${statusStyle.border}`,
+                            padding: '3px 10px',
+                            borderRadius: '6px',
+                            background: statusCfg.bg,
+                            color: statusCfg.color,
+                            border: `1px solid ${statusCfg.border}`,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
                           }}
                         >
-                          {order.status}
+                          <StatusIcon size={13} />
+                          {statusCfg.label}
                         </span>
                       </div>
-                      <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '4px' }}>
-                        Ordered from: <strong style={{ color: '#0F172A' }}>{targetTitle}</strong>
+
+                      <div style={{ fontSize: '13px', color: '#64748B', marginBottom: '8px' }}>
+                        Ordered From: <strong style={{ color: '#0F172A' }}>{targetTitle}</strong>
                       </div>
-                      {/* Items list with prominent visual badges */}
+
+                      {/* Items Badges */}
                       <div style={{ margin: '8px 0', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        {((order.items && order.items.length > 0 ? order.items : (order as any).branch_order_items) || []).map((item: any, idx: number) => (
+                        {itemsList.map((item: any, idx: number) => (
                           <div
                             key={idx}
                             style={{
@@ -878,17 +1369,17 @@ export default function BranchOrders({
                               background: '#F8FAFC',
                               borderRadius: '8px',
                               border: '1px solid #E2E8F0',
-                              maxWidth: '480px',
+                              maxWidth: '520px',
                             }}
                           >
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                              <span style={{ fontSize: '14px' }}>🎨</span>
+                              <Palette size={16} style={{ color: '#F97316' }} />
                               <div>
                                 <div style={{ fontSize: '13px', fontWeight: 700, color: '#0F172A' }}>
                                   {item.item_name}
                                 </div>
                                 {item.item_code && (
-                                  <div style={{ fontSize: '10px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
+                                  <div style={{ fontSize: '11px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
                                     Code: {item.item_code}
                                   </div>
                                 )}
@@ -912,28 +1403,64 @@ export default function BranchOrders({
                           </div>
                         ))}
                       </div>
+
                       {order.notes && (
-                        <div style={{ fontSize: '12px', color: '#475569', marginTop: '6px', background: '#F1F5F9', padding: '6px 10px', borderRadius: '6px', display: 'inline-block' }}>
-                          📝 <strong>Notes:</strong> {order.notes}
+                        <div
+                          style={{
+                            fontSize: '12px',
+                            color: '#475569',
+                            marginTop: '6px',
+                            background: '#F1F5F9',
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                        >
+                          <FileText size={14} style={{ color: '#64748B' }} />
+                          <span>
+                            <strong>Notes:</strong> {order.notes}
+                          </span>
                         </div>
                       )}
                     </div>
 
-                    {/* Right: Date + Action */}
-                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    {/* Right: Date & Actions */}
+                    <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-end' }}>
+                      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px', color: '#475569', fontWeight: 600 }}>
+                        {new Date(order.created_at).toLocaleDateString('en-PK', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                        })}
+                      </div>
                       <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '11px', color: '#94A3B8' }}>
-                        {new Date(order.created_at).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        {new Date(order.created_at).toLocaleTimeString('en-PK', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          hour12: true,
+                        })}
                       </div>
-                      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', color: '#CBD5E1' }}>
-                        {new Date(order.created_at).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                      <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
+                        {itemsList.length} items • {totalUnits} units
                       </div>
+
                       {order.status === 'dispatched' && (
                         <button
                           onClick={() => handleStatusUpdate(order.id, 'received')}
                           className="btn btn-primary"
-                          style={{ marginTop: '8px', fontSize: '11px', padding: '5px 12px' }}
+                          style={{
+                            marginTop: '8px',
+                            fontSize: '12px',
+                            padding: '6px 14px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
                         >
-                          ✅ Mark Received
+                          <CheckCircle2 size={14} />
+                          Mark Received
                         </button>
                       )}
                     </div>
@@ -945,61 +1472,126 @@ export default function BranchOrders({
         </div>
       )}
 
-      {/* ═══ TAB: Incoming Orders ═══ */}
+      {/* ═══ TAB 3: Incoming Orders ═══ */}
       {activeTab === 'incoming' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {incomingOrders.length === 0 ? (
-            <div className="card" style={{ padding: '2rem', textAlign: 'center' }}>
-              <p style={{ fontSize: '14px', color: '#94A3B8' }}>No incoming orders from other branches/counters.</p>
+            <div
+              className="card"
+              style={{
+                padding: '3rem 2rem',
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <div
+                style={{
+                  width: '48px',
+                  height: '48px',
+                  borderRadius: '50%',
+                  backgroundColor: '#F1F5F9',
+                  color: '#94A3B8',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Inbox size={24} />
+              </div>
+              <h4 style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: '#334155' }}>
+                No incoming branch requests
+              </h4>
+              <p style={{ fontSize: '13px', color: '#64748B', margin: 0, maxWidth: '400px' }}>
+                When other branches or counters need products from your stock, their requisitions will appear here.
+              </p>
             </div>
           ) : (
             incomingOrders.map(order => {
-              const statusStyle = getStatusStyle(order.status);
+              const statusCfg = getStatusConfig(order.status);
+              const StatusIcon = statusCfg.icon;
               const isPending = order.status === 'pending';
               const isAccepted = order.status === 'accepted';
               const requesterTitle = order.from_counter
                 ? `${order.from_tenant?.name || 'Branch'} — ${order.from_counter.toUpperCase()} (${order.created_by || 'Staff'})`
-                : (order.from_tenant?.name || 'Unknown Branch');
+                : order.from_tenant?.name || 'Unknown Branch';
+              const itemsList =
+                (order.items && order.items.length > 0 ? order.items : (order as any).branch_order_items) || [];
+              const totalUnits = itemsList.reduce((sum: number, it: any) => sum + (it.qty || 0), 0);
+
               return (
                 <div
                   key={order.id}
                   className="card"
                   style={{
-                    padding: '1rem 1.25rem',
-                    borderLeft: isPending ? '3px solid #F59E0B' : isAccepted ? '3px solid #3B82F6' : undefined,
+                    padding: '1.25rem',
+                    borderLeft: isPending ? '4px solid #F59E0B' : isAccepted ? '4px solid #3B82F6' : undefined,
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
-                    {/* Left: Order details */}
-                    <div style={{ flex: 1, minWidth: '200px' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-start',
+                      flexWrap: 'wrap',
+                      gap: '12px',
+                    }}
+                  >
+                    {/* Left: Requisition Details */}
+                    <div style={{ flex: 1, minWidth: '260px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-                        <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '13px', fontWeight: 700, color: '#0F172A' }}>
+                        <span
+                          style={{
+                            fontFamily: 'JetBrains Mono, monospace',
+                            fontSize: '14px',
+                            fontWeight: 800,
+                            color: '#0F172A',
+                          }}
+                        >
                           {order.order_no}
                         </span>
                         <span
                           style={{
-                            fontSize: '10px',
+                            fontSize: '11px',
                             fontWeight: 700,
-                            textTransform: 'uppercase',
-                            padding: '2px 8px',
-                            borderRadius: '4px',
-                            background: statusStyle.bg,
-                            color: statusStyle.color,
-                            border: `1px solid ${statusStyle.border}`,
+                            padding: '3px 10px',
+                            borderRadius: '6px',
+                            background: statusCfg.bg,
+                            color: statusCfg.color,
+                            border: `1px solid ${statusCfg.border}`,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
                           }}
                         >
-                          {order.status}
+                          <StatusIcon size={13} />
+                          {statusCfg.label}
                         </span>
                         {isPending && (
-                          <span style={{ fontSize: '10px', color: '#F59E0B', fontWeight: 600 }}>⚡ Action Required</span>
+                          <span
+                            style={{
+                              fontSize: '11px',
+                              color: '#B45309',
+                              backgroundColor: '#FEF3C7',
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              fontWeight: 700,
+                            }}
+                          >
+                            Action Required
+                          </span>
                         )}
                       </div>
-                      <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '4px' }}>
-                        Requested by: <strong style={{ color: '#0F172A' }}>{requesterTitle}</strong>
+
+                      <div style={{ fontSize: '13px', color: '#64748B', marginBottom: '8px' }}>
+                        Requested By: <strong style={{ color: '#0F172A' }}>{requesterTitle}</strong>
                       </div>
-                      {/* Items list with prominent visual badges */}
+
+                      {/* Items List */}
                       <div style={{ margin: '8px 0', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        {((order.items && order.items.length > 0 ? order.items : (order as any).branch_order_items) || []).map((item: any, idx: number) => (
+                        {itemsList.map((item: any, idx: number) => (
                           <div
                             key={idx}
                             style={{
@@ -1011,17 +1603,17 @@ export default function BranchOrders({
                               background: '#F8FAFC',
                               borderRadius: '8px',
                               border: '1px solid #E2E8F0',
-                              maxWidth: '480px',
+                              maxWidth: '520px',
                             }}
                           >
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                              <span style={{ fontSize: '14px' }}>🎨</span>
+                              <Palette size={16} style={{ color: '#F97316' }} />
                               <div>
                                 <div style={{ fontSize: '13px', fontWeight: 700, color: '#0F172A' }}>
                                   {item.item_name}
                                 </div>
                                 {item.item_code && (
-                                  <div style={{ fontSize: '10px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
+                                  <div style={{ fontSize: '11px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
                                     Code: {item.item_code}
                                   </div>
                                 )}
@@ -1045,20 +1637,47 @@ export default function BranchOrders({
                           </div>
                         ))}
                       </div>
+
                       {order.notes && (
-                        <div style={{ fontSize: '12px', color: '#475569', marginTop: '6px', background: '#F1F5F9', padding: '6px 10px', borderRadius: '6px', display: 'inline-block' }}>
-                          📝 <strong>Notes:</strong> {order.notes}
+                        <div
+                          style={{
+                            fontSize: '12px',
+                            color: '#475569',
+                            marginTop: '6px',
+                            background: '#F1F5F9',
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                        >
+                          <FileText size={14} style={{ color: '#64748B' }} />
+                          <span>
+                            <strong>Notes:</strong> {order.notes}
+                          </span>
                         </div>
                       )}
                     </div>
 
-                    {/* Right: Date + Actions */}
-                    <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-end' }}>
-                      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '11px', color: '#94A3B8' }}>
-                        {new Date(order.created_at).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    {/* Right: Date & Status Action Buttons */}
+                    <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end' }}>
+                      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px', color: '#475569', fontWeight: 600 }}>
+                        {new Date(order.created_at).toLocaleDateString('en-PK', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                        })}
                       </div>
-                      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', color: '#CBD5E1' }}>
-                        {new Date(order.created_at).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '11px', color: '#94A3B8' }}>
+                        {new Date(order.created_at).toLocaleTimeString('en-PK', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          hour12: true,
+                        })}
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#64748B' }}>
+                        {itemsList.length} items • {totalUnits} units
                       </div>
 
                       {/* Action Buttons */}
@@ -1067,36 +1686,64 @@ export default function BranchOrders({
                           <button
                             onClick={() => handleStatusUpdate(order.id, 'accepted')}
                             style={{
-                              fontSize: '11px', fontWeight: 700, padding: '5px 12px',
-                              borderRadius: '6px', border: '1px solid #BBF7D0',
-                              background: '#D1FAE5', color: '#065F46', cursor: 'pointer',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              padding: '6px 14px',
+                              borderRadius: '6px',
+                              border: '1px solid #BBF7D0',
+                              background: '#ECFDF5',
+                              color: '#065F46',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
                             }}
                           >
-                            ✅ Accept
+                            <Check size={14} />
+                            Accept
                           </button>
                           <button
                             onClick={() => handleStatusUpdate(order.id, 'rejected')}
                             style={{
-                              fontSize: '11px', fontWeight: 700, padding: '5px 12px',
-                              borderRadius: '6px', border: '1px solid #FECACA',
-                              background: '#FEE2E2', color: '#991B1B', cursor: 'pointer',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              padding: '6px 14px',
+                              borderRadius: '6px',
+                              border: '1px solid #FECACA',
+                              background: '#FEF2F2',
+                              color: '#991B1B',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
                             }}
                           >
-                            ✕ Reject
+                            <X size={14} />
+                            Reject
                           </button>
                         </div>
                       )}
+
                       {isAccepted && (
                         <button
                           onClick={() => handleStatusUpdate(order.id, 'dispatched')}
                           style={{
-                            fontSize: '11px', fontWeight: 700, padding: '5px 14px',
-                            borderRadius: '6px', border: '1px solid #BFDBFE',
-                            background: '#DBEAFE', color: '#1E40AF', cursor: 'pointer',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            padding: '6px 14px',
+                            borderRadius: '6px',
+                            border: '1px solid #BFDBFE',
+                            background: '#EFF6FF',
+                            color: '#1D4ED8',
+                            cursor: 'pointer',
                             marginTop: '4px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
                           }}
                         >
-                          🚛 Mark Dispatched
+                          <Truck size={14} />
+                          Mark Dispatched
                         </button>
                       )}
                     </div>

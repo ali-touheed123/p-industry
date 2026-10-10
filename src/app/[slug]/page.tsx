@@ -52,6 +52,9 @@ import {
   RefreshCw,
   Coins,
   Sliders,
+  Wallet,
+  LockOpen,
+  AlertCircle,
 } from 'lucide-react';
 
 interface PageProps {
@@ -844,7 +847,7 @@ export default function TenantAppPage({ params }: PageProps) {
               {/* Header */}
               <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
                 <div style={{ width: 52, height: 52, borderRadius: 'var(--radius-md)', background: 'var(--secondary-fixed)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.875rem', color: 'var(--secondary)' }}>
-                  <span className="material-symbols-outlined filled" style={{ fontSize: 28 }}>account_balance_wallet</span>
+                  <Wallet size={28} />
                 </div>
                 <h3 className="headline-sm" style={{ marginBottom: '4px' }}>
                   {isFirstShift ? 'Shift Open — Opening Cash' : `Shift ${(lastClosedShift?.shift_number || 2)} — Handover Verification`}
@@ -929,7 +932,7 @@ export default function TenantAppPage({ params }: PageProps) {
                   alignItems: 'center',
                   gap: '8px',
                 }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: 18, color: '#DC2626' }}>error</span>
+                  <AlertCircle size={18} style={{ color: '#DC2626', flexShrink: 0 }} />
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 700 }}>Shift Open Failed</div>
                     <div>{shiftOpenError}</div>
@@ -943,9 +946,11 @@ export default function TenantAppPage({ params }: PageProps) {
                 className="btn btn-primary btn-lg btn-full"
                 style={{ opacity: shiftOpening ? 0.7 : 1, cursor: shiftOpening ? 'not-allowed' : 'pointer' }}
               >
-                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
-                  {shiftOpening ? 'sync' : 'lock_open'}
-                </span>
+                {shiftOpening ? (
+                  <RefreshCw size={18} style={{ animation: 'spin 1s linear infinite' }} />
+                ) : (
+                  <LockOpen size={18} />
+                )}
                 {shiftOpening
                   ? 'Connecting to Server...'
                   : shiftOpenError

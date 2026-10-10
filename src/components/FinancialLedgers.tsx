@@ -1,6 +1,26 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import {
+  Plus,
+  Search,
+  Share2,
+  Printer,
+  CreditCard,
+  PlusCircle,
+  Info,
+  AlertTriangle,
+  Pencil,
+  X,
+  Coins,
+  MessageSquare,
+  ExternalLink,
+  Check,
+  CheckCircle2,
+  Copy,
+  Download,
+  Loader2,
+} from 'lucide-react';
 import { Client, Supplier } from '@/types';
 import { generateLedgerStatementBlob } from '@/utils/receiptCanvas';
 
@@ -605,7 +625,7 @@ export default function FinancialLedgers({
                 style={{ width: 28, height: 28, borderRadius: 'var(--radius-full)', background: 'var(--secondary)', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
                 title={`Add New ${activeTab === 'clients' ? 'Client' : 'Supplier'}`}
               >
-                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span>
+                <Plus size={16} />
               </button>
             )}
           </div>
@@ -635,7 +655,7 @@ export default function FinancialLedgers({
           </div>
 
           <div style={{ position: 'relative' }}>
-            <span className="material-symbols-outlined" style={{ position: 'absolute', left: '0.625rem', top: '50%', transform: 'translateY(-50%)', fontSize: 18, color: 'var(--on-surface-variant)' }}>search</span>
+            <Search size={16} style={{ position: 'absolute', left: '0.625rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--on-surface-variant)', pointerEvents: 'none' }} />
             <input
               type="text"
               className="form-input"
@@ -752,9 +772,11 @@ export default function FinancialLedgers({
                     style={{ height: '28px', padding: '0 8px', color: '#16A34A', borderColor: '#BBF7D0', background: '#F0FDF4' }}
                     title="Share A4 Statement Image via WhatsApp"
                   >
-                    <span className="material-symbols-outlined" style={{ fontSize: 15 }}>
-                      {isGeneratingStatementImage ? 'hourglass_top' : 'share'}
-                    </span>
+                    {isGeneratingStatementImage ? (
+                      <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} />
+                    ) : (
+                      <Share2 size={15} />
+                    )}
                   </button>
                   <button
                     onClick={() => window.print()}
@@ -762,7 +784,7 @@ export default function FinancialLedgers({
                     style={{ height: '28px', padding: '0 8px' }}
                     title="Print Ledger Statement"
                   >
-                    <span className="material-symbols-outlined" style={{ fontSize: 15 }}>print</span>
+                    <Printer size={15} />
                   </button>
                 </div>
 
@@ -991,7 +1013,7 @@ export default function FinancialLedgers({
         {/* Record Receipt / Payment / Settlement Button */}
         <div className="card" style={{ padding: '1.25rem', textAlign: 'center' }}>
           <div style={{ width: 44, height: 44, borderRadius: 'var(--radius-md)', background: 'var(--secondary-fixed)', color: 'var(--secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.75rem' }}>
-            <span className="material-symbols-outlined filled" style={{ fontSize: 24 }}>payments</span>
+            <CreditCard size={24} />
           </div>
           <h4 style={{ fontWeight: 700, fontSize: '15px', marginBottom: '4px' }}>
             {activeTab === 'clients' ? 'Receive Payment' : activeTab === 'suppliers' ? 'Pay Supplier' : 'Branch Settlement'}
@@ -1005,7 +1027,7 @@ export default function FinancialLedgers({
             className="btn btn-primary btn-full"
             style={{ opacity: !selectedParty ? 0.5 : 1 }}
           >
-            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add_circle</span>
+            <PlusCircle size={18} />
             {activeTab === 'clients' ? 'Record Receipt' : activeTab === 'suppliers' ? 'Record Payment' : 'Record Settlement'}
           </button>
         </div>
@@ -1022,13 +1044,13 @@ export default function FinancialLedgers({
               </div>
               {hasReconciliationVariance && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#b45309', background: '#fef3c7', border: '1px solid #fde68a', padding: '4px 8px', borderRadius: 'var(--radius-sm)', fontSize: '11px', fontWeight: 600, marginTop: '6px' }} title={`Calculated statement balance: Rs. ${calculatedStatementNet.toLocaleString()}`}>
-                  <span className="material-symbols-outlined" style={{ fontSize: 14 }}>info</span>
+                  <Info size={14} style={{ flexShrink: 0 }} />
                   Statement balance: Rs. {calculatedStatementNet.toLocaleString()}
                 </div>
               )}
               {exceedsThreshold && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--error)', fontSize: '12px', marginTop: '4px', fontWeight: 600 }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: 16 }}>warning</span>
+                  <AlertTriangle size={15} style={{ flexShrink: 0 }} />
                   Exceeds credit threshold (80%)
                 </div>
               )}
@@ -1097,10 +1119,10 @@ export default function FinancialLedgers({
                           setEditLimitValue(String(creditLimit || ''));
                           setIsEditingLimit(true);
                         }}
-                        style={{ background: 'none', border: 'none', color: 'var(--secondary)', cursor: 'pointer', fontSize: '11px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '2px', padding: 0 }}
+                        style={{ background: 'none', border: 'none', color: 'var(--secondary)', cursor: 'pointer', fontSize: '11px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px', padding: 0 }}
                         title="Edit Credit Limit"
                       >
-                        <span className="material-symbols-outlined" style={{ fontSize: 14 }}>edit</span>
+                        <Pencil size={13} />
                         Edit Limit
                       </button>
                     </>
@@ -1150,7 +1172,7 @@ export default function FinancialLedgers({
                   }}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--on-surface-variant)' }}
                 >
-                  <span className="material-symbols-outlined">close</span>
+                  <X size={18} />
                 </button>
               </div>
 
@@ -1208,7 +1230,7 @@ export default function FinancialLedgers({
                   >
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span className="material-symbols-outlined" style={{ fontSize: 16, color: '#D97706' }}>toll</span>
+                        <Coins size={16} style={{ color: '#D97706' }} />
                         <span style={{ fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', color: '#92400E', fontWeight: 800, letterSpacing: '0.04em' }}>
                           PAY VIA STOCKPILED TOKENS
                         </span>
@@ -1453,7 +1475,7 @@ export default function FinancialLedgers({
                 Add New {activeTab === 'clients' ? 'Client / Contractor' : 'Supplier'}
               </h3>
               <button onClick={() => setShowAddPartyModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--on-surface-variant)' }}>
-                <span className="material-symbols-outlined">close</span>
+                <X size={18} />
               </button>
             </div>
 
@@ -1577,7 +1599,7 @@ export default function FinancialLedgers({
                     color: '#FFFFFF',
                   }}
                 >
-                  <span className="material-symbols-outlined" style={{ fontSize: 20 }}>chat</span>
+                  <MessageSquare size={18} />
                 </div>
                 <div>
                   <h3 style={{ fontSize: '15px', fontWeight: 800, margin: 0 }}>
@@ -1604,7 +1626,7 @@ export default function FinancialLedgers({
                   cursor: 'pointer',
                 }}
               >
-                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>close</span>
+                <X size={18} />
               </button>
             </div>
 
@@ -1649,7 +1671,7 @@ export default function FinancialLedgers({
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    <span className="material-symbols-outlined" style={{ fontSize: 16 }}>open_in_new</span>
+                    <ExternalLink size={15} />
                     Open Chat
                   </button>
                 </div>
@@ -1669,9 +1691,11 @@ export default function FinancialLedgers({
                   color: copiedStatement ? '#065F46' : '#1E40AF',
                 }}
               >
-                <span className="material-symbols-outlined" style={{ fontSize: 18, color: copiedStatement ? '#059669' : '#2563EB', flexShrink: 0 }}>
-                  {copiedStatement ? 'check_circle' : 'content_copy'}
-                </span>
+                {copiedStatement ? (
+                  <CheckCircle2 size={18} style={{ color: '#059669', flexShrink: 0 }} />
+                ) : (
+                  <Copy size={18} style={{ color: '#2563EB', flexShrink: 0 }} />
+                )}
                 <span>
                   {copiedStatement
                     ? 'Statement image copied to clipboard! In WhatsApp Web, simply press Ctrl + V to paste and send.'
@@ -1735,9 +1759,7 @@ export default function FinancialLedgers({
                     cursor: 'pointer',
                   }}
                 >
-                  <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
-                    {copiedStatement ? 'check' : 'content_copy'}
-                  </span>
+                  {copiedStatement ? <Check size={15} /> : <Copy size={15} />}
                   <span>{copiedStatement ? 'Copied!' : 'Copy Image'}</span>
                 </button>
 
@@ -1758,7 +1780,7 @@ export default function FinancialLedgers({
                     cursor: 'pointer',
                   }}
                 >
-                  <span className="material-symbols-outlined" style={{ fontSize: 16 }}>download</span>
+                  <Download size={15} />
                   <span>Download</span>
                 </button>
               </div>
