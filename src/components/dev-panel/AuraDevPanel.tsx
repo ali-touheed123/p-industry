@@ -140,7 +140,7 @@ export default function AuraDevPanel() {
             ceo_password: initialAccounts?.ceoPassword,
             staff_username: initialAccounts?.staffUsername,
             staff_password: initialAccounts?.staffPassword,
-            counters: (initialAccounts as any)?.counters,
+            counters: initialAccounts?.counters,
           };
 
       const res = await fetch(endpoint, {

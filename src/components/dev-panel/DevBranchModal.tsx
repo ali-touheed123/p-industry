@@ -9,7 +9,7 @@ interface DevBranchModalProps {
   onClose: () => void;
   onSave: (
     branchData: Partial<Tenant>,
-    initialAccounts?: InitialAccountsData & { counters?: Array<{ username: string; password: string; name: string }> }
+    initialAccounts?: InitialAccountsData
   ) => Promise<boolean>;
   editingBranch?: Tenant | null;
 }
@@ -142,15 +142,13 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
         },
         !editingBranch
           ? {
-              ceoUsername: ceoUsername.trim(),
-              ceoPassword: ceoPassword.trim(),
-              staffUsername: counters[0]?.username.trim().toLowerCase() || `${cleanSlug}_counter1`,
-              staffPassword: counters[0]?.password.trim() || '123',
+              ceoUsername: ceoUsername.trim() || undefined,
+              ceoPassword: ceoPassword || undefined,
               counters: counters.map(c => ({
                 username: c.username.trim().toLowerCase(),
-                password: c.password.trim(),
+                password: c.password,
                 name: c.name.trim(),
-              }))
+              })),
             }
           : undefined
       );

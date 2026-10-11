@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { hashPassword } from '@/lib/auth-passwords';
 import { requireDevAuth, requireTenantAuth } from '@/lib/session';
 import { sanitizePostgRESTLike } from '@/lib/utils';
+import { validateAndAssembleAccounts } from '@/lib/tenant-provisioning-validation';
 
 // GET all tenants or single tenant by slug
 export async function GET(req: NextRequest) {
@@ -156,24 +157,34 @@ export async function POST(req: NextRequest) {
     const cleanSlug = slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-');
 
     // 0. Pre-Flight Unique Username Validation across all proposed user accounts (DEV-02)
-    const proposedUsernames: string[] = [];
-    if (ceo_username?.trim()) proposedUsernames.push(ceo_username.trim().toLowerCase());
-    if (staff_username?.trim()) proposedUsernames.push(staff_username.trim().toLowerCase());
-    if (Array.isArray(body.counters)) {
-      for (const c of body.counters) {
-        if (c?.username?.trim()) {
-          proposedUsernames.push(c.username.trim().toLowerCase());
-        }
-      }
-    }
-
-    // Check for internal duplicates within request
-    const uniqueUsernames = Array.from(new Set(proposedUsernames));
-    if (uniqueUsernames.length < proposedUsernames.length) {
+    const valResult = validateAndAssembleAccounts(body);
+    if (!valResult.success) {
       return NextResponse.json({
         success: false,
-        error: 'Duplicate usernames provided in request. Each user account must have a unique username.'
+        error: valResult.error
       }, { status: 400 });
+    }
+
+    const proposedAccounts = valResult.proposedAccounts || [];
+    const uniqueUsernames = valResult.uniqueUsernames || [];
+
+    // 0b. Pre-Flight Slug Uniqueness Check (DEV-03)
+    // Provides an early 400 before any database writes.
+    // The DB unique constraint on tenants.slug remains the authoritative concurrency boundary.
+    {
+      const { data: existingSlug, error: slugCheckErr } = await supabaseAdmin
+        .from('tenants')
+        .select('id')
+        .eq('slug', cleanSlug)
+        .maybeSingle();
+
+      if (slugCheckErr) throw slugCheckErr;
+      if (existingSlug) {
+        return NextResponse.json({
+          success: false,
+          error: 'A shop or godown with this URL slug already exists!'
+        }, { status: 400 });
+      }
     }
 
     // Check global database uniqueness before creating tenant
@@ -194,7 +205,31 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 1. Insert Tenant
+    // 1. Hash all account passwords BEFORE any database writes (DEV-03).
+    //    If bcrypt throws, no database rows are created.
+    //    Passwords are never logged — only the opaque hash is used downstream.
+    interface HashedAccount {
+      username: string;
+      passwordHash: string;
+      fullName: string;
+      role: 'ceo' | 'staff' | 'godown_staff';
+    }
+
+    const hashedAccounts: HashedAccount[] = [];
+    for (const account of proposedAccounts) {
+      if (!account.password) continue;
+      const hash = await hashPassword(account.password);
+      hashedAccounts.push({
+        username: account.username,
+        passwordHash: hash,
+        fullName: account.fullName,
+        role: account.role,
+      });
+    }
+
+    // 2. Insert Tenant
+    // The DB unique constraint on slug is the authoritative concurrency boundary for
+    // simultaneous requests that pass pre-flight. Code 23505 distinguishes slug collisions.
     const { data: tenant, error: tenantErr } = await supabaseAdmin
       .from('tenants')
       .insert({
@@ -212,79 +247,57 @@ export async function POST(req: NextRequest) {
 
     if (tenantErr) {
       if (tenantErr.code === '23505') {
+        // Slug-specific vs other unique violations: slug is the only unique column on tenants.
         return NextResponse.json({ success: false, error: 'A shop or godown with this URL slug already exists!' }, { status: 400 });
       }
       throw tenantErr;
     }
 
-    // Provision accounts and seed catalog wrapped in atomic rollback
+    // Track exact records created by THIS request for scoped rollback.
+    // Populated only from successful DB responses; never pre-populated.
+    let createdTenantId: string | null = tenant.id;
+    const createdUserIds: string[] = [];
+
+    // Provision accounts and seed catalog wrapped in tracked rollback
+    let provisioningError: Error | null = null;
     try {
-      // 2. Create CEO user if credentials provided
-      if (ceo_username && ceo_password) {
-        const secureCeoHash = await hashPassword(ceo_password);
-        const { data: ceoUser, error: ceoErr } = await supabaseAdmin
+      // 3. Create CEO user if credentials hashed
+      const ceoHashed = hashedAccounts.find(a => a.role === 'ceo');
+      if (ceoHashed) {
+        const { data: ceoRow, error: ceoErr } = await supabaseAdmin
           .from('app_users')
           .insert({
-            username: ceo_username.trim().toLowerCase(),
-            password_hash: secureCeoHash,
-            full_name: owner_name?.trim() || `${name} Owner`,
-            email: email?.trim() || `${ceo_username.trim().toLowerCase()}@pyntflow.com`,
+            username: ceoHashed.username,
+            password_hash: ceoHashed.passwordHash,
+            full_name: ceoHashed.fullName,
+            email: email?.trim() || `${ceoHashed.username}@pyntflow.com`,
             role: 'ceo',
             tenant_id: tenant.id,
           })
-          .select()
+          .select('id')
           .single();
 
         if (ceoErr) throw ceoErr;
-
-        if (ceoUser) {
-          // Link to ceo_tenants mapping table
-          const { error: mapErr } = await supabaseAdmin
-            .from('ceo_tenants')
-            .insert({
-              user_id: ceoUser.id,
-              tenant_id: tenant.id,
-            });
-          if (mapErr) throw mapErr;
-        }
+        if (ceoRow?.id) createdUserIds.push(ceoRow.id);
       }
 
-      // 3. Create Staff / Counter users if credentials provided (preserve custom counter name)
-      if (staff_username && staff_password) {
-        const secureStaffHash = await hashPassword(staff_password);
-        const initialCounterName = (Array.isArray(body.counters) && body.counters[0]?.name?.trim())
-          ? body.counters[0].name.trim()
-          : `${name} Counter 01`;
-
-        const { error: staffErr } = await supabaseAdmin
+      // 4. Create Staff / Counter users from canonical hashed cashier accounts
+      const cashierHashed = hashedAccounts.filter(a => a.role === 'staff' || a.role === 'godown_staff');
+      for (const counter of cashierHashed) {
+        const { data: counterRow, error: counterErr } = await supabaseAdmin
           .from('app_users')
           .insert({
-            username: staff_username.trim().toLowerCase(),
-            password_hash: secureStaffHash,
-            full_name: initialCounterName,
-            role: type === 'godown' ? 'godown_staff' : 'staff',
+            username: counter.username,
+            password_hash: counter.passwordHash,
+            full_name: counter.fullName,
+            role: counter.role,
             tenant_id: tenant.id,
-          });
-        if (staffErr) throw staffErr;
-      }
+          })
+          .select('id')
+          .single();
 
-      // 4. Create multiple custom counters if provided
-      if (Array.isArray(body.counters) && body.counters.length > 0) {
-        for (const c of body.counters) {
-          if (c.username && c.password && c.username.trim().toLowerCase() !== staff_username?.trim().toLowerCase()) {
-            const secureCounterHash = await hashPassword(c.password);
-            const { error: counterErr } = await supabaseAdmin
-              .from('app_users')
-              .insert({
-                username: c.username.trim().toLowerCase(),
-                password_hash: secureCounterHash,
-                full_name: c.name?.trim() || `${name} ${c.username.toUpperCase()}`,
-                role: type === 'godown' ? 'godown_staff' : 'staff',
-                tenant_id: tenant.id,
-              });
-            if (counterErr) throw counterErr;
-          }
-        }
+        if (counterErr) throw counterErr;
+        if (counterRow?.id) createdUserIds.push(counterRow.id);
       }
 
       // 5. Automatically seed existing catalog products into this new branch with stock_qty = 0
@@ -334,26 +347,57 @@ export async function POST(req: NextRequest) {
         console.error('Failed to seed catalog items to new branch (non-critical):', seedErr);
       }
 
-      return NextResponse.json({ success: true, tenant });
-    } catch (provErr: any) {
-      console.error('Account provisioning failed, rolling back created tenant:', provErr);
-      // Clean rollback of tenant and any partially created users / mappings
-      try {
-        await supabaseAdmin.from('ceo_tenants').delete().eq('tenant_id', tenant.id);
-        await supabaseAdmin.from('app_users').delete().eq('tenant_id', tenant.id);
-        await supabaseAdmin.from('tenants').delete().eq('id', tenant.id);
-      } catch (cleanupErr) {
-        console.error('Failed to completely rollback orphaned tenant:', cleanupErr);
+    } catch (err: any) {
+      provisioningError = err;
+    }
+
+    if (provisioningError) {
+      // Scoped compensating rollback: delete only records demonstrably created by this request.
+      // Each cleanup step is independent — a failure in one does not prevent the others.
+      // NEVER log passwords, hashes, PINs, tokens, or session secrets.
+      console.error('Account provisioning failed, attempting scoped rollback:', {
+        tenantId: createdTenantId,
+        createdUserCount: createdUserIds.length,
+        error: provisioningError.message,
+      });
+
+      // Step R1: Delete exact user records created by this request (by ID).
+      if (createdUserIds.length > 0) {
+        try {
+          await supabaseAdmin.from('app_users').delete().in('id', createdUserIds);
+        } catch (cleanupErr: any) {
+          console.error('[ROLLBACK-R1] Failed to delete created user rows by ID:', {
+            userIds: createdUserIds,
+            error: cleanupErr?.message,
+          });
+        }
       }
+
+      // Step R2: Delete tenant record created by this request (by exact ID).
+      if (createdTenantId) {
+        try {
+          await supabaseAdmin.from('tenants').delete().eq('id', createdTenantId);
+        } catch (cleanupErr: any) {
+          console.error('[ROLLBACK-R2] Failed to delete created tenant row by ID:', {
+            tenantId: createdTenantId,
+            error: cleanupErr?.message,
+          });
+        }
+      }
+
+      // Return original provisioning error — rollback status is diagnostic-only.
       return NextResponse.json({
         success: false,
-        error: `Failed to provision branch accounts: ${provErr.message}. Tenant creation was rolled back.`
+        error: `Failed to provision branch accounts: ${provisioningError.message}. Tenant creation was rolled back.`
       }, { status: 500 });
     }
+
+    return NextResponse.json({ success: true, tenant });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
+
 
 // DELETE: Remove tenant with full cascade cleanup
 export async function DELETE(req: NextRequest) {

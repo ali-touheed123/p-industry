@@ -31,11 +31,18 @@ export interface UserItem {
   tenants?: { name: string; slug: string; type: string } | null;
 }
 
+export interface CounterRegisterInput {
+  username: string;
+  password: string;
+  name: string;
+}
+
 export interface InitialAccountsData {
   ceoUsername?: string;
   ceoPassword?: string;
   staffUsername?: string;
   staffPassword?: string;
+  counters?: CounterRegisterInput[];
 }
 
 export type DevActiveTab = 'overview' | 'branches' | 'users' | 'receipt-templates' | 'ai-control';
