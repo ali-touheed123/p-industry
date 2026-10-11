@@ -69,6 +69,14 @@ export interface LayoutConfig {
   scale: number; // 0.8 to 1.2
 }
 
+export interface TokenClaimSlipConfig {
+  enabled: boolean; // show/hide slip on receipt
+  title: string; // heading, e.g. "Token Claim Slip"
+  instructions: string; // subtitle/instructions
+  footerNotice: string; // disclaimer/notice
+  showDetails: boolean; // show breakdown of items with tokens
+}
+
 export interface TemplateJson {
   header: HeaderConfig;
   invoiceInfo: InvoiceInfoConfig;
@@ -76,6 +84,7 @@ export interface TemplateJson {
   totals: TotalsConfig;
   footer: FooterConfig;
   layout: LayoutConfig;
+  tokenClaimSlip?: TokenClaimSlipConfig;
   locks: Record<string, boolean>; // locked field keys that tenants cannot override
 }
 
@@ -164,6 +173,13 @@ export const DEFAULT_TEMPLATE_JSON: TemplateJson = {
     fontSize: 12,
     fontFamily: 'mono',
     scale: 1,
+  },
+  tokenClaimSlip: {
+    enabled: true,
+    title: 'Token Claim Slip',
+    instructions: 'Present this code on your next visit to redeem your token',
+    footerNotice: 'Keep this receipt — code cannot be reissued',
+    showDetails: true,
   },
   locks: {},
 };

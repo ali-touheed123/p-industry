@@ -1,5 +1,5 @@
 import React from 'react';
-import { TemplateJson, PaperSize, PAPER_SIZE_CONFIG } from '@/types/receipt';
+import { TemplateJson, PaperSize, PAPER_SIZE_CONFIG, DEFAULT_TEMPLATE_JSON } from '@/types/receipt';
 
 export interface ReceiptItemData {
   item_name: string;
@@ -27,6 +27,8 @@ export interface ReceiptInvoiceData {
   shop_name?: string;
   shop_address?: string;
   shop_phone?: string;
+  token_claim_code?: string;
+  token_claim_details?: string;
 }
 
 export const MOCK_INVOICE_DATA: ReceiptInvoiceData = {
@@ -50,6 +52,8 @@ export const MOCK_INVOICE_DATA: ReceiptInvoiceData = {
   net_total: 14160,
   paid_amount: 14000,
   due_amount: 160,
+  token_claim_code: 'CLM-DEMO99',
+  token_claim_details: 'Super Gloss Enamel 1L (x4) - Rs. 200 token value',
 };
 
 interface DevReceiptPreviewProps {
@@ -80,6 +84,9 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
     footer,
     layout,
   } = template;
+
+  const tokenClaimSlip = template.tokenClaimSlip ?? DEFAULT_TEMPLATE_JSON.tokenClaimSlip;
+  const isSlipEnabled = tokenClaimSlip?.enabled !== false;
 
   const fontStack =
     layout.fontFamily === 'mono'
@@ -191,19 +198,17 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
           ...separatorStyle('dashed'),
         }}
       >
-        {invoiceInfo.showInvoiceNo && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, marginBottom: '2px' }}>
-            <span>{invoiceInfo.invoiceLabel || 'Invoice #'}:</span>
-            <span>{invoiceData.invoice_no || 'INV-0000'}</span>
-          </div>
-        )}
+        {/* T-19 Strict Compliance Lock: Invoice Number is mandatory and always visible */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, marginBottom: '2px' }}>
+          <span>{invoiceInfo.invoiceLabel || 'Invoice #'}:</span>
+          <span>{invoiceData.invoice_no || 'INV-0000'}</span>
+        </div>
 
-        {invoiceInfo.showDate && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569', marginBottom: '2px' }}>
-            <span>Date:</span>
-            <span>{invoiceData.date || new Date().toLocaleString()}</span>
-          </div>
-        )}
+        {/* T-19 Strict Compliance Lock: Date is mandatory and always visible */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569', marginBottom: '2px' }}>
+          <span>Date:</span>
+          <span>{invoiceData.date || new Date().toLocaleString()}</span>
+        </div>
 
         {invoiceInfo.showCashier && invoiceData.cashier_name && (
           <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569', marginBottom: '2px' }}>
@@ -351,22 +356,21 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
           </div>
         )}
 
-        {totals.showGrandTotal && (
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              fontSize: totals.boldTotal ? `${Math.round(layout.fontSize * 1.2)}px` : `${layout.fontSize}px`,
-              fontWeight: totals.boldTotal ? 900 : 700,
-              paddingTop: '4px',
-              borderTop: '1px solid #0f172a',
-              marginTop: '3px',
-            }}
-          >
-            <span>NET TOTAL:</span>
-            <span>{cur} {(invoiceData.net_total || 0).toLocaleString()}</span>
-          </div>
-        )}
+        {/* T-19 Strict Compliance Lock: Grand Total is mandatory and always visible */}
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            fontSize: totals.boldTotal ? `${Math.round(layout.fontSize * 1.2)}px` : `${layout.fontSize}px`,
+            fontWeight: totals.boldTotal ? 900 : 700,
+            paddingTop: '4px',
+            borderTop: '1px solid #0f172a',
+            marginTop: '3px',
+          }}
+        >
+          <span>NET TOTAL:</span>
+          <span>{cur} {(invoiceData.net_total || 0).toLocaleString()}</span>
+        </div>
 
         {totals.showPaid && (
           <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
@@ -453,6 +457,90 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
           </div>
         )}
       </div>
+
+      {/* ─── TOKEN CLAIM SLIP (PREVIEW WITH DEMO WATERMARK) ────────── */}
+      {isSlipEnabled && (
+        <div
+          style={{
+            border: '1px dashed #0f172a',
+            padding: '8px',
+            marginTop: '12px',
+            textAlign: 'center',
+            backgroundColor: '#fafaf9',
+            borderRadius: '2px',
+          }}
+        >
+          <div
+            style={{
+              fontSize: '9.5px',
+              fontWeight: 800,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              marginBottom: '3px',
+              color: '#0f172a',
+            }}
+          >
+            &#127915; {tokenClaimSlip?.title || 'Token Claim Slip'}
+          </div>
+          <div
+            style={{
+              fontSize: '8.5px',
+              color: '#475569',
+              marginBottom: '5px',
+            }}
+          >
+            {tokenClaimSlip?.instructions || 'Present this code on your next visit to redeem your token'}
+          </div>
+          <div
+            style={{
+              fontSize: '13px',
+              fontWeight: 900,
+              letterSpacing: '0.12em',
+              border: '1px solid #0f172a',
+              padding: '3px 8px',
+              display: 'inline-block',
+              margin: '3px 0',
+              fontFamily: 'monospace',
+              backgroundColor: '#ffffff',
+            }}
+          >
+            {invoiceData.token_claim_code || 'CLM-DEMO99'}
+          </div>
+          <div
+            style={{
+              fontSize: '8px',
+              fontWeight: 800,
+              color: '#b91c1c',
+              letterSpacing: '0.04em',
+              margin: '3px 0',
+              textTransform: 'uppercase',
+            }}
+          >
+            [SAMPLE / PREVIEW ONLY — NOT REDEEMABLE]
+          </div>
+          {tokenClaimSlip?.showDetails && (invoiceData.token_claim_details || 'Super Gloss Enamel 1L (x4) - Rs. 200 token value') && (
+            <div
+              style={{
+                fontSize: '8.5px',
+                color: '#475569',
+                marginTop: '3px',
+                fontStyle: 'italic',
+              }}
+            >
+              {invoiceData.token_claim_details || 'Super Gloss Enamel 1L (x4) - Rs. 200 token value'}
+            </div>
+          )}
+          <div
+            style={{
+              fontSize: '7.5px',
+              color: '#64748b',
+              marginTop: '4px',
+            }}
+          >
+            {tokenClaimSlip?.footerNotice || 'Keep this receipt — code cannot be reissued'}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

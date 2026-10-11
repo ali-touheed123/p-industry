@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { printViaIframe, buildThermalHtmlDocument } from '@/utils/iframePrint';
+import { printViaIframe } from '@/utils/iframePrint';
+import { buildPosThermalHtml } from '@/utils/receiptAdapters';
 import { ReceiptTemplate } from '@/types/receipt';
 import { Item, Client } from '@/types';
 import {
@@ -104,109 +105,6 @@ const SHORTCUTS = [
   { key: 'F9', label: 'Cancel' },
 ];
 
-/** UX-01: Build an 80mm thermal receipt as a plain HTML string for iframe printing.
- * Applies footer/branding settings from the assigned template when available (DEV-07). */
-function buildPosThermalHtml(data: any, tenantName: string = 'PyntFlow Store', staffName: string = 'Counter Staff', tmpl?: ReceiptTemplate | null): string {
-  const effectiveTenantName = (tenantName && tenantName.trim() && tenantName !== 'Main Godown & Retail Counter #1') ? tenantName : 'PyntFlow Store';
-  const fmt = (n: number) => Number(n || 0).toLocaleString();
-  const isSplit = data.payment_type === 'split' ||
-    (Number(data.cash_paid || 0) > 0 &&
-      (Number(data.card_paid || 0) > 0 || Number(data.bank_paid || 0) > 0 || Number(data.others_paid || 0) > 0));
-
-  const itemRows = (data.items || []).map((item: any, idx: number) => {
-    const lineTotal = item.qty * (item.rate || item.unit_price || 0);
-    const isRemoved = item.tokenAction === 'remove';
-    const hasToken = Boolean(item.hasToken && (item.tokenValue || 0) > 0);
-    const tokenNote = hasToken
-      ? `<div style="font-size:9px;color:#555;font-style:italic">${isRemoved ? `Token removed &mdash; Rs. ${fmt(item.tokenValue * item.qty)} deducted` : `Token included &mdash; Rs. ${fmt(item.tokenValue * item.qty)} token value`}</div>`
-      : '';
-    const codeStr = (item.code || item.item_code) ? `${item.code || item.item_code} &middot; ` : '';
-    const shadeStr = (item.shadeCode || item.shade_code) && (item.shadeCode || item.shade_code) !== '&mdash;'
-      ? `Shade: ${item.shadeCode || item.shade_code} &middot; ` : '';
-    return `<div style="padding:3px 0;border-bottom:${idx < (data.items.length - 1) ? '1px dotted #ccc' : 'none'}">
-      <div style="display:flex;justify-content:space-between">
-        <div>
-          <div style="font-weight:700">${item.productName || item.item_name || '—'}</div>
-          <div style="font-size:9.5px;color:#444">${codeStr}${shadeStr}${item.qty} x Rs. ${fmt(item.rate || item.unit_price || 0)}</div>
-        </div>
-        <div style="font-weight:700">Rs. ${fmt(lineTotal)}</div>
-      </div>${tokenNote}
-    </div>`;
-  }).join('');
-
-  const splitRows = isSplit ? `
-    <div style="padding-left:8px;font-size:9.5px;color:#444">
-      ${Number(data.cash_paid || 0) > 0 ? `<div style="display:flex;justify-content:space-between"><span>&bull; Cash:</span><span>Rs. ${fmt(data.cash_paid)}</span></div>` : ''}
-      ${Number(data.card_paid || 0) > 0 ? `<div style="display:flex;justify-content:space-between"><span>&bull; Card:</span><span>Rs. ${fmt(data.card_paid)}</span></div>` : ''}
-      ${Number(data.bank_paid || 0) > 0 ? `<div style="display:flex;justify-content:space-between"><span>&bull; Bank:</span><span>Rs. ${fmt(data.bank_paid)}</span></div>` : ''}
-      ${Number(data.others_paid || 0) > 0 ? `<div style="display:flex;justify-content:space-between"><span>&bull; Other:</span><span>Rs. ${fmt(data.others_paid)}</span></div>` : ''}
-    </div>` : '';
-
-  const changeRow = Number(data.change_returned || 0) > 0
-    ? `<div style="display:flex;justify-content:space-between;font-size:10px;color:#15803d;font-weight:700"><span>Change Returned:</span><span>Rs. ${fmt(data.change_returned)}</span></div>` : '';
-  const dueRow = Number(data.due_amount || 0) > 0
-    ? `<div style="display:flex;justify-content:space-between;font-size:10.5px;font-weight:700"><span>Balance Due:</span><span>Rs. ${fmt(data.due_amount)}</span></div>` : '';
-  const deliveryRow = Number(data.delivery_charge || 0) > 0
-    ? `<div style="display:flex;justify-content:space-between"><span style="color:#555">Delivery:</span><span>+ Rs. ${fmt(data.delivery_charge)}</span></div>` : '';
-
-  // Apply template footer config when available
-  const footer = tmpl?.template_json?.footer;
-  const footerLine1 = footer?.line1 || `Thank you for shopping at ${effectiveTenantName}!`;
-  const footerLine2 = footer?.line2 || '';
-  const whatsappRow = (footer?.showWhatsapp && footer?.whatsappNumber)
-    ? `<div style="font-size:9px;color:#555">WhatsApp: ${footer.whatsappNumber}</div>` : '';
-  const poweredBy = (footer?.showPoweredBy !== false)
-    ? `<div style="font-size:8px;color:#aaa;margin-top:2px">${footer?.poweredByText || 'Powered by Pyntflow'}</div>` : '';
-
-  // Task 12.8 — FINDING-E2E-003: Walk-in token claim slip appended to receipt.
-  // Printed only when a claim code was generated (anonymous walk-in who kept their token).
-  const tokenClaimBlock = data.token_claim_code
-    ? `<div style="border:1px dashed #000;padding:8px;margin-top:10px;text-align:center">
-  <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px">&#127915; Token Claim Slip</div>
-  <div style="font-size:9px;color:#555;margin-bottom:6px">Present this code on your next visit to redeem your token</div>
-  <div style="font-size:14px;font-weight:900;letter-spacing:0.1em;border:1px solid #000;padding:4px 8px;display:inline-block;margin:4px 0">${data.token_claim_code}</div>
-  ${data.token_claim_details ? `<div style="font-size:9px;color:#444;margin-top:4px">${data.token_claim_details}</div>` : ''}
-  <div style="font-size:8px;color:#777;margin-top:4px">Keep this receipt — code cannot be reissued</div>
-</div>`
-    : '';
-
-  return `
-<div style="text-align:center;border-bottom:1px dashed #000;padding-bottom:8px;margin-bottom:8px">
-  <h2 style="font-size:15px;font-weight:900;text-transform:uppercase;letter-spacing:0.05em;margin:0 0 2px 0">${effectiveTenantName}</h2>
-  <p style="font-size:10px;color:#333;margin:0">Retail &amp; Industrial Paint Hub</p>
-  <div style="font-size:12px;font-weight:700;margin-top:4px">${data.invoice_no || '—'}</div>
-  <div style="font-size:9px;color:#555">${data.date} &middot; ${data.time}</div>
-</div>
-<div style="font-size:11px;border-bottom:1px dashed #000;padding-bottom:6px;margin-bottom:6px">
-  <div style="display:flex;justify-content:space-between;margin-bottom:2px">
-    <span style="color:#555">Customer:</span><span style="font-weight:700">${data.client_name || 'Walk-in'}</span>
-  </div>
-  <div style="display:flex;justify-content:space-between">
-    <span style="color:#555">Staff:</span><span style="font-weight:700">${staffName}</span>
-  </div>
-</div>
-<div style="border-bottom:1px dashed #000;padding-bottom:6px;margin-bottom:6px;font-size:10.5px">
-  ${itemRows}
-</div>
-<div style="display:flex;flex-direction:column;gap:3px;font-size:11px;border-bottom:1px dashed #000;padding-bottom:8px;margin-bottom:8px">
-  <div style="display:flex;justify-content:space-between"><span style="color:#555">Subtotal:</span><span>Rs. ${fmt(data.subTotal)}</span></div>
-  <div style="display:flex;justify-content:space-between"><span style="color:#555">Discount:</span><span>- Rs. ${fmt(data.discount)}</span></div>
-  ${deliveryRow}
-  <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:900;padding-top:3px">
-    <span>NET TOTAL:</span><span>Rs. ${fmt(data.grandTotal)}</span>
-  </div>
-  <div style="display:flex;justify-content:space-between;font-size:11px;font-weight:700;padding-top:3px">
-    <span>Paid (${(data.payment_type || 'CASH').toUpperCase()}):</span><span>Rs. ${fmt(data.paid_amount)}</span>
-  </div>
-  ${splitRows}${changeRow}${dueRow}
-</div>
-<div style="text-align:center;font-size:9.5px;color:#555">${footerLine1}</div>
-${footerLine2 ? `<div style="text-align:center;font-size:9px;color:#777;margin-top:2px">${footerLine2}</div>` : ''}
-${whatsappRow}
-${poweredBy}
-${tokenClaimBlock}
-`;
-}
 
 export default function PosBilling({
   items: liveItems,
@@ -1087,10 +985,7 @@ export default function PosBilling({
           setPrintReceiptData(completedInvoice);
           showFeedback(isEditingExisting ? `Invoice #${finalServerInvoiceNo} updated & printing...` : `Invoice ${finalServerInvoiceNo} finalized & printing...`);
           // UX-01: Print via hidden iframe — avoids popup blocker on post-async calls (DEV-07: applies assigned template)
-          const iframeHtml = buildThermalHtmlDocument(
-            buildPosThermalHtml(completedInvoice, tenantName, staffName, assignedTemplate),
-            `Receipt ${completedInvoice.invoice_no || finalServerInvoiceNo}`
-          );
+          const iframeHtml = buildPosThermalHtml(completedInvoice, tenantName, staffName, assignedTemplate);
           printViaIframe(iframeHtml);
         } else {
           setPrintReceiptData(null);

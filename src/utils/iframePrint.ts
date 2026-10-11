@@ -76,6 +76,10 @@ export function printViaIframe(htmlContent: string): void {
 /**
  * Wraps a thermal receipt HTML snippet into a full self-contained HTML document
  * optimised for 80mm thermal printers with embedded CSS reset.
+ *
+ * @deprecated Legacy wrapper that hardcodes 80mm Courier New.
+ * POS and Sales History now use `renderReceiptDocument` from `receiptRenderCore.ts`.
+ * Retained for backward compatibility.
  */
 export function buildThermalHtmlDocument(innerHtml: string, title = 'Receipt'): string {
   return `<!DOCTYPE html>
@@ -95,7 +99,7 @@ export function buildThermalHtmlDocument(innerHtml: string, title = 'Receipt'): 
       padding: 4mm;
     }
     @media print {
-      @page { size: 80mm auto; margin: 0; }
+      @page { size: 80mm 297mm; margin: 0; }
       body { padding: 2mm; }
     }
   </style>

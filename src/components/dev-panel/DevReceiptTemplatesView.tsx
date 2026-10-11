@@ -26,7 +26,13 @@ import {
   PAPER_SIZE_CONFIG,
   DEFAULT_TEMPLATE_JSON,
   TableColumnId,
+  TokenClaimSlipConfig,
 } from '@/types/receipt';
+import {
+  normalizeTemplate,
+  buildReceiptPageCss,
+  escapeHtml,
+} from '@/utils/receiptRenderCore';
 import { DevReceiptPreview, MOCK_INVOICE_DATA } from './DevReceiptPreview';
 import { DevTemplateAssignView } from './DevTemplateAssignView';
 import { printViaIframe } from '@/utils/iframePrint';
@@ -35,7 +41,7 @@ interface DevReceiptTemplatesViewProps {
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
 }
 
-type DesignerTab = 'layout' | 'header' | 'meta' | 'table' | 'totals' | 'footer' | 'locks';
+type DesignerTab = 'layout' | 'header' | 'meta' | 'table' | 'totals' | 'footer' | 'token' | 'locks';
 
 export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = ({ onShowToast }) => {
   const [activeMainTab, setActiveMainTab] = useState<'templates' | 'branches'>('templates');
@@ -96,7 +102,7 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
     setTemplateDesc('Tailored receipt format for retail checkout.');
     setPaperSize('thermal_80');
     setIsDefault(false);
-    setTemplateJson(JSON.parse(JSON.stringify(DEFAULT_TEMPLATE_JSON)));
+    setTemplateJson(normalizeTemplate(DEFAULT_TEMPLATE_JSON, 'thermal_80').template_json);
     setActiveDesignerTab('layout');
     setIsDesigning(true);
   };
@@ -108,7 +114,7 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
     setTemplateDesc(tmpl.description || '');
     setPaperSize(tmpl.paper_size);
     setIsDefault(tmpl.is_default);
-    setTemplateJson(JSON.parse(JSON.stringify(tmpl.template_json || DEFAULT_TEMPLATE_JSON)));
+    setTemplateJson(normalizeTemplate(tmpl.template_json || DEFAULT_TEMPLATE_JSON, tmpl.paper_size).template_json);
     setActiveDesignerTab('layout');
     setIsDesigning(true);
   };
@@ -116,7 +122,7 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
   // Clone Template
   const handleClone = async (tmpl: ReceiptTemplate) => {
     try {
-      const clonedJson = JSON.parse(JSON.stringify(tmpl.template_json || DEFAULT_TEMPLATE_JSON));
+      const clonedJson = normalizeTemplate(tmpl.template_json || DEFAULT_TEMPLATE_JSON, tmpl.paper_size).template_json;
       const res = await fetch('/api/receipt-templates', {
         method: 'POST',
         headers: getDevAuthHeaders({ 'Content-Type': 'application/json' }),
@@ -238,26 +244,15 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
       return;
     }
 
-    const sizeConfig = PAPER_SIZE_CONFIG[paperSize];
-    const isThermal = paperSize.startsWith('thermal');
-    const pageSize = isThermal
-      ? `${sizeConfig.widthMm}mm auto`
-      : paperSize === 'a5' ? 'A5' : 'A4';
+    const pageCss = buildReceiptPageCss(templateJson.layout, paperSize);
 
     const htmlDoc = `<!DOCTYPE html>
 <html>
   <head>
-    <title>Receipt Test Print - ${templateName}</title>
+    <meta charset="utf-8" />
+    <title>Receipt Test Print - ${escapeHtml(templateName)}</title>
+    <style>${pageCss}</style>
     <style>
-      @page { size: ${pageSize}; margin: 0; }
-      body {
-        margin: 0;
-        padding: 0;
-        background: #fff;
-        color: #000;
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
-      }
       .receipt-preview-container {
         box-shadow: none !important;
         margin: 0 auto !important;
@@ -781,6 +776,7 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
                     { id: 'table', label: 'Items Table' },
                     { id: 'totals', label: 'Totals & Tax' },
                     { id: 'footer', label: 'Footer & Notes' },
+                    { id: 'token', label: '🎟️ Token Slip' },
                     { id: 'locks', label: '🔒 Field Locks' },
                   ] as { id: DesignerTab; label: string }[]
                 ).map((tab) => (
@@ -1074,19 +1070,46 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
                 {activeDesignerTab === 'meta' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <label style={{ fontSize: '13px', fontWeight: 600, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                      <label
+                        style={{
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          color: '#FFFFFF',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          flex: 1,
+                          cursor: 'not-allowed',
+                          opacity: 0.9,
+                        }}
+                        title="Mandatory for compliance: Invoice Number must always be visible on receipts."
+                      >
                         <input
                           type="checkbox"
-                          checked={templateJson.invoiceInfo.showInvoiceNo}
-                          onChange={(e) =>
-                            setTemplateJson({
-                              ...templateJson,
-                              invoiceInfo: { ...templateJson.invoiceInfo, showInvoiceNo: e.target.checked },
-                            })
-                          }
-                          style={{ accentColor: '#D4AF37' }}
+                          checked={true}
+                          disabled={true}
+                          readOnly
+                          style={{ accentColor: '#D4AF37', cursor: 'not-allowed' }}
                         />
-                        Show Invoice Number
+                        <span>Show Invoice Number</span>
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            background: 'rgba(212, 175, 55, 0.15)',
+                            color: '#D4AF37',
+                            border: '1px solid rgba(212, 175, 55, 0.3)',
+                            borderRadius: '4px',
+                            padding: '1px 6px',
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            letterSpacing: '0.5px',
+                            textTransform: 'uppercase',
+                          }}
+                        >
+                          <Lock style={{ width: 10, height: 10 }} /> Mandatory / Locked
+                        </span>
                       </label>
                       <input
                         type="text"
@@ -1101,21 +1124,53 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
                         style={{ background: '#1A1A1A', color: '#FFF', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '5px 8px', fontSize: '12px', width: '140px' }}
                       />
                     </div>
+                    <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '-8px', marginBottom: '4px' }}>
+                      Required for legal and accounting compliance. Cannot be disabled.
+                    </div>
 
-                    <label style={{ fontSize: '13px', fontWeight: 600, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <label
+                      style={{
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        color: '#FFFFFF',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        cursor: 'not-allowed',
+                        opacity: 0.9,
+                      }}
+                      title="Mandatory for compliance: Date & Timestamp must always be visible on receipts."
+                    >
                       <input
                         type="checkbox"
-                        checked={templateJson.invoiceInfo.showDate}
-                        onChange={(e) =>
-                          setTemplateJson({
-                            ...templateJson,
-                            invoiceInfo: { ...templateJson.invoiceInfo, showDate: e.target.checked },
-                          })
-                        }
-                        style={{ accentColor: '#D4AF37' }}
+                        checked={true}
+                        disabled={true}
+                        readOnly
+                        style={{ accentColor: '#D4AF37', cursor: 'not-allowed' }}
                       />
-                      Show Date &amp; Timestamp
+                      <span>Show Date &amp; Timestamp</span>
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          background: 'rgba(212, 175, 55, 0.15)',
+                          color: '#D4AF37',
+                          border: '1px solid rgba(212, 175, 55, 0.3)',
+                          borderRadius: '4px',
+                          padding: '1px 6px',
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          letterSpacing: '0.5px',
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        <Lock style={{ width: 10, height: 10 }} /> Mandatory / Locked
+                      </span>
                     </label>
+                    <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '-8px', marginBottom: '4px' }}>
+                      Required for audit and transaction verification. Cannot be disabled.
+                    </div>
 
                     <label style={{ fontSize: '13px', fontWeight: 600, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <input
@@ -1363,20 +1418,46 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
                       )}
                     </div>
 
-                    <div style={{ display: 'flex', gap: '20px' }}>
-                      <label style={{ fontSize: '13px', fontWeight: 600, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
+                      <label
+                        style={{
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          color: '#FFFFFF',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          cursor: 'not-allowed',
+                          opacity: 0.9,
+                        }}
+                        title="Mandatory for compliance: Grand Total must always be visible on receipts."
+                      >
                         <input
                           type="checkbox"
-                          checked={templateJson.totals.showGrandTotal}
-                          onChange={(e) =>
-                            setTemplateJson({
-                              ...templateJson,
-                              totals: { ...templateJson.totals, showGrandTotal: e.target.checked },
-                            })
-                          }
-                          style={{ accentColor: '#D4AF37' }}
+                          checked={true}
+                          disabled={true}
+                          readOnly
+                          style={{ accentColor: '#D4AF37', cursor: 'not-allowed' }}
                         />
-                        Show Grand Total
+                        <span>Show Grand Total</span>
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            background: 'rgba(212, 175, 55, 0.15)',
+                            color: '#D4AF37',
+                            border: '1px solid rgba(212, 175, 55, 0.3)',
+                            borderRadius: '4px',
+                            padding: '1px 6px',
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            letterSpacing: '0.5px',
+                            textTransform: 'uppercase',
+                          }}
+                        >
+                          <Lock style={{ width: 10, height: 10 }} /> Mandatory / Locked
+                        </span>
                       </label>
 
                       <label style={{ fontSize: '13px', fontWeight: 600, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1393,6 +1474,9 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
                         />
                         Extra Bold Total
                       </label>
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '-8px', marginBottom: '4px' }}>
+                      Required financial settlement field. Cannot be disabled.
                     </div>
 
                     <label style={{ fontSize: '13px', fontWeight: 600, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1560,6 +1644,160 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
                   </div>
                 )}
 
+                {/* 6.5. TOKEN CLAIM SLIP */}
+                {activeDesignerTab === 'token' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div style={{ padding: '12px', background: 'rgba(212, 175, 55, 0.08)', borderRadius: '8px', border: '1px solid rgba(212, 175, 55, 0.2)' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#F3E5AB', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>🎟️ Token Claim Slip Configuration</span>
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '3px', lineHeight: 1.4 }}>
+                        When walk-in customers receive promotional tokens without a customer account, a claim slip prints on the receipt. Live preview displays watermarked mock data for simulation.
+                      </div>
+                    </div>
+
+                    {Boolean(templateJson.locks?.token_claim_slip) && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px', background: 'rgba(212, 175, 55, 0.12)', border: '1px solid rgba(212, 175, 55, 0.35)', borderRadius: '8px', color: '#F3E5AB', fontSize: '12px' }}>
+                        <Lock style={{ width: 14, height: 14, flexShrink: 0 }} />
+                        <span>Token Claim Slip settings are locked under developer governance policy.</span>
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                      <label style={{ fontSize: '13px', fontWeight: 600, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={(templateJson.tokenClaimSlip?.enabled ?? true)}
+                          disabled={Boolean(templateJson.locks?.token_claim_slip)}
+                          onChange={(e) =>
+                            setTemplateJson({
+                              ...templateJson,
+                              tokenClaimSlip: {
+                                ...(templateJson.tokenClaimSlip ?? DEFAULT_TEMPLATE_JSON.tokenClaimSlip!),
+                                enabled: e.target.checked,
+                              },
+                            })
+                          }
+                          style={{ accentColor: '#D4AF37' }}
+                        />
+                        Enable Token Claim Slip on Receipts
+                      </label>
+
+                      <div>
+                        <label style={{ fontSize: '12px', color: '#94A3B8', display: 'block', marginBottom: '4px' }}>
+                          Slip Title / Heading
+                        </label>
+                        <input
+                          type="text"
+                          value={templateJson.tokenClaimSlip?.title ?? 'Token Claim Slip'}
+                          disabled={Boolean(templateJson.locks?.token_claim_slip) || (templateJson.tokenClaimSlip?.enabled === false)}
+                          onChange={(e) =>
+                            setTemplateJson({
+                              ...templateJson,
+                              tokenClaimSlip: {
+                                ...(templateJson.tokenClaimSlip ?? DEFAULT_TEMPLATE_JSON.tokenClaimSlip!),
+                                title: e.target.value,
+                              },
+                            })
+                          }
+                          placeholder="Token Claim Slip"
+                          style={{
+                            width: '100%',
+                            background: '#1A1A1A',
+                            color: '#FFF',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            borderRadius: '6px',
+                            padding: '7px 10px',
+                            fontSize: '12px',
+                            opacity: (templateJson.tokenClaimSlip?.enabled === false) ? 0.5 : 1,
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ fontSize: '12px', color: '#94A3B8', display: 'block', marginBottom: '4px' }}>
+                          Customer Instructions
+                        </label>
+                        <input
+                          type="text"
+                          value={templateJson.tokenClaimSlip?.instructions ?? 'Present this code on your next visit to redeem your token'}
+                          disabled={Boolean(templateJson.locks?.token_claim_slip) || (templateJson.tokenClaimSlip?.enabled === false)}
+                          onChange={(e) =>
+                            setTemplateJson({
+                              ...templateJson,
+                              tokenClaimSlip: {
+                                ...(templateJson.tokenClaimSlip ?? DEFAULT_TEMPLATE_JSON.tokenClaimSlip!),
+                                instructions: e.target.value,
+                              },
+                            })
+                          }
+                          placeholder="Present this code on your next visit to redeem your token"
+                          style={{
+                            width: '100%',
+                            background: '#1A1A1A',
+                            color: '#FFF',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            borderRadius: '6px',
+                            padding: '7px 10px',
+                            fontSize: '12px',
+                            opacity: (templateJson.tokenClaimSlip?.enabled === false) ? 0.5 : 1,
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ fontSize: '12px', color: '#94A3B8', display: 'block', marginBottom: '4px' }}>
+                          Security / Disclaimer Notice
+                        </label>
+                        <input
+                          type="text"
+                          value={templateJson.tokenClaimSlip?.footerNotice ?? 'Keep this receipt — code cannot be reissued'}
+                          disabled={Boolean(templateJson.locks?.token_claim_slip) || (templateJson.tokenClaimSlip?.enabled === false)}
+                          onChange={(e) =>
+                            setTemplateJson({
+                              ...templateJson,
+                              tokenClaimSlip: {
+                                ...(templateJson.tokenClaimSlip ?? DEFAULT_TEMPLATE_JSON.tokenClaimSlip!),
+                                footerNotice: e.target.value,
+                              },
+                            })
+                          }
+                          placeholder="Keep this receipt — code cannot be reissued"
+                          style={{
+                            width: '100%',
+                            background: '#1A1A1A',
+                            color: '#FFF',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            borderRadius: '6px',
+                            padding: '7px 10px',
+                            fontSize: '12px',
+                            opacity: (templateJson.tokenClaimSlip?.enabled === false) ? 0.5 : 1,
+                          }}
+                        />
+                      </div>
+
+                      <label style={{ fontSize: '13px', fontWeight: 600, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={(templateJson.tokenClaimSlip?.showDetails ?? true)}
+                          disabled={Boolean(templateJson.locks?.token_claim_slip) || (templateJson.tokenClaimSlip?.enabled === false)}
+                          onChange={(e) =>
+                            setTemplateJson({
+                              ...templateJson,
+                              tokenClaimSlip: {
+                                ...(templateJson.tokenClaimSlip ?? DEFAULT_TEMPLATE_JSON.tokenClaimSlip!),
+                                showDetails: e.target.checked,
+                              },
+                            })
+                          }
+                          style={{ accentColor: '#D4AF37' }}
+                        />
+                        Show Item Token Details on Slip
+                      </label>
+                    </div>
+                  </div>
+                )}
+
                 {/* 7. FIELD LOCKS */}
                 {activeDesignerTab === 'locks' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -1576,6 +1814,7 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
                       { key: 'gst_rate', label: 'Lock GST Tax Calculation' },
                       { key: 'shop_name', label: 'Lock Store Title Override' },
                       { key: 'whatsapp', label: 'Lock WhatsApp Helpdesk Number' },
+                      { key: 'token_claim_slip', label: 'Lock Token Claim Slip Settings' },
                     ].map((item) => {
                       const isLocked = Boolean(templateJson.locks?.[item.key]);
                       return (

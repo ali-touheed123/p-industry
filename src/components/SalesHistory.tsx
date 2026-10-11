@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Invoice, InvoiceItem } from '@/types';
-import { printViaIframe, buildThermalHtmlDocument } from '@/utils/iframePrint';
+import { printViaIframe } from '@/utils/iframePrint';
+import { buildSalesHistoryThermalHtml } from '@/utils/receiptAdapters';
 import { ReceiptTemplate } from '@/types/receipt';
 import {
   Search,
@@ -37,73 +38,6 @@ import {
 import { generateReceiptImageBlob } from '@/utils/receiptCanvas';
 import { calculateSalesSummary } from '@/utils/salesMath';
 
-/** UX-01: Build an 80mm thermal receipt as a plain HTML string for iframe printing.
- * Applies footer/branding from assigned template when available (DEV-07). */
-function buildSalesHistoryThermalHtml(inv: any, tenantName: string, tmpl?: ReceiptTemplate | null): string {
-  const fmt = (n: number) => Number(n || 0).toLocaleString();
-  const isSplit = inv.payment_type === 'split' ||
-    (Number(inv.cash_paid || 0) > 0 &&
-      (Number(inv.card_paid || 0) > 0 || Number(inv.bank_paid || 0) > 0 || Number(inv.others_paid || 0) > 0));
-
-  const items: any[] = inv.invoice_items || inv.items || [];
-  const itemRows = items.map((it: any, idx: number) => {
-    const lineTotal = Number(it.total_price || (it.qty * it.unit_price) || 0);
-    const code = it.item_code ? `[${it.item_code}] ` : '';
-    const shade = it.shade_code ? ` (${it.shade_code})` : '';
-    return `<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;border-bottom:${idx < items.length - 1 ? '1px dotted #ccc' : 'none'};padding-bottom:3px">
-      <span>${code}${it.item_name || '—'}${shade} x${it.qty}</span>
-      <span style="font-weight:700">Rs. ${fmt(lineTotal)}</span>
-    </div>`;
-  }).join('');
-
-  const splitRows = isSplit ? `
-    <div style="padding-left:8px;font-size:11px;color:#444">
-      ${Number(inv.cash_paid || 0) > 0 ? `<div style="display:flex;justify-content:space-between"><span>&bull; Cash:</span><span>Rs. ${fmt(inv.cash_paid)}</span></div>` : ''}
-      ${Number(inv.card_paid || 0) > 0 ? `<div style="display:flex;justify-content:space-between"><span>&bull; Card:</span><span>Rs. ${fmt(inv.card_paid)}</span></div>` : ''}
-      ${Number(inv.bank_paid || 0) > 0 ? `<div style="display:flex;justify-content:space-between"><span>&bull; Bank:</span><span>Rs. ${fmt(inv.bank_paid)}</span></div>` : ''}
-      ${Number(inv.others_paid || 0) > 0 ? `<div style="display:flex;justify-content:space-between"><span>&bull; Other:</span><span>Rs. ${fmt(inv.others_paid)}</span></div>` : ''}
-    </div>` : '';
-
-  const dueRow = Number(inv.due_amount || 0) > 0
-    ? `<div style="display:flex;justify-content:space-between;font-weight:700"><span>BALANCE DUE:</span><span>Rs. ${fmt(inv.due_amount)}</span></div>` : '';
-  const discRow = Number(inv.discount || 0) > 0
-    ? `<div style="display:flex;justify-content:space-between"><span>Discount:</span><span>-Rs. ${fmt(inv.discount)}</span></div>` : '';
-
-  const footer = tmpl?.template_json?.footer;
-  const footerLine1 = footer?.line1 || `Thank you for your business!`;
-  const footerLine2 = footer?.line2 || '';
-  const whatsappRow = (footer?.showWhatsapp && footer?.whatsappNumber)
-    ? `<div style="text-align:center;font-size:9px;color:#555">WhatsApp: ${footer.whatsappNumber}</div>` : '';
-  const poweredBy = (footer?.showPoweredBy !== false)
-    ? `<div style="text-align:center;font-size:8px;color:#aaa;margin-top:2px">${footer?.poweredByText || 'Powered by Pyntflow'}</div>` : '';
-
-  return `
-<div style="text-align:center;border-bottom:1px dashed #000;padding-bottom:12px;margin-bottom:12px">
-  <h2 style="font-size:16px;font-weight:900;text-transform:uppercase;margin:0 0 2px 0">${tenantName}</h2>
-  <p style="font-size:11px;color:#555;margin:0">Pyntflow Retail &amp; Wholesale POS</p>
-  <div style="font-size:12px;font-weight:800;margin-top:4px">${inv.invoice_no || '—'}</div>
-  <div style="font-size:11px;color:#666">Date: ${inv.date || '—'} &middot; Customer: ${inv.client_name || 'Walk-in'}</div>
-</div>
-<div style="border-bottom:1px dashed #000;padding-bottom:12px;margin-bottom:12px">
-  ${itemRows}
-</div>
-<div style="display:flex;flex-direction:column;gap:4px;font-size:12px;margin-bottom:16px">
-  <div style="display:flex;justify-content:space-between"><span>Subtotal:</span><span>Rs. ${fmt(inv.subtotal)}</span></div>
-  ${discRow}
-  <div style="display:flex;justify-content:space-between;font-weight:900;font-size:14px;border-top:1px solid #000;padding-top:4px;margin-top:2px">
-    <span>NET TOTAL:</span><span>Rs. ${fmt(inv.net_total)}</span>
-  </div>
-  <div style="display:flex;justify-content:space-between;font-weight:700">
-    <span>PAID (${(inv.payment_type || 'CASH').toUpperCase()}):</span><span>Rs. ${fmt(inv.paid_amount)}</span>
-  </div>
-  ${splitRows}${dueRow}
-</div>
-<div style="text-align:center;font-size:9.5px;color:#555">${footerLine1}</div>
-${footerLine2 ? `<div style="text-align:center;font-size:9px;color:#777;margin-top:2px">${footerLine2}</div>` : ''}
-${whatsappRow}
-${poweredBy}
-`;
-}
 
 interface TokenRedemptionRow {
   id: string;
@@ -2612,10 +2546,7 @@ export default function SalesHistory({
               <button
                 onClick={() => {
                   if (thermalPrintInvoice) {
-                    const html = buildThermalHtmlDocument(
-                      buildSalesHistoryThermalHtml(thermalPrintInvoice, tenantName, assignedTemplate),
-                      `Receipt ${thermalPrintInvoice.invoice_no}`
-                    );
+                    const html = buildSalesHistoryThermalHtml(thermalPrintInvoice, tenantName, assignedTemplate);
                     printViaIframe(html);
                   }
                 }}

@@ -394,7 +394,7 @@ export default function TokenRedemption({
         <head>
           <title>Redemption Voucher - ${completedRedemption.redemptionNo}</title>
           <style>
-            @page { margin: 0; size: 80mm auto; }
+            @page { margin: 0; size: 80mm 297mm; }
             body {
               font-family: 'Courier New', Courier, monospace;
               width: 72mm;
