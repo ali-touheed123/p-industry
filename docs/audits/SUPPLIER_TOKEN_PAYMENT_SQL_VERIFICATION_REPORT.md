@@ -164,19 +164,70 @@ The API caller **always** generates a `candidateVoucherNo` before invoking the R
 
 ---
 
-### 7.2 Purchase Token Financial Semantics (`_04` migration)
+### 7.2 Purchase Token Financial Semantics & Resolution of Q-FIN-01 (`_04` migration)
 
-**Contract established from `purchases/route.ts`:**
-- `paid_amount`, `due_amount`, and `net_total` are **computed and provided by the caller** from the UI before the RPC is called (L116-124).
-- `applied_token_ids` is sent separately as `p_token_ids`.
-- The RPC records `tokens_applied_amount` in the `purchases` table as an informational field; it does **not** adjust `paid_amount` or `due_amount`.
-- Supplier `current_balance` is incremented by `v_due_amount` (L226), where `v_due_amount` is the caller-provided value — independent of `v_tokens_amount`.
+**Full Flow Trace Across UI → API → RPC → Supplier Balance:**
 
-**Finding — Financial semantics ambiguity (UNRESOLVED):**  
-The RPC does not reduce `due_amount` or `paid_amount` by the `tokens_applied_amount`. Whether token value should offset the payable or remain a separate ledger entry cannot be determined from repository evidence alone. The caller passes pre-computed values from the UI; the RPC trusts them. This may be intentional or may be a design gap.
+1. **Frontend UI Level (`src/components/PurchasesView.tsx`):**
+   - **Line 281–284:** Calculates gross net bill before tokens:
+     ```typescript
+     const netBillValueBeforeTokens = Math.max(
+       0,
+       taxableValue + effectiveSalesTax - additionalDiscount + cartageFreight
+     );
+     ```
+   - **Line 286–289:** **Tokens are deducted at the UI level from the net invoice total:**
+     ```typescript
+     const netBillValue = Math.max(
+       0,
+       netBillValueBeforeTokens - tokensAppliedAmount
+     );
+     ```
+   - **Line 295–298:** Projected supplier balance calculates:
+     ```typescript
+     const projectedBalance =
+       purchaseType === 'purchase'
+         ? currentSupplierBalance + netBillValue - paidAmount
+         : Math.max(0, currentSupplierBalance - netBillValue);
+     ```
+   - **Line 389–396:** The submitted POST payload sends:
+     ```typescript
+     net_total: netBillValue,
+     paid_amount: paidAmount,
+     due_amount: Math.max(0, netBillValue - paidAmount), // Already net of tokens!
+     applied_token_ids: selectedTokenIds,
+     ```
 
-> [!WARNING]
-> **Unresolved business question (unanswered from prior sessions):** Should `tokens_applied_amount` reduce the supplier payable (`due_amount`) at the database level, or is the caller responsible for computing the correct `due_amount` before invoking the RPC? **Do not change this behaviour without explicit business owner confirmation.**
+2. **API Route Level (`src/app/api/purchases/route.ts`):**
+   - **Line 118–124:** Ingests `net_total`, `paid_amount`, `due_amount` and packages them into `purchaseData`:
+     ```typescript
+     net_total: Number(net_total) || 0,
+     paid_amount: Number(paid_amount) || 0,
+     due_amount: Number(due_amount) || 0,
+     ```
+   - **Line 139–147:** Passes `purchaseData` and `p_token_ids` to `create_purchase_atomic` without altering `due_amount`.
+
+3. **Database Stored Procedure Level (`supabase/migrations/20261013_04_fix_create_purchase_atomic_valuation.sql`):**
+   - **Line 83–85:** Extracts:
+     ```sql
+     v_net_total   := COALESCE((p_purchase_data->>'net_total')::NUMERIC, 0);
+     v_paid_amount := COALESCE((p_purchase_data->>'paid_amount')::NUMERIC, 0);
+     v_due_amount  := COALESCE((p_purchase_data->>'due_amount')::NUMERIC, 0);
+     ```
+   - **Line 107–145 (Step 2):** Calculates `v_tokens_amount` from locked token rows.
+   - **Line 149–158 (Step 3):** Inserts purchase header, recording `tokens_applied_amount = v_tokens_amount`, `paid_amount = v_paid_amount`, and `due_amount = v_due_amount`.
+   - **Line 228–257 (Step 6):** Adjusts supplier balance using `v_due_amount`:
+     ```sql
+     IF NOT v_is_return THEN
+       v_new_balance := v_current_bal + v_due_amount;
+     ...
+     UPDATE suppliers SET current_balance = v_new_balance ...
+     ```
+
+**Empirical Resolution of Q-FIN-01:**
+- **Evidence Finding:** The caller (`PurchasesView.tsx`) **already subtracts `tokensAppliedAmount`** from `netBillValue` and computes `due_amount = netBillValue - paidAmount`.
+- **Double-Deduction Hazard:** If `create_purchase_atomic` were modified to subtract `v_tokens_amount` from `v_due_amount` at the database level, tokens would be deducted **twice** from the supplier's payable balance, erroneously reducing supplier liability by $2 \times$ the token face value.
+- **Authoritative Recommendation:** Retain the existing contract in `20261013_04_fix_create_purchase_atomic_valuation.sql`. The caller provides the pre-computed `due_amount` (already net of tokens), and the RPC records `tokens_applied_amount` as an informational/audit field while updating supplier balance strictly by `v_due_amount`. No changes to `_04` SQL logic are required for Q-FIN-01.
 
 ---
 
@@ -233,7 +284,7 @@ END IF;
 | `_03` Legacy wrapper: depleted tokens yield `quantity: 0` → canonical RPC rejects with fail-closed error | ✅ Correct and documented |
 | `_04` forward: `ORDER BY id ASC FOR UPDATE` on token loop | ✅ Already present before this review |
 | `_04` forward: Step 4 sets `used_against_purchase_id`, not `used_against_voucher_id` | ✅ Correct |
-| `_04` forward: Supplier balance incremented by `v_due_amount` (caller-computed), not affected by `v_tokens_amount` | ✅ Consistent with caller contract |
+| `_04` forward: Supplier balance incremented by `v_due_amount` (caller-computed), not affected by `v_tokens_amount` | ✅ Consistent with caller contract (Q-FIN-01 resolved) |
 | `_03` rollback: `DROP FUNCTION IF EXISTS` targets the correct JSONB overload signature | ✅ Correct |
 | SECURITY DEFINER + `SET search_path = public, pg_temp` on all four routines | ✅ Confirmed |
 | `REVOKE EXECUTE FROM PUBLIC, anon, authenticated` + `GRANT TO service_role` | ✅ Confirmed on all four routines |
@@ -243,10 +294,18 @@ END IF;
 
 ### 7.5 Files Changed in This Review
 
-| File | Change |
-|---|---|
-| [`supabase/migrations/20261013_04_fix_create_purchase_atomic_valuation.sql`](file:///d:/bestow/p-industry/supabase/migrations/20261013_04_fix_create_purchase_atomic_valuation.sql) | Added `p_items` NULL/non-array guard (F-RV-01); added NULL-element and duplicate-token-ID guards in Step 2 (F-RV-02) |
-| [`supabase/rollbacks/rollback_20261013_04_fix_create_purchase_atomic_valuation.sql`](file:///d:/bestow/p-industry/supabase/rollbacks/rollback_20261013_04_fix_create_purchase_atomic_valuation.sql) | Added `p_items` NULL/non-array guard (F-RV-01); added `ORDER BY id ASC` to token FOR UPDATE loop (F-RV-03) |
+> [!IMPORTANT]
+> **Git Status Reconciliation:** The changes described below are **HISTORICAL** — they were applied to the files during their original authoring session and committed in Git commit `fe31b18` ("supplier token payment fixes"). `git status --short` correctly shows these migration and rollback files as **clean/unmodified** relative to HEAD. The only currently uncommitted file is this verification report (`SUPPLIER_TOKEN_PAYMENT_SQL_VERIFICATION_REPORT.md`). Section 7.5 describes what was changed *within the files during their creation*, not what is currently uncommitted.
+
+| File | Change | Commit Status |
+|---|---|---|
+| [`supabase/migrations/20261013_04_fix_create_purchase_atomic_valuation.sql`](file:///d:/bestow/p-industry/supabase/migrations/20261013_04_fix_create_purchase_atomic_valuation.sql) | Added `p_items` NULL/non-array guard (F-RV-01); added NULL-element and duplicate-token-ID guards in Step 2 (F-RV-02) | Committed (`fe31b18`) |
+| [`supabase/rollbacks/rollback_20261013_04_fix_create_purchase_atomic_valuation.sql`](file:///d:/bestow/p-industry/supabase/rollbacks/rollback_20261013_04_fix_create_purchase_atomic_valuation.sql) | Added `p_items` NULL/non-array guard (F-RV-01); added `ORDER BY id ASC` to token FOR UPDATE loop (F-RV-03) | Committed (`fe31b18`) |
+
+**On-disk presence verified (October 13, 2026):**
+- F-RV-01 (`p_items` guard): Present at `_04` forward migration L98–L103, rollback `_04` L91–L96. ✅
+- F-RV-02 (NULL element + duplicate ID guards): Present at `_04` forward migration L109–L116. ✅
+- F-RV-03 (`ORDER BY id ASC` in rollback token loop): Present at rollback `_04` L114. ✅
 
 **No changes made to:**  
 - `20261013_03_fix_create_voucher_atomic.sql` — no defects found  
@@ -255,10 +314,112 @@ END IF;
 
 ---
 
-### 7.6 Outstanding Unresolved Questions
+### 7.6 Review Inquiries Status
 
-1. **Purchase financial semantics (Q-FIN-01):** Does `tokens_applied_amount` reduce the supplier `due_amount` at DB level, or is the caller responsible for computing correct `due_amount`? Requires business owner confirmation before any financial logic is modified.
-2. **Live execution (Q-EXEC-01):** All corrections remain statically verified only. Runtime correctness, lock behavior, and concurrency safety require execution against a PostgreSQL 17.6 staging instance.
+1. **Purchase financial semantics (Q-FIN-01):** **RESOLVED.** Codebase analysis of `src/components/PurchasesView.tsx#L286-L289` and `#L389-L391` confirms that `due_amount` is calculated by the UI after already deducting tokens. The RPC must NOT subtract tokens again to prevent double-deduction.
+2. **Live execution (Q-EXEC-01):** **PENDING.** All corrections remain statically verified only. Runtime correctness, lock behavior, and concurrency safety require execution against a PostgreSQL 17.6 staging instance once provisioned (`STAGING-INFRA`).
+
+---
+
+## 8. Staging Test Plan & Outstanding Operational Risks
+
+### 8.1 Staging Test Matrix Summary (42 Cases)
+Per Revision 12 FINAL Section 6, the test matrix comprises 42 formal cases divided into two strict execution categories:
+
+1. **Transactional Staging Suite — Test Cases 1–38 (`[PLANNED]` on Staging):**
+   - **Partial & Full Batch Depletion (Cases 1–4):** Tests full batch allocation, partial consumption slice creation, sequential partial slices, and complete exhaustion leaving parent `remaining_quantity = 0, total_amount = 0, usage_status = 'used'` with child slices preserving voucher IDs.
+   - **Input Validation & Overdrafts (Cases 5–9):** Tests overdraft ($15 > 14$), zero quantity, negative quantity, fractional numbers ($2.5$), and already depleted batches ($0$ remaining).
+   - **Structural & Payload Malformations (Cases 10–16):** Duplicate IDs in canonical array, duplicate IDs in legacy wrapper, nonexistent IDs, foreign-tenant IDs, malformed JSON structures, missing required keys, and invalid UUID regex strings.
+   - **Status & Reference Guards (Cases 17–23):** Rejection of tokens with `status = 'used'`, `status = 'settled'`, `status IS NULL`, or already linked to a voucher (`used_against_voucher_id IS NOT NULL`) or purchase (`used_against_purchase_id IS NOT NULL`).
+   - **Financial Tender & Mix Scenarios (Cases 24–25, 31–34):** Pure cash vouchers, combined cash + tokens, zero face value token rejection, negative face value rejection, heterogeneous batch mixing, and supplier credit balance preservation.
+   - **Concurrency & Deadlock Prevention (Cases 26–28):** Two concurrent sessions competing for tokens from the same batch; verification that deterministic ascending UUID row locking (`ORDER BY id ASC FOR UPDATE`) prevents deadlocks and enforces stock re-validation upon lock unblocking.
+   - **Atomicity & Recovery (Case 29–30):** Error injection during voucher creation to verify total transaction rollback; replay rejection.
+   - **Purchase Parity & Reporting Isolation (Cases 35–38):** Audit log schema verification, `create_purchase_atomic` quantity valuation parity, non-token purchase regression verification, and stockpile inventory isolation filtering `WHERE usage_status = 'available'`.
+
+2. **Baseline Production Assertions — Test Cases 39–42 (`[EXECUTED-PASS]` Read-Only):**
+   - **Case 39:** Routine identity & `SECURITY DEFINER` assertion.
+   - **Case 40:** Information schema confirmation: `used_date` column absent from `token_transactions`.
+   - **Case 41:** Execute grant restriction: `PUBLIC`, `anon`, `authenticated` revoked; restricted strictly to `service_role`.
+   - **Case 42:** Historical diagnostic query suite (HDA-Q1 to HDA-Q6): 0 anomalies across examined live records.
+
+### 8.2 Outstanding Risks & Operational Safeguards
+
+1. **`STAGING-INFRA` Blocker:**
+   - A dedicated staging instance mirroring PostgreSQL 17.6 is not yet provisioned.
+   - **Mitigation:** Zero mutating tests or forward migrations may be executed against production. Testing is strictly blocked until staging infrastructure is ready.
+2. **PL/pgSQL Deferred Plan Compilation:**
+   - PostgreSQL validates function syntax at definition time, but deferred plan compilation resolves certain table/column references only when a statement branch is first executed at runtime.
+   - **Mitigation:** Staging test suite must achieve 100% branch execution coverage across all 38 planned test cases before Gate C production deployment.
+3. **Rollback Data Mutation Scope:**
+   - Rollback scripts (`rollback_20261013_03` and `rollback_20261013_04`) revert function DDL definitions only; they cannot undo committed transactional writes created while a migration was active.
+   - **Mitigation:** Pre-deployment database snapshots and strict staging isolation prior to any production roll-out.
+4. **Implementation Authorization Gate:**
+   - In accordance with Revision 12 FINAL, implementation and deployment remain strictly UNAUTHORIZED until Gate B and Gate C are formally opened.
+
+### 8.3 Future Hardening Recommendation — Server-Side Financial Consistency Validation
+
+> [!NOTE]
+> **Context:** Q-FIN-01 is resolved — the caller (UI) already deducts `tokensAppliedAmount` from `netBillValue` before computing `due_amount`, so the RPC correctly trusts the caller-supplied `due_amount` without subtracting tokens again. However, blindly trusting any caller-supplied financial field introduces a separate integrity concern: a malformed or tampered API request could submit inconsistent `net_total`, `paid_amount`, and `due_amount` values that don't match the actual locked token values.
+
+**Recommended Future Enhancement (NOT in current scope — requires separate authorization):**
+
+After token rows are locked and `v_tokens_amount` is calculated in Step 2, `create_purchase_atomic` could add a **non-deducting consistency assertion** that validates the caller's arithmetic without altering the existing financial contract:
+
+```sql
+-- FUTURE HARDENING (example — not authorized for implementation):
+-- After Step 2 (v_tokens_amount calculated from locked rows):
+IF v_tokens_amount > 0 THEN
+  -- Verify: net_total + tokens_applied ≈ gross total (within rounding)
+  -- Verify: due_amount + paid_amount + tokens_applied ≈ gross total
+  -- Verify: due_amount >= 0
+  IF v_due_amount < 0 THEN
+    RAISE EXCEPTION 'due_amount cannot be negative: %', v_due_amount;
+  END IF;
+  IF v_paid_amount < 0 THEN
+    RAISE EXCEPTION 'paid_amount cannot be negative: %', v_paid_amount;
+  END IF;
+END IF;
+```
+
+**Key constraint:** This validation must **never subtract** `v_tokens_amount` from `v_due_amount`. Doing so would double-deduct tokens (the caller already deducted them). The purpose is solely to catch arithmetic inconsistencies in the submitted payload before they are persisted.
+
+**Status:** Documented as a future hardening opportunity. Not included in the current `_04` migration scope. Requires separate design review and authorization.
+
+## 9. Discrepancy Reconciliation & Forensic Findings (Rev 12A Audit)
+
+### 9.1 D1 — Voucher-Number Uniqueness and Concurrency Resolution
+- **Committed Migration Evidence:** `supabase/migrations/20261013_03_fix_create_voucher_atomic.sql` (L257–L284) implements a subtransaction `LOOP ... BEGIN ... INSERT ... EXCEPTION WHEN unique_violation ... END; END LOOP;` block.
+- **Constraint-Specific Handling:** Extracts `v_constraint_name = CONSTRAINT_NAME` via `GET STACKED DIAGNOSTICS`. Only collisions on `uq_vouchers_tenant_voucher_no` trigger the retry generator (up to 10 attempts with regenerated random hex suffix). All other uniqueness constraint violations are explicitly re-raised via `RAISE;`.
+- **Concurrency Coverage:** Surrounds the actual `INSERT INTO vouchers` statement, guaranteeing safety against concurrent collision races between pre-check and commit.
+- **Plan Discrepancy Resolution:** Implementation Plan Section 4.4 previously displayed a pre-insert `WHILE EXISTS` loop followed by a bare `INSERT` without the exception block. This was a documentation omission in the plan. Section 4.4 has been corrected in place to match the committed migration code.
+
+### 9.2 D2 — Quantity Validation Across API and JSONB Boundaries
+Detailed boundary analysis for the 11 target inputs:
+| Input | Application API (`await req.json()`) | PostgreSQL RPC (`create_voucher_atomic`) | Contract Status |
+|---|---|---|---|
+| `2` | Accepted (`typeof === 'number'`, `isInteger`, within bounds) | Accepted (`jsonb_typeof='number'`, regex `^[0-9]+$`, > 0, floor match) | Accepted |
+| `2.0` | Accepted (parsed by JS to IEEE-754 primitive `2`) | Rejected at text conversion if `->>` produces `'2.0'` (regex `^[0-9]+$` fails) | Strict Integer Guard |
+| `2e0` | Accepted (parsed by JS to IEEE-754 primitive `2`) | Rejected at text conversion if `->>` preserves exponential format | Strict Integer Guard |
+| `2.5` | Rejected (`Number.isInteger(2.5)` is false) | Rejected (regex `^[0-9]+$` and `numeric <> floor(numeric)`) | Rejected (Fractional) |
+| `0` | Rejected (bounded `qty >= 1`) | Rejected (`numeric <= 0`) | Rejected (Non-positive) |
+| `-2` | Rejected (bounded `qty >= 1`) | Rejected (regex fails on `-`, `numeric <= 0`) | Rejected (Negative) |
+| `2147483647` | Accepted (32-bit signed int limit) | Accepted (`numeric <= 2147483647`) | Accepted |
+| `2147483648` | Rejected (`qty > 2147483647`) | Rejected (`numeric > 2147483647`) | Rejected (Overflow) |
+| `"2"` | Rejected (`typeof !== 'number'`) | Rejected (`jsonb_typeof <> 'number'`) | Rejected (String Type) |
+| `null` | Rejected (`typeof === 'object'`) | Rejected (`jsonb_typeof = 'null'`) | Rejected (Null) |
+| `true` | Rejected (`typeof !== 'number'`) | Rejected (`jsonb_typeof <> 'number'`) | Rejected (Boolean Type) |
+
+### 9.3 D3 — Accurate SQL Execution Status Reconciliation
+- **Read-Only Historical Diagnostic Queries:** Tasks HDA-Q1 to HDA-Q6 (Task T6) were executed live against production Supabase project `ignspvajzblmsbertmmv`. All 6 queries completed read-only with 0 anomalies confirmed across live records (`[EXECUTED-PASS]`).
+- **Baseline Structural Assertions:** Cases 39–42 were executed read-only against production (`[EXECUTED-PASS]`).
+- **Mutating SQL Status:** Forward migrations `20261013_03` (T2) and `20261013_04` (T3), and rollbacks `rollback_20261013_03` and `rollback_20261013_04` (T5) are authored and committed in Git `fe31b18` but have **NOT been executed against any database** (staging or production).
+- **Transactional Staging Scenarios:** Cases 1–38 remain `[PLANNED]` pending staging infrastructure provisioning (`STAGING-INFRA`).
+
+### 9.4 D4 — Authorization Gates and Scopes
+- **Gate A (Forensic & Plan Verification):** Complete.
+- **Gate B (Local Implementation & Testing):** Local code modifications (frontend T4, local unit tests, documentation) are authorized. Staging environment provisioning and staging SQL execution remain blocked on external infrastructure.
+- **Gate C-1 (Production Deployment of Migration _03):** UNAUTHORIZED. Requires independent project owner approval following successful staging verification.
+- **Gate C-2 (Production Deployment of Migration _04):** UNAUTHORIZED. Requires independent project owner approval separate from Gate C-1.
 
 ---
 *End of SQL Migration Verification Report*

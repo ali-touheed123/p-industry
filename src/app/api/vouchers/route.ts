@@ -81,6 +81,7 @@ export async function POST(req: NextRequest) {
       remarks,
       created_by,
       applied_token_ids = [],
+      token_allocations = null,
       date = new Date().toISOString().split('T')[0],
     } = body;
 
@@ -96,6 +97,57 @@ export async function POST(req: NextRequest) {
     const auth = await requireTenantAuth(req, tenant_id);
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
+    // Validate token allocations if supplied (Canonical Contract per Plan Section 4.2)
+    let validatedAllocations: { token_id: string; quantity: number }[] | null = null;
+    if (token_allocations !== null && token_allocations !== undefined) {
+      if (!Array.isArray(token_allocations)) {
+        return NextResponse.json(
+          { success: false, error: 'token_allocations must be a JSON array' },
+          { status: 400 }
+        );
+      }
+      const seenTokenIds = new Set<string>();
+      for (const alloc of token_allocations) {
+        if (!alloc || typeof alloc !== 'object') {
+          return NextResponse.json(
+            { success: false, error: 'Each token allocation must be a JSON object' },
+            { status: 400 }
+          );
+        }
+        const { token_id, quantity } = alloc;
+        if (!token_id || typeof token_id !== 'string') {
+          return NextResponse.json(
+            { success: false, error: 'Allocation token_id must be a string UUID' },
+            { status: 400 }
+          );
+        }
+        if (
+          typeof quantity !== 'number' ||
+          !Number.isInteger(quantity) ||
+          quantity < 1 ||
+          quantity > 2147483647
+        ) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `Allocation quantity for token ${token_id} must be a positive integer between 1 and 2147483647`,
+            },
+            { status: 400 }
+          );
+        }
+        if (seenTokenIds.has(token_id)) {
+          return NextResponse.json(
+            { success: false, error: `Duplicate token ID in allocations: ${token_id}` },
+            { status: 400 }
+          );
+        }
+        seenTokenIds.add(token_id);
+      }
+      if (token_allocations.length > 0) {
+        validatedAllocations = token_allocations;
+      }
     }
 
     // Task 8.2: Generate collision-resistant candidate voucher_no
@@ -119,13 +171,20 @@ export async function POST(req: NextRequest) {
     };
 
     // Task 8.1: Invoke atomic stored procedure
+    // Selects canonical overload (p_token_allocations) if allocations present, else legacy wrapper (p_token_ids)
+    const rpcPayload: Record<string, any> = {
+      p_tenant_id: tenant_id,
+      p_voucher_data: voucherData,
+    };
+    if (validatedAllocations && validatedAllocations.length > 0) {
+      rpcPayload.p_token_allocations = validatedAllocations;
+    } else {
+      rpcPayload.p_token_ids = tokenIds.length > 0 ? tokenIds : null;
+    }
+
     const { data: rpcResult, error: rpcError } = await supabaseAdmin.rpc(
       'create_voucher_atomic',
-      {
-        p_tenant_id:    tenant_id,
-        p_voucher_data: voucherData,
-        p_token_ids:    tokenIds.length > 0 ? tokenIds : null,
-      }
+      rpcPayload
     );
 
     if (rpcError) throw rpcError;

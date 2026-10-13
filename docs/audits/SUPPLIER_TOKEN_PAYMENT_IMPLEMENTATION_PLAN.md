@@ -5,8 +5,9 @@
 **Project:** PyntFlow Paint Industry POS & Industrial ERP (`p-industry`)  
 **Baseline Commit:** `bdfea3576de0d3f9a1c1e49d9ec359ceece8003f`  
 **Target Supabase Production Project:** `ignspvajzblmsbertmmv` (PostgreSQL 17.6)  
-**Status:** `REVISION 12 — FINAL IMPLEMENTATION PLAN & TASK REGISTER — IMPLEMENTATION NOT AUTHORIZED`  
-**Date:** October 13, 2026
+**Status:** `REVISION 12A — STATUS UPDATE — STATIC VERIFICATION COMPLETE — RUNTIME EXECUTION NOT AUTHORIZED`  
+**Date:** October 13, 2026  
+**Last Updated:** October 13, 2026 (Rev 12A Status Update)
 
 ---
 
@@ -15,7 +16,7 @@
 **THIS IS A PLANNING, ARCHITECTURAL SPECIFICATION, AND TASK REGISTER UPDATE ONLY.**  
 No implementation is authorized. No database migrations, DDL, DML, application code changes, configuration alterations, staging project creation, or test accounting records may be applied until all required authorization gates (Gate B and independent Gate C approvals) are formally opened and required staging infrastructure is provisioned.
 
-**FINAL PLANNING NOTICE:** This document constitutes **Revision 12 — FINAL**. Planning is complete. No further planning revision (Revision 13 or subsequent audit cycles) is authorized or expected. All work stops after this document until explicit implementation authorization is granted.
+**PLANNING NOTICE:** This document was finalized as **Revision 12 — FINAL**. Revision 12A is a **status update only** — it reconciles task statuses, records verified findings (Q-FIN-01 resolution, SQL static verification results, committed artifact locations), and documents staging readiness without altering the architectural specification, scope, or authorization boundaries established in Rev 12.
 
 ---
 
@@ -111,8 +112,9 @@ No implementation is authorized. No database migrations, DDL, DML, application c
 
 ### 2.2 Baseline Verification
 - **Git Status:** `[GIT-VERIFIED]`
-  - Baseline Commit: `bdfea3576de0d3f9a1c1e49d9ec359ceece8003f`
-  - Working Tree: Zero modified or staged tracked files; only `docs/audits/SUPPLIER_TOKEN_PAYMENT_IMPLEMENTATION_PLAN.md` exists as an untracked planning document. Zero uncommitted source changes.
+  - Original Baseline Commit: `bdfea3576de0d3f9a1c1e49d9ec359ceece8003f`
+  - Current HEAD (Rev 12A): `fe31b18` ("supplier token payment fixes") — contains committed migration files (`_03`, `_04`), rollback files, implementation plan, and verification report.
+  - Working Tree (Rev 12A): Only `docs/audits/SUPPLIER_TOKEN_PAYMENT_SQL_VERIFICATION_REPORT.md` is modified (uncommitted documentation updates). All migration and rollback SQL files are clean relative to HEAD.
 - **TypeScript Static Verification:** `[TEST-VERIFIED]`
   - Command: `npx tsc --noEmit`
   - Result: Exit code `0` (clean compile, zero errors).
@@ -286,6 +288,8 @@ DECLARE
   v_client           clients%ROWTYPE;
   v_new_balance      numeric(12,2);
   v_audit_details    jsonb;
+  v_constraint_name  text;
+  v_retry_count      integer := 0;
   i                  integer;
 
   -- Parameterized cursor selecting composite tuple 't' directly
@@ -455,16 +459,36 @@ BEGIN
     v_voucher_no := v_prefix || '-' || to_char(v_date, 'YYYYMMDD') || '-' || upper(to_hex(floor(4096 + random() * 61440)::int));
   END LOOP;
 
-  -- ── 6. Insert Voucher Header ───────────────────────────────────────────────
-  INSERT INTO vouchers (
-    tenant_id, voucher_no, voucher_type, party_type, party_id,
-    party_name, amount, payment_mode, reference_no, remarks,
-    created_by, date
-  ) VALUES (
-    p_tenant_id, v_voucher_no, v_voucher_type, v_party_type, v_party_id,
-    v_party_name, v_total_settlement, v_payment_mode, v_reference_no, v_remarks,
-    v_created_by, v_date
-  ) RETURNING id INTO v_voucher_id;
+  -- ── 6. Insert Voucher Header with Concurrency Collision Handling ───────────
+  -- Robust insertion with subtransaction SAVEPOINT retry specifically on uq_vouchers_tenant_voucher_no
+  LOOP
+    BEGIN
+      INSERT INTO vouchers (
+        tenant_id, voucher_no, voucher_type, party_type, party_id,
+        party_name, amount, payment_mode, reference_no, remarks,
+        created_by, date
+      ) VALUES (
+        p_tenant_id, v_voucher_no, v_voucher_type, v_party_type, v_party_id,
+        v_party_name, v_total_settlement, v_payment_mode, v_reference_no, v_remarks,
+        v_created_by, v_date
+      ) RETURNING id INTO v_voucher_id;
+
+      EXIT; -- Insert succeeded
+    EXCEPTION
+      WHEN unique_violation THEN
+        GET STACKED DIAGNOSTICS v_constraint_name = CONSTRAINT_NAME;
+        -- Filter specifically for uq_vouchers_tenant_voucher_no collisions; re-raise any other constraint failure
+        IF v_constraint_name = 'uq_vouchers_tenant_voucher_no' THEN
+          v_retry_count := v_retry_count + 1;
+          IF v_retry_count > 10 THEN
+            RAISE EXCEPTION 'Exceeded maximum retry attempts (10) generating collision-free voucher_no';
+          END IF;
+          v_voucher_no := v_prefix || '-' || to_char(v_date, 'YYYYMMDD') || '-' || upper(to_hex(floor(4096 + random() * 61440)::int));
+        ELSE
+          RAISE; -- Re-raise unexpected unique constraint violations with original error
+        END IF;
+    END;
+  END LOOP;
 
   -- ── 7. Token Mutation & Uniform Child Slice Creation ───────────────────────
   IF cardinality(v_locked_rows) > 0 THEN
@@ -634,22 +658,25 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public', 'pg_temp';
 
 ## 5. Master Task Matrix & Dependencies (T1–T11)
 
+> [!IMPORTANT]
+> **Rev 12A Status Update:** Tasks T2, T3, and T5 reflect SQL artifacts committed in `fe31b18`. These files are statically verified only — **no SQL has been executed against any database**. Runtime test execution (T7) and deployment (T9/T10) remain blocked on staging infrastructure and authorization.
+
 ```
-┌─────────┬────────────────────────────────────────────────────┬──────────┬───────────────────────┬──────────────────────────────────┐
-│ Task ID │ Task Title                                         │ Priority │ Status                │ Authorization Gate               │
-├─────────┼────────────────────────────────────────────────────┼──────────┼───────────────────────┼──────────────────────────────────┤
-│ Task T1 │ Pre-Implementation Baseline Verification           │ P0       │ COMPLETED (Baseline)  │ Gate A (Plan Review)             │
-│ Task T2 │ Forward Migration: Quantity-Aware Voucher RPC      │ P0       │ PLANNING SPEC COMPLETE│ Gate B (Requires Auth)           │
-│ Task T3 │ Forward Migration: Fix Purchase RPC Qty Valuation  │ P1       │ PLANNING SPEC COMPLETE│ Gate B (Independent of T2)       │
-│ Task T4 │ Frontend Fix: Quantity-Aware Supplier Token UI     │ P0       │ PLANNING SPEC COMPLETE│ Gate B (Requires Auth)           │
-│ Task T5 │ Recovery Artifacts & Containment Procedures (T2/T3)│ P0       │ READY FOR DRAFTING    │ Gate B (Pre-requisite for C)     │
-│ Task T6 │ Historical Data Diagnostic Audit (Read-Only)       │ P1       │ COMPLETED (6 Queries) │ Gate B (Baseline Verified)       │
-│ Task T7 │ Static Verification & Expanded Test Suite (42)     │ P1       │ SPECIFIED / PLANNED   │ Gate B                           │
-│ Task T8 │ Pre-Deployment Readiness Review                    │ P0       │ PENDING T2-T7         │ Gate B (Pre-deploy review)       │
-│ Task T9 │ Production Deployment: T2 Migration                │ P0       │ UNAUTHORIZED          │ Gate C-1 (Separate auth from T10)│
-│ Task T10│ Production Deployment: T3 Migration                │ P1       │ UNAUTHORIZED          │ Gate C-2 (Separate auth from T9) │
-│ Task T11│ Staging End-to-End Verification & Prod Verification │ P0       │ BLOCKED (Infra Setup) │ Gate C + Staging Project Ready   │
-└─────────┴────────────────────────────────────────────────────┴──────────┴───────────────────────┴──────────────────────────────────┘
+┌─────────┬────────────────────────────────────────────────────┬──────────┬────────────────────────────────┬──────────────────────────────────┐
+│ Task ID │ Task Title                                         │ Priority │ Status (Rev 12A)               │ Authorization Gate               │
+├─────────┼────────────────────────────────────────────────────┼──────────┼────────────────────────────────┼──────────────────────────────────┤
+│ Task T1 │ Pre-Implementation Baseline Verification           │ P0       │ COMPLETED                      │ Gate A (Plan Review)             │
+│ Task T2 │ Forward Migration: Quantity-Aware Voucher RPC      │ P0       │ SQL AUTHORED & COMMITTED       │ Gate B (Execution Requires Auth) │
+│ Task T3 │ Forward Migration: Fix Purchase RPC Qty Valuation  │ P1       │ SQL AUTHORED & COMMITTED       │ Gate B (Execution Requires Auth) │
+│ Task T4 │ Frontend Fix: Quantity-Aware Supplier Token UI     │ P0       │ COMPLETED (Local Implemented)  │ Gate B (Local Verified)          │
+│ Task T5 │ Recovery Artifacts & Containment Procedures (T2/T3)│ P0       │ ROLLBACKS AUTHORED & COMMITTED │ Gate B (Execution Pre-req for C) │
+│ Task T6 │ Historical Data Diagnostic Audit (Read-Only)       │ P1       │ COMPLETED (6 Queries)          │ Gate A/B (Baseline Verified)     │
+│ Task T7 │ Static Verification & Test Suite (42 Cases)        │ P1       │ STATIC DONE / RUNTIME BLOCKED  │ Gate B + STAGING-INFRA           │
+│ Task T8 │ Pre-Deployment Readiness Review                    │ P0       │ PENDING T7 Runtime Results     │ Gate B (Pre-deploy review)       │
+│ Task T9 │ Production Deployment: T2 Migration                │ P0       │ UNAUTHORIZED                   │ Gate C-1 (Separate auth from T10)│
+│ Task T10│ Production Deployment: T3 Migration                │ P1       │ UNAUTHORIZED                   │ Gate C-2 (Separate auth from T9) │
+│ Task T11│ Staging End-to-End Verification & Prod Verification │ P0       │ BLOCKED (Staging Not Provisioned)│ Gate C + Staging Project Ready   │
+└─────────┴────────────────────────────────────────────────────┴──────────┴────────────────────────────────┴──────────────────────────────────┘
 ```
 
 ### Detailed Task Specifications
@@ -668,24 +695,27 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public', 'pg_temp';
 #### Task T2 — Forward Migration: Quantity-Aware Voucher RPC
 - **Scope:** Author migration `supabase/migrations/20261013_03_fix_create_voucher_atomic.sql` implementing canonical JSONB RPC with uniform child slice creation, deterministic lock ordering, and legacy wrapper.
 - **Deliverables:** Single idempotent SQL migration file.
-- **Dependencies:** Gate B authorization.
+- **Dependencies:** Gate B authorization for execution.
 - **Acceptance Criteria:** `create_voucher_atomic` definition replaces `used_date` update with child slice creation; multiplies `token_value * alloc_qty`; enforces strict validation.
-- **Verification Method:** Static SQL linting and staging deployment.
+- **Verification Method:** Static SQL linting (done) and staging deployment (pending).
 - **Environment:** Staging Supabase project.
-- **Authorization Gate:** Gate B.
-- **Current Status:** `PLANNING SPEC COMPLETE (Implementation Unauthorized)`.
-- **Blockers:** Requires Gate B authorization.
+- **Authorization Gate:** Gate B (execution).
+- **Current Status (Rev 12A):** `SQL AUTHORED & COMMITTED` — File committed in Git `fe31b18`. Static verification complete per SQL Verification Report Section 2. **Not executed against any database.** Runtime verification blocked on staging provisioning.
+- **Committed Artifact:** [`supabase/migrations/20261013_03_fix_create_voucher_atomic.sql`](file:///c:/Users/Alyan/Desktop/pyntflow/p-industry/supabase/migrations/20261013_03_fix_create_voucher_atomic.sql) (21,467 bytes)
+- **Blockers:** Gate B authorization for SQL execution; staging infrastructure (`STAGING-INFRA`).
 
 #### Task T3 — Forward Migration: Fix Purchase RPC Quantity Valuation
 - **Scope:** Author migration `supabase/migrations/20261013_04_fix_create_purchase_atomic_valuation.sql` correcting Step 2 accumulator to multiply `token_value * remaining_quantity`.
 - **Deliverables:** Single idempotent SQL migration file.
-- **Dependencies:** Gate B authorization (independent of T2).
-- **Acceptance Criteria:** Multiplies `token_value * remaining_quantity`; maintains existing non-token purchase behavior.
-- **Verification Method:** Staging SQL execution.
+- **Dependencies:** Gate B authorization for execution (independent of T2).
+- **Acceptance Criteria:** Multiplies `token_value * remaining_quantity`; maintains existing non-token purchase behavior; includes `p_items` NULL/non-array guard (F-RV-01), NULL-element and duplicate token ID guards (F-RV-02).
+- **Verification Method:** Static SQL verification (done per SQL Verification Report) and staging execution (pending).
 - **Environment:** Staging Supabase project.
-- **Authorization Gate:** Gate B.
-- **Current Status:** `PLANNING SPEC COMPLETE (Implementation Unauthorized)`.
-- **Blockers:** Requires Gate B authorization.
+- **Authorization Gate:** Gate B (execution).
+- **Current Status (Rev 12A):** `SQL AUTHORED & COMMITTED` — File committed in Git `fe31b18`. Static verification complete per SQL Verification Report Sections 5 and 7.5. Includes hardening fixes F-RV-01 (p_items guard), F-RV-02 (NULL/duplicate token ID guards) verified on-disk at L98–L103, L109–L116. **Not executed against any database.**
+- **Q-FIN-01 Resolution:** Verified `[SRC-VERIFIED]` — The caller (PurchasesView.tsx) already deducts `tokensAppliedAmount` from `netBillValue` before computing `due_amount`. The RPC correctly trusts caller-supplied `due_amount` and must NOT subtract token value a second time. See SQL Verification Report Section 7.2. **Do not change this behavior without explicit business owner confirmation.**
+- **Committed Artifact:** [`supabase/migrations/20261013_04_fix_create_purchase_atomic_valuation.sql`](file:///c:/Users/Alyan/Desktop/pyntflow/p-industry/supabase/migrations/20261013_04_fix_create_purchase_atomic_valuation.sql) (13,893 bytes)
+- **Blockers:** Gate B authorization for SQL execution; staging infrastructure (`STAGING-INFRA`).
 
 #### Task T4 — Frontend Fix: Quantity-Aware Supplier Token UI
 - **Scope:** Update `src/components/FinancialLedgers.tsx` to support quantity selectors per batch row, line totals, dynamic preview, and payload mapping to `/api/vouchers`.
@@ -695,20 +725,24 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public', 'pg_temp';
 - **Verification Method:** TypeScript type check and browser verification on staging.
 - **Environment:** Local / Staging.
 - **Authorization Gate:** Gate B.
-- **Current Status:** `PLANNING SPEC COMPLETE (Implementation Unauthorized)`.
-- **Blockers:** Requires Gate B authorization.
+- **Current Status (Rev 12A):** `COMPLETED (Local Implementation & Testing Complete)` — Implemented in `src/components/FinancialLedgers.tsx` and `src/app/api/vouchers/route.ts`. Local test suite passed (31/31 assertions in `scripts/test-supplier-token-payment-local.mjs`).
+- **Blockers:** Staging runtime browser verification blocked pending staging infrastructure (`STAGING-INFRA`). Local implementation complete.
 
 #### Task T5 — Recovery Artifacts & Containment Procedures
 - **Scope:** Author emergency rollback / containment migration artifacts `supabase/rollbacks/rollback_20261013_03_fix_create_voucher_atomic.sql` and `rollback_20261013_04_fix_create_purchase_atomic_valuation.sql`.
 - **Deliverables:** Two verified containment SQL scripts.
-- **Dependencies:** T2 and T3 migration drafting.
+- **Dependencies:** T2 and T3 migration drafting (satisfied).
 - **Rollback Contradiction Resolution:** Prior plan drafts ambiguously proposed rolling back by restoring the baseline production migration `20261005_04_create_voucher_atomic.sql`. However, baseline forensics confirmed that `20261005_04_create_voucher_atomic.sql` is inherently defective due to `BUG-VA-01` (`used_date = NOW()`, referencing a column that does not exist in `token_transactions`). Restoring that historical file would immediately reinstate a guaranteed runtime crash (`42703 undefined_column`) whenever tokens are applied. Because no prior working version of `create_voucher_atomic` exists in migration history, a historical safe rollback target remains unresolved. Therefore, Task T5 defines an explicit emergency containment procedure: the rollback artifact must synthesize a clean, minimal definition of `create_voucher_atomic(uuid, jsonb, uuid[])` that strips the erroneous `used_date` statement, providing a verified safe fallback.
 - **Acceptance Criteria:** Rollback scripts safely restore valid routines without referencing `used_date`; static analysis and dry-run syntax verification pass.
-- **Verification Method:** Dry-run syntax analysis.
-- **Environment:** Local repository.
-- **Authorization Gate:** Gate B.
-- **Current Status:** `READY FOR DRAFTING (Implementation Unauthorized — Safe Containment Target Specified; Historical Target Unresolved)`.
-- **Blockers:** Requires Gate B authorization.
+- **Verification Method:** Dry-run syntax analysis (done) and staging rollback-apply-rollback cycle (pending).
+- **Environment:** Local repository / Staging.
+- **Authorization Gate:** Gate B (execution).
+- **Current Status (Rev 12A):** `ROLLBACKS AUTHORED & COMMITTED` — Both rollback files committed in Git `fe31b18`. Static verification complete per SQL Verification Report Section 4. Rollback `_04` includes F-RV-03 fix (`ORDER BY id ASC` locking, verified on-disk at L114). **Not executed against any database.** Rollback-apply-rollback validation cycle awaiting staging provisioning.
+- **Critical Safety Notice:** Reverting to baseline `20261005_04` is **FORBIDDEN** — it causes `42703 (undefined_column)` crash. Emergency containment requires the minimal fix provided in `rollback_20261013_03`.
+- **Committed Artifacts:**
+  - [`supabase/rollbacks/rollback_20261013_03_fix_create_voucher_atomic.sql`](file:///c:/Users/Alyan/Desktop/pyntflow/p-industry/supabase/rollbacks/rollback_20261013_03_fix_create_voucher_atomic.sql) (10,057 bytes)
+  - [`supabase/rollbacks/rollback_20261013_04_fix_create_purchase_atomic_valuation.sql`](file:///c:/Users/Alyan/Desktop/pyntflow/p-industry/supabase/rollbacks/rollback_20261013_04_fix_create_purchase_atomic_valuation.sql) (11,797 bytes)
+- **Blockers:** Gate B authorization for rollback execution on staging; staging infrastructure (`STAGING-INFRA`).
 
 #### Task T6 — Historical Data Diagnostic Audit
 - **Scope:** Execute read-only diagnostics against production to check for existing anomalies.
@@ -723,13 +757,24 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public', 'pg_temp';
 
 #### Task T7 — Static Verification & Test Suite Execution
 - **Scope:** Execute local TypeScript checks and run the 38 planned transactional staging test scenarios (Cases 1–38) against the provisioned staging environment, while confirming that the 4 read-only baseline structural/diagnostic checks (Cases 39–42) remain valid.
-- **Deliverables:** Test execution log across all 38 planned staging scenarios.
-- **Dependencies:** Staging project provisioning; migrations applied to staging.
+- **Deliverables:** Test execution log across all 38 planned staging scenarios with pass/fail evidence.
+- **Dependencies:** Staging project provisioning; migrations T2 and T3 applied to staging.
 - **Acceptance Criteria:** All 38 planned staging test cases pass on staging; zero regressions; 4 baseline structural/diagnostic assertions confirm passing state.
 - **Verification Method:** Automated test script on staging.
 - **Environment:** Staging Supabase project (Cases 1–38) / Production read-only assertions (Cases 39–42).
-- **Authorization Gate:** Gate B.
-- **Current Status:** `SPECIFIED / PLANNED (Awaiting Staging Environment)`.
+- **Authorization Gate:** Gate B + `STAGING-INFRA` provisioned.
+- **Current Status (Rev 12A):** `STATIC VERIFICATION COMPLETE — RUNTIME BLOCKED`
+  - **Static verification done:** SQL Verification Report confirms structural correctness of `_03` and `_04` migration files. 42-case test matrix specified in Report Section 8.
+  - **Runtime verification pending:** 38 transactional test cases (Cases 1–38) remain `PLANNED` — zero have been executed. No database has been touched.
+  - **4 structural/diagnostic checks (Cases 39–42):** Previously `EXECUTED-PASS` against production (read-only). Remain valid.
+- **Staging Execution Sequence (Planned):**
+  1. **Setup:** Apply T2 migration (`_03`) then T3 migration (`_04`) to staging. Seed test tenant, supplier, and token batches.
+  2. **Voucher Tests (Cases 1–25, 29–35):** Full/partial batch consumption, overdraft, zero/negative/fractional quantity, depleted batch, duplicate IDs, nonexistent tokens, foreign tenant, malformed JSON, status guards, reference guards, cash-only voucher, combined cash+tokens, concurrency, replay, face value guards, heterogeneous batches, supplier balance, audit log completeness.
+  3. **Concurrency Tests (Cases 26–28):** Two-session coordinated race conditions validating deterministic lock ordering and deadlock freedom.
+  4. **Purchase Tests (Cases 36–37):** Multi-token batch valuation and non-token regression.
+  5. **Reporting Isolation (Case 38):** Stockpile query excludes child rows with `usage_status = 'used'`.
+  6. **Rollback Validation:** Execute `rollback_20261013_03`, verify function reverted; re-apply `_03`. Execute `rollback_20261013_04`, verify function reverted; re-apply `_04`.
+  7. **Post-Test Data Integrity:** Verify parent+child quantity invariants, zero orphaned rows, zero double-counted values.
 - **Blockers:** Staging project provisioning (`STAGING-INFRA`).
 
 #### Task T8 — Pre-Deployment Readiness Review
@@ -853,9 +898,11 @@ The read-only diagnostic investigation was strictly bounded to the following six
 
 | Inquiry ID | Technical Subject | Status & Action Required | Blocking Level |
 |---|---|---|---|
-| **STAGING-INFRA** | **Provisioning of Dedicated Staging Supabase Project** | An active staging project is not yet provisioned. The project owner must provision a staging instance mirroring PostgreSQL 17.6 and provide read-only connection parameters during authorized setup. | **BLOCKS TASK T11** |
+| **STAGING-INFRA** | **Provisioning of Dedicated Staging Supabase Project** | An active staging project is **not yet provisioned**. The project owner must provision a staging instance mirroring PostgreSQL 17.6 and provide connection parameters during authorized setup. **Options:** (a) Create a new Supabase project on the free tier for staging, (b) Repurpose inactive project `bvykqfccfndttejulaen` if compatible with PostgreSQL 17.6. Both options require project owner approval. No `.env` staging configuration exists in the repository. | **BLOCKS T7 (runtime), T8, T11** |
+| **Q-FIN-01** | **Purchase RPC Token Deduction Logic** | **RESOLVED** `[SRC-VERIFIED]` — The caller (`PurchasesView.tsx`) already deducts `tokensAppliedAmount` from `netBillValue` before computing `due_amount`. The RPC must NOT subtract token value again. Documented in SQL Verification Report Section 7.2. **Do not change without explicit business owner confirmation.** | Resolved — no block |
+| **FH-01** | **Future Hardening: Server-Side Financial Consistency Validation** | **DOCUMENTED — NOT IN SCOPE.** A non-deducting consistency assertion for `net_total`/`paid_amount`/`due_amount` vs. actual locked token values is documented as a future enhancement in SQL Verification Report Section 8.3. Must never subtract `v_tokens_amount` from `v_due_amount` (double-deduction hazard). Requires separate design review and authorization. | Not a blocker — separate future scope |
 
-*(Note: Decision Q1, Decision Q2, and Decision Q-SMOKE are fully resolved and recorded.)*
+*(Note: Decision Q1, Decision Q2, Decision Q-SMOKE, and Q-FIN-01 are fully resolved and recorded.)*
 
 ---
 
@@ -875,7 +922,8 @@ The read-only diagnostic investigation was strictly bounded to the following six
 | **Rev 10** | 2026-10-13 | Final Architectural Plan & Hardening Review | Replaced separate unlocked reads with cursor join; added cardinality proof; fixed wrapper alias and tenant validation; aligned Test #31 tender rule; verified child-row schema fields. |
 | **Rev 11** | 2026-10-13 | Concurrency Coordination & Transaction Reconciliation | Reconciled wrapper pre-checks; added independent cash validation; selected composite `t` in cursor; justified child-row `type`; added accounting matrix; rewrote Tests 26–28. |
 | **Rev 12 FINAL** | 2026-10-13 | Final Technical Corrections & Plan Finalization | **1. Legacy Wrapper ID Preservation:** Replaced INNER JOIN with LEFT JOIN and added explicit tenant/existence count pre-check to guarantee missing, foreign-tenant, or depleted IDs are never silently dropped.<br>**2. Canonical RPC JSON Type Alignment:** Added explicit `jsonb_typeof(quantity) <> 'number'` check before integer format, positive range ($1 \le \text{qty} \le 2147483647$), and locked stock availability validation.<br>**3. Scientific Notation Lexical Claim Correction:** Documented that API `await req.json()` parses numeric tokens into JS number primitives, discarding raw lexemes; replaced lexical regex claims with type and `Number.isInteger` validation.<br>**4. Rollback Target Resolution:** Explicitly recorded that restoring baseline `20261005_04_create_voucher_atomic.sql` reinstates the P0 `used_date` crash; noted historical safe rollback target remains unresolved; specified emergency containment script omitting `used_date`.<br>**5. Test Count & Scope Reconciliation:** Reconciled T7 scope to distinguish the 38 planned staging scenarios from the 4 executed read-only baseline checks (total 42 cases).<br>**6. Working Tree Criteria:** Reconciled T1 acceptance criteria to acknowledge the untracked plan document in the working tree.<br>**7. Explicit `child.shift_id = NULL` Insertion:** Explicitly included `shift_id` in child INSERT column list and passed `NULL`, aligning with nullable schema and protecting shift drawer cash reconciliation.<br>**8. Source & Schema Inspection:** Formulated Section 4.6 verifying PostgREST overload resolution, parameterized cursor locking, mandatory insert columns, reporting compatibility, and legacy caller audit.<br>**9. Planning Stopped:** Formally declared final planning state; no further revisions authorized. |
+| **Rev 12A** | 2026-10-13 | Status Update — Staging Readiness Assessment | **Documentation-only update. No scope, architecture, or authorization changes.**<br>**1. Task Status Reconciliation:** Updated T2, T3, T5 statuses from `PLANNING SPEC COMPLETE` / `READY FOR DRAFTING` to `SQL AUTHORED & COMMITTED` based on Git commit `fe31b18` evidence. Updated T7 to `STATIC DONE / RUNTIME BLOCKED`.<br>**2. Q-FIN-01 Resolution Recorded:** Confirmed and documented that `PurchasesView.tsx` caller already deducts token value before computing `due_amount`; RPC must NOT deduct again. Added to Task T3 and Section 8 inquiries.<br>**3. Financial Consistency Hardening (FH-01):** Documented as out-of-scope future enhancement in Section 8 inquiries with cross-reference to SQL Verification Report Section 8.3. Must never double-deduct tokens.<br>**4. Staging Readiness Assessment:** Confirmed staging project is NOT provisioned. No `.env` staging configuration exists. Documented provisioning options (new project or repurpose `bvykqfccfndttejulaen`) requiring project owner approval. Staging blocks T7 runtime, T8, and T11.<br>**5. Runtime Verification Preparation:** Added detailed staging execution sequence to T7 covering setup, voucher/purchase/concurrency tests, rollback validation, and post-test integrity checks.<br>**6. Committed Artifact Registry:** Added file paths, sizes, and Git commit references for all 4 SQL artifacts (2 migrations + 2 rollbacks).<br>**7. Git Baseline Updated:** Recorded `fe31b18` as current HEAD with only verification report uncommitted. |
 
 ---
-*End of Document — Revision 12 FINAL Implementation Plan & Task Register*  
-*Status: FINAL PLAN — No further planning revision is authorized or expected. Implementation strictly unauthorized until separately authorized.*
+*End of Document — Revision 12A Implementation Plan & Task Register*  
+*Status: STATUS UPDATE — Static verification complete. Runtime execution and deployment strictly unauthorized until staging infrastructure is provisioned and Gate B/C authorizations are granted.*

@@ -103,6 +103,7 @@ export default function FinancialLedgers({
   // Supplier Token Stockpile State (for Pay Supplier modal)
   const [availableSupplierTokens, setAvailableSupplierTokens] = useState<any[]>([]);
   const [selectedSupplierTokenIds, setSelectedSupplierTokenIds] = useState<string[]>([]);
+  const [selectedSupplierTokenQtys, setSelectedSupplierTokenQtys] = useState<Record<string, number>>({});
   const [filterTokensBySupplier, setFilterTokensBySupplier] = useState<boolean>(true);
   const [loadingSupplierTokens, setLoadingSupplierTokens] = useState<boolean>(false);
 
@@ -242,6 +243,7 @@ export default function FinancialLedgers({
   useEffect(() => {
     if (showReceiptModal && activeTab === 'suppliers') {
       setSelectedSupplierTokenIds([]);
+      setSelectedSupplierTokenQtys({});
       fetchAvailableSupplierTokens();
     }
   }, [showReceiptModal, activeTab, selectedParty?.id]);
@@ -266,12 +268,34 @@ export default function FinancialLedgers({
     });
   }, [availableSupplierTokens, filterTokensBySupplier, selectedParty, activeTab]);
 
+  // Quantity-aware calculation: multiplies unit face value by selected quantity (BUG-FL-01 resolution)
   const supplierTokensAppliedAmount = React.useMemo(() => {
     if (activeTab !== 'suppliers') return 0;
     return availableSupplierTokens
       .filter((t: any) => selectedSupplierTokenIds.includes(t.id))
-      .reduce((sum: number, t: any) => sum + (Number(t.token_value) || 0), 0);
-  }, [availableSupplierTokens, selectedSupplierTokenIds, activeTab]);
+      .reduce((sum: number, t: any) => {
+        const maxQty = Math.max(0, Number(t.remaining_quantity ?? t.quantity ?? 1));
+        const rawQty = selectedSupplierTokenQtys[t.id];
+        const qty = typeof rawQty === 'number' && Number.isInteger(rawQty) && rawQty > 0
+          ? Math.min(rawQty, maxQty)
+          : maxQty;
+        return sum + ((Number(t.token_value) || 0) * qty);
+      }, 0);
+  }, [availableSupplierTokens, selectedSupplierTokenIds, selectedSupplierTokenQtys, activeTab]);
+
+  const supplierTokensTotalUnits = React.useMemo(() => {
+    if (activeTab !== 'suppliers') return 0;
+    return availableSupplierTokens
+      .filter((t: any) => selectedSupplierTokenIds.includes(t.id))
+      .reduce((sum: number, t: any) => {
+        const maxQty = Math.max(0, Number(t.remaining_quantity ?? t.quantity ?? 1));
+        const rawQty = selectedSupplierTokenQtys[t.id];
+        const qty = typeof rawQty === 'number' && Number.isInteger(rawQty) && rawQty > 0
+          ? Math.min(rawQty, maxQty)
+          : maxQty;
+        return sum + qty;
+      }, 0);
+  }, [availableSupplierTokens, selectedSupplierTokenIds, selectedSupplierTokenQtys, activeTab]);
 
   // Record Payment Receipt / Payment with structured payment_mode & tokens
   const handleRecordReceipt = async (e: React.FormEvent) => {
@@ -285,6 +309,37 @@ export default function FinancialLedgers({
     if (totalSettlement <= 0) {
       setReceiptError('Please enter a payment amount or select at least one stockpiled token.');
       return;
+    }
+
+    // Validate token allocations if selected
+    let tokenAllocations: { token_id: string; quantity: number }[] = [];
+    if (activeTab === 'suppliers' && selectedSupplierTokenIds.length > 0) {
+      for (const id of selectedSupplierTokenIds) {
+        const token = availableSupplierTokens.find((t: any) => t.id === id);
+        if (!token) {
+          setReceiptError('One or more selected tokens are no longer available. Please refresh.');
+          return;
+        }
+        const maxQty = Math.max(0, Number(token.remaining_quantity ?? token.quantity ?? 0));
+        if (maxQty <= 0 || token.usage_status === 'used') {
+          setReceiptError(`Token batch "${token.brand_name || 'Token'}" is depleted and cannot be applied.`);
+          return;
+        }
+        const rawQty = selectedSupplierTokenQtys[id] ?? maxQty;
+        if (typeof rawQty !== 'number' || !Number.isInteger(rawQty) || rawQty < 1) {
+          setReceiptError(`Please enter a valid positive integer quantity for token batch "${token.brand_name || 'Token'}".`);
+          return;
+        }
+        if (rawQty > maxQty) {
+          setReceiptError(`Requested quantity (${rawQty}) exceeds available stock (${maxQty}) for token batch "${token.brand_name || 'Token'}".`);
+          return;
+        }
+        if (rawQty > 2147483647) {
+          setReceiptError('Quantity exceeds maximum 32-bit integer limit (2,147,483,647).');
+          return;
+        }
+        tokenAllocations.push({ token_id: id, quantity: rawQty });
+      }
     }
 
     setSubmittingReceipt(true);
@@ -308,6 +363,7 @@ export default function FinancialLedgers({
           remarks: refNotes ? `${refNotes}` : undefined,
           created_by: staffName,
           applied_token_ids: activeTab === 'suppliers' ? selectedSupplierTokenIds : [],
+          token_allocations: activeTab === 'suppliers' && tokenAllocations.length > 0 ? tokenAllocations : undefined,
         }),
       });
 
@@ -317,6 +373,7 @@ export default function FinancialLedgers({
         setReceiptAmount('');
         setRefNotes('');
         setSelectedSupplierTokenIds([]);
+        setSelectedSupplierTokenQtys({});
         // Refresh parties and statement
         await fetchParties();
         await fetchLedgerStatement(selectedParty.id);
@@ -1169,6 +1226,7 @@ export default function FinancialLedgers({
                   onClick={() => {
                     setShowReceiptModal(false);
                     setSelectedSupplierTokenIds([]);
+                    setSelectedSupplierTokenQtys({});
                   }}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--on-surface-variant)' }}
                 >
@@ -1258,12 +1316,29 @@ export default function FinancialLedgers({
                           <button
                             type="button"
                             onClick={() => {
-                              const allIds = matchingSupplierTokens.map((t: any) => t.id);
-                              const allSelected = allIds.every((id: string) => selectedSupplierTokenIds.includes(id));
+                              const eligibleTokens = matchingSupplierTokens.filter(
+                                (t: any) => Number(t.remaining_quantity ?? t.quantity ?? 0) > 0 && t.usage_status !== 'used'
+                              );
+                              const eligibleIds = eligibleTokens.map((t: any) => t.id);
+                              const allSelected = eligibleIds.length > 0 && eligibleIds.every((id: string) => selectedSupplierTokenIds.includes(id));
                               if (allSelected) {
-                                setSelectedSupplierTokenIds((prev) => prev.filter((id) => !allIds.includes(id)));
+                                setSelectedSupplierTokenIds((prev) => prev.filter((id) => !eligibleIds.includes(id)));
+                                setSelectedSupplierTokenQtys((prev) => {
+                                  const next = { ...prev };
+                                  eligibleIds.forEach((id) => delete next[id]);
+                                  return next;
+                                });
                               } else {
-                                setSelectedSupplierTokenIds((prev) => Array.from(new Set([...prev, ...allIds])));
+                                setSelectedSupplierTokenIds((prev) => Array.from(new Set([...prev, ...eligibleIds])));
+                                setSelectedSupplierTokenQtys((prev) => {
+                                  const next = { ...prev };
+                                  eligibleTokens.forEach((t: any) => {
+                                    if (!next[t.id]) {
+                                      next[t.id] = Number(t.remaining_quantity ?? t.quantity ?? 1);
+                                    }
+                                  });
+                                  return next;
+                                });
                               }
                             }}
                             style={{
@@ -1277,7 +1352,12 @@ export default function FinancialLedgers({
                               cursor: 'pointer',
                             }}
                           >
-                            {matchingSupplierTokens.every((t: any) => selectedSupplierTokenIds.includes(t.id)) ? 'Deselect All' : 'Select All'}
+                            {matchingSupplierTokens.some((t: any) => Number(t.remaining_quantity ?? t.quantity ?? 0) > 0 && t.usage_status !== 'used') &&
+                            matchingSupplierTokens
+                              .filter((t: any) => Number(t.remaining_quantity ?? t.quantity ?? 0) > 0 && t.usage_status !== 'used')
+                              .every((t: any) => selectedSupplierTokenIds.includes(t.id))
+                              ? 'Deselect All'
+                              : 'Select All'}
                           </button>
                         )}
                       </div>
@@ -1294,61 +1374,126 @@ export default function FinancialLedgers({
                           : 'No available stockpiled tokens in stock.'}
                       </div>
                     ) : (
-                      <div style={{ maxHeight: '140px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                      <div style={{ maxHeight: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                         {matchingSupplierTokens.map((t: any) => {
                           const isChecked = selectedSupplierTokenIds.includes(t.id);
+                          const maxQty = Math.max(0, Number(t.remaining_quantity ?? t.quantity ?? 0));
+                          const isDepleted = maxQty <= 0 || t.usage_status === 'used';
                           const dateStr = t.created_at ? new Date(t.created_at).toLocaleDateString('en-PK') : '';
                           const originLabel = (t.type || t.transaction_type) === 'shop_retained' ? 'Retained' : (t.type || t.transaction_type) === 'opening_stock' ? 'Opening' : 'Redeemed';
+                          const currentQty = selectedSupplierTokenQtys[t.id] ?? maxQty;
+                          const unitVal = Number(t.token_value || 0);
+                          const lineTotal = unitVal * (isChecked ? currentQty : maxQty);
 
                           return (
                             <div
                               key={t.id}
                               onClick={() => {
-                                setSelectedSupplierTokenIds((prev) =>
-                                  isChecked ? prev.filter((id) => id !== t.id) : [...prev, t.id]
-                                );
+                                if (isDepleted) return;
+                                if (isChecked) {
+                                  setSelectedSupplierTokenIds((prev) => prev.filter((id) => id !== t.id));
+                                } else {
+                                  setSelectedSupplierTokenIds((prev) => [...prev, t.id]);
+                                  if (!selectedSupplierTokenQtys[t.id]) {
+                                    setSelectedSupplierTokenQtys((prev) => ({
+                                      ...prev,
+                                      [t.id]: maxQty > 0 ? maxQty : 1,
+                                    }));
+                                  }
+                                }
                               }}
                               style={{
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'space-between',
                                 padding: '6px 8px',
-                                background: isChecked ? '#FEF3C7' : '#FFFFFF',
-                                border: isChecked ? '1px solid #F59E0B' : '1px solid #E2E8F0',
+                                background: isDepleted ? '#F8FAFC' : isChecked ? '#FEF3C7' : '#FFFFFF',
+                                border: isDepleted ? '1px solid #E2E8F0' : isChecked ? '1px solid #F59E0B' : '1px solid #E2E8F0',
                                 borderRadius: '6px',
-                                cursor: 'pointer',
+                                cursor: isDepleted ? 'not-allowed' : 'pointer',
+                                opacity: isDepleted ? 0.6 : 1,
                                 transition: 'all 0.15s ease',
+                                gap: '8px',
                               }}
                             >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
                                 <input
                                   type="checkbox"
-                                  checked={isChecked}
-                                  onChange={() => {}}
-                                  style={{ cursor: 'pointer' }}
+                                  disabled={isDepleted}
+                                  checked={isChecked && !isDepleted}
+                                  onChange={() => {}} // handled by parent onClick
+                                  style={{ cursor: isDepleted ? 'not-allowed' : 'pointer', flexShrink: 0 }}
                                 />
-                                <div>
-                                  <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#0F172A' }}>
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ fontSize: '11.5px', fontWeight: 700, color: isDepleted ? '#94A3B8' : '#0F172A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                     {t.brand_name || t.brand || 'General'} · <span style={{ fontWeight: 500, color: '#475569' }}>{[t.series_name, t.unit_name].filter(Boolean).join(' · ') || t.item_name || 'Paint Token'}</span>
+                                    {isDepleted && (
+                                      <span style={{ marginLeft: '6px', fontSize: '9px', background: '#FEE2E2', color: '#DC2626', padding: '1px 4px', borderRadius: '3px', fontWeight: 700 }}>
+                                        DEPLETED
+                                      </span>
+                                    )}
                                   </div>
                                   <div style={{ fontSize: '9.5px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
-                                    {dateStr} · {originLabel}
-                                    {Number(t.remaining_quantity ?? t.quantity ?? 1) > 1 ? ` · Qty: ${t.remaining_quantity ?? t.quantity}` : ''}
+                                    {dateStr} · {originLabel} · Avail: {maxQty}
                                   </div>
                                 </div>
                               </div>
 
-                              <div style={{ textAlign: 'right' }}>
-                                <span
-                                  style={{
-                                    fontFamily: 'JetBrains Mono, monospace',
-                                    fontWeight: 800,
-                                    color: '#D97706',
-                                    fontSize: '11.5px',
-                                  }}
-                                >
-                                  Rs. {Number(t.token_value || 0).toLocaleString()}
-                                </span>
+                              {/* Quantity selector & line total calculation */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                                {isChecked && !isDepleted && (
+                                  <div
+                                    style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <label style={{ fontSize: '10px', color: '#64748B', fontWeight: 600 }}>Qty:</label>
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      max={maxQty}
+                                      step="1"
+                                      value={currentQty}
+                                      onChange={(e) => {
+                                        const parsed = parseInt(e.target.value, 10);
+                                        if (isNaN(parsed)) {
+                                          setSelectedSupplierTokenQtys((prev) => ({ ...prev, [t.id]: 1 }));
+                                        } else {
+                                          const clamped = Math.max(1, Math.min(maxQty, Math.min(parsed, 2147483647)));
+                                          setSelectedSupplierTokenQtys((prev) => ({ ...prev, [t.id]: clamped }));
+                                        }
+                                      }}
+                                      style={{
+                                        width: '52px',
+                                        padding: '2px 4px',
+                                        fontSize: '11px',
+                                        fontWeight: 700,
+                                        fontFamily: 'JetBrains Mono, monospace',
+                                        textAlign: 'center',
+                                        border: '1px solid #D97706',
+                                        borderRadius: '4px',
+                                        background: '#FFFFFF',
+                                        color: '#0F172A',
+                                      }}
+                                    />
+                                  </div>
+                                )}
+
+                                <div style={{ textAlign: 'right', minWidth: '75px' }}>
+                                  <span
+                                    style={{
+                                      fontFamily: 'JetBrains Mono, monospace',
+                                      fontWeight: 800,
+                                      color: isDepleted ? '#94A3B8' : '#D97706',
+                                      fontSize: '11.5px',
+                                      display: 'block',
+                                    }}
+                                  >
+                                    Rs. {(isChecked ? lineTotal : unitVal).toLocaleString()}
+                                  </span>
+                                  <span style={{ fontSize: '9px', color: '#94A3B8', display: 'block' }}>
+                                    {isChecked ? `(${currentQty} × Rs. ${unitVal.toLocaleString()})` : `@ Rs. ${unitVal.toLocaleString()}`}
+                                  </span>
+                                </div>
                               </div>
                             </div>
                           );
@@ -1370,7 +1515,7 @@ export default function FinancialLedgers({
                         }}
                       >
                         <span style={{ fontWeight: 700, color: '#166534' }}>
-                          {selectedSupplierTokenIds.length} Token(s) Selected for Settlement
+                          {selectedSupplierTokenIds.length} Token Batch(es) Selected ({supplierTokensTotalUnits} Unit{supplierTokensTotalUnits === 1 ? '' : 's'})
                         </span>
                         <span style={{ fontWeight: 800, color: '#166534', fontFamily: 'JetBrains Mono, monospace' }}>
                           - Rs. {tokensAmountNum.toLocaleString()}
@@ -1439,6 +1584,7 @@ export default function FinancialLedgers({
                     onClick={() => {
                       setShowReceiptModal(false);
                       setSelectedSupplierTokenIds([]);
+                      setSelectedSupplierTokenQtys({});
                     }}
                     className="btn btn-secondary-outline"
                   >
