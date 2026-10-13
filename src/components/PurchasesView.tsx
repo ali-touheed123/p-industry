@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Item, Supplier } from '@/types';
 import {
   Search,
@@ -165,6 +165,11 @@ export default function PurchasesView({
   const [showFindModal, setShowFindModal] = useState<boolean>(false);
   const [showVoucherModal, setShowVoucherModal] = useState<boolean>(false);
   const [editingItem, setEditingItem] = useState<PurchaseLineItem | null>(null);
+
+  // Task T3: Synchronous double-submission guard (useRef prevents microsecond double-clicks
+  // that bypass asynchronous useState updates)
+  const isSubmittingRef = useRef<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
 
   const showFeedback = (msg: string) => {
     setNotification(msg);
@@ -337,38 +342,72 @@ export default function PurchasesView({
     showFeedback(`Initiated new Purchase Record #${nextRecord}`);
   };
 
-  const handleSavePurchase = async () => {
+  const handleSavePurchase = async (): Promise<boolean> => {
+    // Task T3: Synchronous ref check prevents microsecond double-clicks
+    if (isSubmittingRef.current) return false;
     if (items.length === 0) {
       showFeedback('Cannot save empty purchase invoice. Please add items.');
-      return;
+      return false;
     }
 
-    try {
-      const res = await fetch('/api/purchases', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tenant_id: tenantId,
-          purchase_no: purchaseInvNo,
-          purchase_type: purchaseType,
-          supplier_id: selectedSupplier?.id || null,
-          supplier_name: selectedSupplier?.name || supplierQuery || 'Supplier',
-          date: invoiceDate,
-          subtotal: grossSubtotal,
-          discount: totalStdDiscount + additionalDiscount,
-          net_total: netBillValue,
-          paid_amount: paidAmount,
-          due_amount: Math.max(0, netBillValue - paidAmount),
-          payment_type: paymentMode,
-          created_by: staffName,
-          shift_id: shiftId || null,
-          items: items,
-          applied_token_ids: selectedTokenIds,
-        }),
-      });
+    isSubmittingRef.current = true;
+    setIsSaving(true);
 
-      const data = await res.json();
-      if (data.success) {
+    try {
+      // ── Network fetch ──────────────────────────────────────────────────────
+      let res: Response;
+      try {
+        res = await fetch('/api/purchases', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tenant_id: tenantId,
+            purchase_no: purchaseInvNo,
+            purchase_type: purchaseType,
+            supplier_id: selectedSupplier?.id || null,
+            supplier_name: selectedSupplier?.name || supplierQuery || 'Supplier',
+            date: invoiceDate,
+            subtotal: grossSubtotal,
+            discount: totalStdDiscount + additionalDiscount,
+            net_total: netBillValue,
+            paid_amount: paidAmount,
+            due_amount: Math.max(0, netBillValue - paidAmount),
+            payment_type: paymentMode,
+            created_by: staffName,
+            shift_id: shiftId || null,
+            items: items,
+            applied_token_ids: selectedTokenIds,
+          }),
+        });
+      } catch (networkErr: any) {
+        // ── Branch D: Network Transport Failure ─────────────────────────────
+        // fetch() threw TypeError — zero HTTP response received.
+        // Database outcome is COMPLETELY UNKNOWN.
+        showFeedback(
+          '⚠️ Network error: Could not reach the server. ' +
+          'Check purchase history before retrying. If you retry with the same ' +
+          'invoice number and it was already saved, it will be safely rejected.'
+        );
+        return false;
+      }
+
+      // ── Parse response body ────────────────────────────────────────────────
+      let data: any;
+      try {
+        data = await res.json();
+      } catch (parseErr: any) {
+        // ── Branch C: Response Parsing Failure ──────────────────────────────
+        // HTTP response received but body is unparseable (e.g. 502/504 HTML proxy error).
+        // Database outcome is UNKNOWN.
+        showFeedback(
+          '⚠️ Communication error: Server responded with unparseable format. ' +
+          'Check purchase history to see if the purchase committed before retrying.'
+        );
+        return false;
+      }
+
+      // ── Branch A: Confirmed Success ────────────────────────────────────────
+      if (res.ok && data.success === true) {
         showFeedback(
           `✅ ${purchaseType === 'purchase' ? 'Purchase Invoice' : 'Purchase Return'} #${purchaseInvNo} saved to database & stock updated!`
         );
@@ -376,11 +415,28 @@ export default function PurchasesView({
         setSelectedTokenIds([]);
         fetchAvailableTokens();
         handleNewPurchase();
-      } else {
-        showFeedback(`❌ Error: ${data.error || 'Failed to save'}`);
+        return true;
       }
-    } catch (err: any) {
-      showFeedback(`❌ Network error: ${err.message}`);
+
+      // ── Branch B: HTTP Application / Database Error ────────────────────────
+      // Parseable JSON received. In the common case, PostgreSQL rolled back when
+      // rpcError occurred. However, a rare race window exists where DB committed
+      // before server crash — do not blindly assume guaranteed rollback.
+      const errorMsg = data.error || 'Failed to save purchase';
+      // Check for unique constraint violation (23505) on uq_purchases_tenant_purchase_no
+      if (errorMsg.includes('23505') || errorMsg.includes('uq_purchases_tenant_purchase_no') || errorMsg.includes('duplicate key')) {
+        showFeedback(
+          '⚠️ This invoice number was already saved in a prior attempt. ' +
+          'Verify in purchase history before proceeding.'
+        );
+      } else {
+        showFeedback(`❌ Error: ${errorMsg}`);
+      }
+      return false;
+
+    } finally {
+      isSubmittingRef.current = false;
+      setIsSaving(false);
     }
   };
 
@@ -389,8 +445,11 @@ export default function PurchasesView({
       showFeedback('Cannot print empty invoice.');
       return;
     }
-    await handleSavePurchase();
-    setShowVoucherModal(true);
+    // Task T3: Guard voucher modal — only open on CONFIRMED success
+    const saved = await handleSavePurchase();
+    if (saved) {
+      setShowVoucherModal(true);
+    }
   };
 
   const handleCancelPurchase = () => {
@@ -1570,6 +1629,7 @@ export default function PurchasesView({
               {/* Primary Action: SAVE & PRINT (F5) */}
               <button
                 type="button"
+                disabled={isSaving}
                 onClick={() => {
                   setShowCheckoutModal(false);
                   handleSaveAndPrint();
@@ -1626,6 +1686,7 @@ export default function PurchasesView({
 
                 <button
                   type="button"
+                  disabled={isSaving}
                   onClick={() => {
                     setShowCheckoutModal(false);
                     handleSavePurchase();
