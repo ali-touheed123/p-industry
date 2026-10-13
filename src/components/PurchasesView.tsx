@@ -131,6 +131,8 @@ export default function PurchasesView({
   const [selectedSupplier, setSelectedSupplier] = useState<any>(null);
   const [supplierQuery, setSupplierQuery] = useState<string>('');
   const [showSupplierDropdown, setShowSupplierDropdown] = useState<boolean>(false);
+  const [activeSupplierIndex, setActiveSupplierIndex] = useState<number>(0);
+  const activeSupplierItemRef = useRef<HTMLButtonElement | null>(null);
 
   // Line items (starts completely clean/empty)
   const [items, setItems] = useState<PurchaseLineItem[]>([]);
@@ -144,6 +146,8 @@ export default function PurchasesView({
   const [inputTax, setInputTax] = useState<number>(0);
   const [selectedProduct, setSelectedProduct] = useState<Item | null>(null);
   const [showProductDropdown, setShowProductDropdown] = useState<boolean>(false);
+  const [activeProductIndex, setActiveProductIndex] = useState<number>(0);
+  const activeProductItemRef = useRef<HTMLButtonElement | null>(null);
 
   // Financial calculations state
   const [additionalDiscount, setAdditionalDiscount] = useState<number>(0);
@@ -175,6 +179,19 @@ export default function PurchasesView({
     setNotification(msg);
     setTimeout(() => setNotification(null), 3000);
   };
+
+  // Auto-scroll highlighted dropdown option into view
+  useEffect(() => {
+    if (showSupplierDropdown && activeSupplierItemRef.current) {
+      activeSupplierItemRef.current.scrollIntoView({ block: 'nearest' });
+    }
+  }, [activeSupplierIndex, showSupplierDropdown]);
+
+  useEffect(() => {
+    if (showProductDropdown && activeProductItemRef.current) {
+      activeProductItemRef.current.scrollIntoView({ block: 'nearest' });
+    }
+  }, [activeProductIndex, showProductDropdown]);
 
   // Fetch available stockpile tokens (shop-retained and customer-redeemed)
   const fetchAvailableTokens = async () => {
@@ -466,6 +483,7 @@ export default function PurchasesView({
     setSelectedSupplier(sup);
     setSupplierQuery(sup.name);
     setShowSupplierDropdown(false);
+    setActiveSupplierIndex(0);
     showFeedback(`Selected supplier: ${sup.name}`);
   };
 
@@ -673,8 +691,39 @@ export default function PurchasesView({
                 onChange={(e) => {
                   setSupplierQuery(e.target.value);
                   setShowSupplierDropdown(true);
+                  setActiveSupplierIndex(0);
                 }}
-                onFocus={() => setShowSupplierDropdown(true)}
+                onFocus={() => {
+                  setShowSupplierDropdown(true);
+                  setActiveSupplierIndex(0);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (!showSupplierDropdown) {
+                      setShowSupplierDropdown(true);
+                      setActiveSupplierIndex(0);
+                    } else if (filteredSuppliers.length > 0) {
+                      setActiveSupplierIndex((prev) => (prev + 1) % filteredSuppliers.length);
+                    }
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (!showSupplierDropdown) {
+                      setShowSupplierDropdown(true);
+                      setActiveSupplierIndex(filteredSuppliers.length ? filteredSuppliers.length - 1 : 0);
+                    } else if (filteredSuppliers.length > 0) {
+                      setActiveSupplierIndex((prev) => (prev - 1 + filteredSuppliers.length) % filteredSuppliers.length);
+                    }
+                  } else if (e.key === 'Enter') {
+                    if (showSupplierDropdown && filteredSuppliers.length > 0 && activeSupplierIndex >= 0 && activeSupplierIndex < filteredSuppliers.length) {
+                      e.preventDefault();
+                      handleSelectSupplier(filteredSuppliers[activeSupplierIndex]);
+                    }
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setShowSupplierDropdown(false);
+                  }
+                }}
                 placeholder="Search supplier name, phone, or city..."
                 style={{ width: '100%', fontSize: '12.5px', background: '#F8FAFC', border: '1px solid #CBD5E1', padding: '8px 32px 8px 10px', color: '#0F172A', fontWeight: 600, borderRadius: '8px', outline: 'none' }}
               />
@@ -683,25 +732,42 @@ export default function PurchasesView({
               {/* Dropdown Suggestions */}
               {showSupplierDropdown && (
                 <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '4px', background: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '10px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', zIndex: 30, maxHeight: '200px', overflowY: 'auto' }}>
-                  {filteredSuppliers.map((sup) => (
-                    <button
-                      key={sup.id}
-                      type="button"
-                      onClick={() => handleSelectSupplier(sup)}
-                      style={{ width: '100%', padding: '8px 12px', textAlign: 'left', border: 'none', background: 'transparent', borderBottom: '1px solid #F1F5F9', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                    >
-                      <div>
-                        <div style={{ fontSize: '12px', fontWeight: 700, color: '#0F172A' }}>{sup.name}</div>
-                        <div style={{ fontSize: '10.5px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>{sup.city || sup.address || '—'} · {sup.phone || 'No phone'}</div>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A' }}>
-                          Rs. {Number(sup.current_balance || sup.currentBalance || 0).toLocaleString()}
+                  {filteredSuppliers.map((sup, idx) => {
+                    const isHighlighted = idx === activeSupplierIndex;
+                    return (
+                      <button
+                        key={sup.id}
+                        type="button"
+                        ref={isHighlighted ? activeSupplierItemRef : null}
+                        onMouseEnter={() => setActiveSupplierIndex(idx)}
+                        onClick={() => handleSelectSupplier(sup)}
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px',
+                          textAlign: 'left',
+                          border: 'none',
+                          background: isHighlighted ? '#FFF7ED' : 'transparent',
+                          borderLeft: isHighlighted ? '3px solid #F97316' : '3px solid transparent',
+                          borderBottom: '1px solid #F1F5F9',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: '12px', fontWeight: 700, color: isHighlighted ? '#C2410C' : '#0F172A' }}>{sup.name}</div>
+                          <div style={{ fontSize: '10.5px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>{sup.city || sup.address || '—'} · {sup.phone || 'No phone'}</div>
                         </div>
-                        <div style={{ fontSize: '9px', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>Payable Balance</div>
-                      </div>
-                    </button>
-                  ))}
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A' }}>
+                            Rs. {Number(sup.current_balance || sup.currentBalance || 0).toLocaleString()}
+                          </div>
+                          <div style={{ fontSize: '9px', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>Payable Balance</div>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -772,10 +838,45 @@ export default function PurchasesView({
               onChange={(e) => {
                 setProductQuery(e.target.value);
                 setShowProductDropdown(true);
+                setActiveProductIndex(0);
               }}
-              onFocus={() => setShowProductDropdown(true)}
+              onFocus={() => {
+                setShowProductDropdown(true);
+                setActiveProductIndex(0);
+              }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') handleAddItem();
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  if (!showProductDropdown) {
+                    setShowProductDropdown(true);
+                    setActiveProductIndex(0);
+                  } else if (filteredProducts.length > 0) {
+                    setActiveProductIndex((prev) => (prev + 1) % filteredProducts.length);
+                  }
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  if (!showProductDropdown) {
+                    setShowProductDropdown(true);
+                    setActiveProductIndex(filteredProducts.length ? filteredProducts.length - 1 : 0);
+                  } else if (filteredProducts.length > 0) {
+                    setActiveProductIndex((prev) => (prev - 1 + filteredProducts.length) % filteredProducts.length);
+                  }
+                } else if (e.key === 'Enter') {
+                  if (showProductDropdown && filteredProducts.length > 0 && activeProductIndex >= 0 && activeProductIndex < filteredProducts.length) {
+                    e.preventDefault();
+                    const p = filteredProducts[activeProductIndex];
+                    setSelectedProduct(p);
+                    setProductQuery(p.name);
+                    setInputRate(p.cost_price || p.retail_price * 0.85);
+                    setInputUnit(p.unit);
+                    setShowProductDropdown(false);
+                  } else {
+                    handleAddItem();
+                  }
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setShowProductDropdown(false);
+                }
               }}
               placeholder="Search product by name, code, barcode or shade... (F3)"
               style={{ width: '100%', fontSize: '12.5px', background: '#F8FAFC', border: '1px solid #CBD5E1', padding: '8px 36px 8px 34px', color: '#0F172A', fontWeight: 500, borderRadius: '8px', outline: 'none' }}
@@ -785,35 +886,52 @@ export default function PurchasesView({
             {/* Product Dropdown Results */}
             {showProductDropdown && filteredProducts.length > 0 && (
               <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '4px', background: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '10px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', zIndex: 30, maxHeight: '220px', overflowY: 'auto' }}>
-                {filteredProducts.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedProduct(p);
-                      setProductQuery(p.name);
-                      setInputRate(p.cost_price || p.retail_price * 0.85);
-                      setInputUnit(p.unit);
-                      setShowProductDropdown(false);
-                    }}
-                    style={{ width: '100%', padding: '8px 12px', textAlign: 'left', border: 'none', background: 'transparent', borderBottom: '1px solid #F1F5F9', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                  >
-                    <div>
-                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#0F172A' }}>{p.name}</div>
-                      <div style={{ fontSize: '10.5px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
-                        {p.code} · {p.shade_code || 'Standard'} · {p.pack_size || p.unit}
+                {filteredProducts.map((p, idx) => {
+                  const isHighlighted = idx === activeProductIndex;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      ref={isHighlighted ? activeProductItemRef : null}
+                      onMouseEnter={() => setActiveProductIndex(idx)}
+                      onClick={() => {
+                        setSelectedProduct(p);
+                        setProductQuery(p.name);
+                        setInputRate(p.cost_price || p.retail_price * 0.85);
+                        setInputUnit(p.unit);
+                        setShowProductDropdown(false);
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        textAlign: 'left',
+                        border: 'none',
+                        background: isHighlighted ? '#FFF7ED' : 'transparent',
+                        borderLeft: isHighlighted ? '3px solid #F97316' : '3px solid transparent',
+                        borderBottom: '1px solid #F1F5F9',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontSize: '12px', fontWeight: 700, color: isHighlighted ? '#C2410C' : '#0F172A' }}>{p.name}</div>
+                        <div style={{ fontSize: '10.5px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
+                          {p.code} · {p.shade_code || 'Standard'} · {p.pack_size || p.unit}
+                        </div>
                       </div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A' }}>
-                        Rs. {(p.cost_price || p.retail_price * 0.85).toLocaleString()}
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A' }}>
+                          Rs. {(p.cost_price || p.retail_price * 0.85).toLocaleString()}
+                        </div>
+                        <div style={{ fontSize: '9px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
+                          Stock: {p.stock_qty || 0} {p.unit}
+                        </div>
                       </div>
-                      <div style={{ fontSize: '9px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
-                        Stock: {p.stock_qty || 0} {p.unit}
-                      </div>
-                    </div>
-                  </button>
-                ))}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>

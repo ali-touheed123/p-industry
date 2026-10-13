@@ -456,4 +456,74 @@ test('Suite 3: Mocked UI Control-Flow & Outcome Handling in PurchasesView.tsx', 
     assert.strictEqual(r7.branch, 'BRANCH_D_NETWORK_FAILURE');
     assert.ok(r7.feedback.includes('Network error'));
   });
+
+  await t.test('Keyboard navigation (ArrowUp, ArrowDown, Enter, Escape) in search dropdowns', () => {
+    // Verify state variables for active indices
+    assert.match(
+      viewContent,
+      /const\s+\[activeSupplierIndex,\s*setActiveSupplierIndex\]\s*=\s*useState<number>\(0\);/,
+      'PurchasesView must declare activeSupplierIndex state'
+    );
+    assert.match(
+      viewContent,
+      /const\s+\[activeProductIndex,\s*setActiveProductIndex\]\s*=\s*useState<number>\(0\);/,
+      'PurchasesView must declare activeProductIndex state'
+    );
+
+    // Verify keyboard handlers in Supplier search input
+    assert.match(
+      viewContent,
+      /e\.key\s*===\s*'ArrowDown'[\s\S]*?setActiveSupplierIndex\(\(prev\)[\s\S]*?filteredSuppliers\.length\)/,
+      'Supplier search input must handle ArrowDown navigation'
+    );
+    assert.match(
+      viewContent,
+      /e\.key\s*===\s*'ArrowUp'[\s\S]*?setActiveSupplierIndex\(\(prev\)[\s\S]*?filteredSuppliers\.length\)/,
+      'Supplier search input must handle ArrowUp navigation'
+    );
+    assert.match(
+      viewContent,
+      /e\.key\s*===\s*'Enter'[\s\S]*?handleSelectSupplier\(filteredSuppliers\[activeSupplierIndex\]\)/,
+      'Supplier search input must handle Enter to select highlighted supplier'
+    );
+    assert.match(
+      viewContent,
+      /e\.key\s*===\s*'Escape'[\s\S]*?setShowSupplierDropdown\(false\)/,
+      'Supplier search input must handle Escape to close dropdown'
+    );
+
+    // Verify keyboard handlers in Product search input
+    assert.match(
+      viewContent,
+      /e\.key\s*===\s*'ArrowDown'[\s\S]*?setActiveProductIndex\(\(prev\)[\s\S]*?filteredProducts\.length\)/,
+      'Product search input must handle ArrowDown navigation'
+    );
+    assert.match(
+      viewContent,
+      /e\.key\s*===\s*'ArrowUp'[\s\S]*?setActiveProductIndex\(\(prev\)[\s\S]*?filteredProducts\.length\)/,
+      'Product search input must handle ArrowUp navigation'
+    );
+    assert.match(
+      viewContent,
+      /e\.key\s*===\s*'Enter'[\s\S]*?filteredProducts\[activeProductIndex\][\s\S]*?setShowProductDropdown\(false\)/,
+      'Product search input must handle Enter to select highlighted product'
+    );
+    assert.match(
+      viewContent,
+      /e\.key\s*===\s*'Escape'[\s\S]*?setShowProductDropdown\(false\)/,
+      'Product search input must handle Escape to close dropdown'
+    );
+
+    // Verify active option highlight & mouse hover binding
+    assert.match(
+      viewContent,
+      /onMouseEnter=\{\(\)\s*=>\s*setActiveSupplierIndex\(idx\)\}/,
+      'Supplier dropdown item must update active index on mouse hover'
+    );
+    assert.match(
+      viewContent,
+      /onMouseEnter=\{\(\)\s*=>\s*setActiveProductIndex\(idx\)\}/,
+      'Product dropdown item must update active index on mouse hover'
+    );
+  });
 });
