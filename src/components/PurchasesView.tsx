@@ -157,6 +157,7 @@ export default function PurchasesView({
   // Stockpile Tokens state
   const [availableStockpileTokens, setAvailableStockpileTokens] = useState<any[]>([]);
   const [selectedTokenIds, setSelectedTokenIds] = useState<string[]>([]);
+  const [selectedTokenQtys, setSelectedTokenQtys] = useState<Record<string, number>>({});
   const [filterTokensBySupplier, setFilterTokensBySupplier] = useState<boolean>(true);
 
   // Payment Breakdown
@@ -233,8 +234,28 @@ export default function PurchasesView({
   const tokensAppliedAmount = React.useMemo(() => {
     return availableStockpileTokens
       .filter((t) => selectedTokenIds.includes(t.id))
-      .reduce((sum, t) => sum + (Number(t.token_value) || 0), 0);
-  }, [availableStockpileTokens, selectedTokenIds]);
+      .reduce((sum, t) => {
+        const maxQty = Math.max(0, Number(t.remaining_quantity ?? t.quantity ?? 1));
+        const rawQty = selectedTokenQtys[t.id];
+        const qty = typeof rawQty === 'number' && Number.isInteger(rawQty) && rawQty > 0
+          ? Math.min(rawQty, maxQty)
+          : maxQty;
+        return sum + ((Number(t.token_value) || 0) * qty);
+      }, 0);
+  }, [availableStockpileTokens, selectedTokenIds, selectedTokenQtys]);
+
+  const tokensTotalUnits = React.useMemo(() => {
+    return availableStockpileTokens
+      .filter((t) => selectedTokenIds.includes(t.id))
+      .reduce((sum, t) => {
+        const maxQty = Math.max(0, Number(t.remaining_quantity ?? t.quantity ?? 1));
+        const rawQty = selectedTokenQtys[t.id];
+        const qty = typeof rawQty === 'number' && Number.isInteger(rawQty) && rawQty > 0
+          ? Math.min(rawQty, maxQty)
+          : maxQty;
+        return sum + qty;
+      }, 0);
+  }, [availableStockpileTokens, selectedTokenIds, selectedTokenQtys]);
 
   // Fetch real suppliers from DB if available
   useEffect(() => {
@@ -356,6 +377,7 @@ export default function PurchasesView({
     setSalesTaxAmount(0);
     setPaidAmount(0);
     setSelectedTokenIds([]);
+    setSelectedTokenQtys({});
     showFeedback(`Initiated new Purchase Record #${nextRecord}`);
   };
 
@@ -365,6 +387,37 @@ export default function PurchasesView({
     if (items.length === 0) {
       showFeedback('Cannot save empty purchase invoice. Please add items.');
       return false;
+    }
+
+    // Validate token allocations if selected
+    const tokenAllocations: { token_id: string; quantity: number }[] = [];
+    if (selectedTokenIds.length > 0) {
+      for (const id of selectedTokenIds) {
+        const token = availableStockpileTokens.find((t) => t.id === id);
+        if (!token) {
+          showFeedback('One or more selected tokens are no longer available. Please refresh.');
+          return false;
+        }
+        const maxQty = Math.max(0, Number(token.remaining_quantity ?? token.quantity ?? 0));
+        if (maxQty <= 0 || token.usage_status === 'used') {
+          showFeedback(`Token batch "${token.brand_name || 'Token'}" is depleted and cannot be applied.`);
+          return false;
+        }
+        const rawQty = selectedTokenQtys[id] ?? maxQty;
+        if (typeof rawQty !== 'number' || !Number.isInteger(rawQty) || rawQty < 1) {
+          showFeedback(`Please enter a valid positive integer quantity for token batch "${token.brand_name || 'Token'}".`);
+          return false;
+        }
+        if (rawQty > maxQty) {
+          showFeedback(`Requested quantity (${rawQty}) exceeds available stock (${maxQty}) for token batch "${token.brand_name || 'Token'}".`);
+          return false;
+        }
+        if (rawQty > 2147483647) {
+          showFeedback('Quantity exceeds maximum 32-bit integer limit (2,147,483,647).');
+          return false;
+        }
+        tokenAllocations.push({ token_id: id, quantity: rawQty });
+      }
     }
 
     isSubmittingRef.current = true;
@@ -394,6 +447,7 @@ export default function PurchasesView({
             shift_id: shiftId || null,
             items: items,
             applied_token_ids: selectedTokenIds,
+            token_allocations: tokenAllocations.length > 0 ? tokenAllocations : undefined,
           }),
         });
       } catch (networkErr: any) {
@@ -430,6 +484,7 @@ export default function PurchasesView({
         );
         if (onStockUpdated) onStockUpdated();
         setSelectedTokenIds([]);
+        setSelectedTokenQtys({});
         fetchAvailableTokens();
         handleNewPurchase();
         return true;
@@ -476,6 +531,7 @@ export default function PurchasesView({
     setSalesTaxAmount(0);
     setPaidAmount(0);
     setSelectedTokenIds([]);
+    setSelectedTokenQtys({});
     showFeedback('Purchase draft cleared.');
   };
 
@@ -1419,7 +1475,7 @@ export default function PurchasesView({
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#16A34A', fontWeight: 700 }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <Coins style={{ width: 14, height: 14 }} />
-                      (-) Tokens Applied ({selectedTokenIds.length})
+                      (-) Tokens Applied ({tokensTotalUnits})
                     </span>
                     <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>
                       - Rs. {tokensAppliedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -1511,12 +1567,26 @@ export default function PurchasesView({
                       <button
                         type="button"
                         onClick={() => {
-                          const matchingIds = matchingStockpileTokens.map((t) => t.id);
-                          const allSelected = matchingIds.every((id) => selectedTokenIds.includes(id));
+                          const eligible = matchingStockpileTokens.filter((t) => {
+                            const maxQty = Math.max(0, Number(t.remaining_quantity ?? t.quantity ?? 0));
+                            return maxQty > 0 && t.usage_status !== 'used';
+                          });
+                          const eligibleIds = eligible.map((t) => t.id);
+                          const allSelected = eligibleIds.length > 0 && eligibleIds.every((id) => selectedTokenIds.includes(id));
                           if (allSelected) {
-                            setSelectedTokenIds((prev) => prev.filter((id) => !matchingIds.includes(id)));
+                            setSelectedTokenIds((prev) => prev.filter((id) => !eligibleIds.includes(id)));
                           } else {
-                            setSelectedTokenIds((prev) => Array.from(new Set([...prev, ...matchingIds])));
+                            setSelectedTokenIds((prev) => Array.from(new Set([...prev, ...eligibleIds])));
+                            setSelectedTokenQtys((prev) => {
+                              const updated = { ...prev };
+                              eligible.forEach((t) => {
+                                const maxQty = Math.max(0, Number(t.remaining_quantity ?? t.quantity ?? 0));
+                                if (maxQty > 0 && !updated[t.id]) {
+                                  updated[t.id] = maxQty;
+                                }
+                              });
+                              return updated;
+                            });
                           }
                         }}
                         style={{
@@ -1530,7 +1600,7 @@ export default function PurchasesView({
                           cursor: 'pointer',
                         }}
                       >
-                        {matchingStockpileTokens.every((t) => selectedTokenIds.includes(t.id)) ? 'Deselect All' : 'Select All'}
+                        {matchingStockpileTokens.filter((t) => Math.max(0, Number(t.remaining_quantity ?? t.quantity ?? 0)) > 0 && t.usage_status !== 'used').every((t) => selectedTokenIds.includes(t.id)) ? 'Deselect All' : 'Select All'}
                       </button>
                     )}
                   </div>
@@ -1543,58 +1613,126 @@ export default function PurchasesView({
                       : 'No available shop-retained stockpiled tokens found in stock.'}
                   </div>
                 ) : (
-                  <div style={{ maxHeight: '160px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ maxHeight: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     {matchingStockpileTokens.map((t) => {
                       const isChecked = selectedTokenIds.includes(t.id);
+                      const maxQty = Math.max(0, Number(t.remaining_quantity ?? t.quantity ?? 0));
+                      const isDepleted = maxQty <= 0 || t.usage_status === 'used';
+                      const dateStr = t.created_at ? new Date(t.created_at).toLocaleDateString('en-PK') : '';
+                      const originLabel = (t.type || t.transaction_type) === 'shop_retained' ? 'Retained' : (t.type || t.transaction_type) === 'opening_stock' ? 'Opening' : 'Redeemed';
+                      const currentQty = selectedTokenQtys[t.id] ?? maxQty;
+                      const unitVal = Number(t.token_value || 0);
+                      const lineTotal = unitVal * (isChecked ? currentQty : maxQty);
+
                       return (
                         <div
                           key={t.id}
                           onClick={() => {
-                            setSelectedTokenIds((prev) =>
-                              isChecked ? prev.filter((id) => id !== t.id) : [...prev, t.id]
-                            );
+                            if (isDepleted) return;
+                            if (isChecked) {
+                              setSelectedTokenIds((prev) => prev.filter((id) => id !== t.id));
+                            } else {
+                              setSelectedTokenIds((prev) => [...prev, t.id]);
+                              if (!selectedTokenQtys[t.id]) {
+                                setSelectedTokenQtys((prev) => ({
+                                  ...prev,
+                                  [t.id]: maxQty > 0 ? maxQty : 1,
+                                }));
+                              }
+                            }
                           }}
                           style={{
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
                             padding: '6px 10px',
-                            background: isChecked ? '#FEF3C7' : '#F8FAFC',
-                            border: isChecked ? '1px solid #F59E0B' : '1px solid #E2E8F0',
+                            background: isDepleted ? '#F8FAFC' : isChecked ? '#FEF3C7' : '#FFFFFF',
+                            border: isDepleted ? '1px solid #E2E8F0' : isChecked ? '1px solid #F59E0B' : '1px solid #E2E8F0',
                             borderRadius: '8px',
-                            cursor: 'pointer',
+                            cursor: isDepleted ? 'not-allowed' : 'pointer',
+                            opacity: isDepleted ? 0.6 : 1,
                             transition: 'all 0.15s ease',
+                            gap: '8px',
                           }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
                             <input
                               type="checkbox"
-                              checked={isChecked}
+                              disabled={isDepleted}
+                              checked={isChecked && !isDepleted}
                               onChange={() => {}}
-                              style={{ cursor: 'pointer' }}
+                              style={{ cursor: isDepleted ? 'not-allowed' : 'pointer', flexShrink: 0 }}
                             />
-                            <div>
-                              <div style={{ fontSize: '12px', fontWeight: 700, color: '#0F172A' }}>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: '12px', fontWeight: 700, color: isDepleted ? '#94A3B8' : '#0F172A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                 {t.brand_name || t.brand || 'General'} · <span style={{ fontWeight: 500, color: '#475569' }}>{[t.series_name, t.unit_name].filter(Boolean).join(' · ') || t.item_name || 'Paint Token'}</span>
+                                {isDepleted && (
+                                  <span style={{ marginLeft: '6px', fontSize: '9px', background: '#FEE2E2', color: '#DC2626', padding: '1px 4px', borderRadius: '3px', fontWeight: 700 }}>
+                                    DEPLETED
+                                  </span>
+                                )}
                               </div>
                               <div style={{ fontSize: '10px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
-                                {t.created_at ? new Date(t.created_at).toLocaleDateString('en-PK') : ''}
-                                {Number(t.remaining_quantity ?? t.quantity ?? 1) > 1 ? ` · Qty: ${t.remaining_quantity ?? t.quantity}` : ''}
+                                {dateStr} · {originLabel} · Avail: {maxQty}
                               </div>
                             </div>
                           </div>
 
-                          <div style={{ textAlign: 'right' }}>
-                            <span
-                              style={{
-                                fontFamily: 'JetBrains Mono, monospace',
-                                fontWeight: 800,
-                                color: '#D97706',
-                                fontSize: '12px',
-                              }}
-                            >
-                              Rs. {Number(t.token_value || 0).toLocaleString()}
-                            </span>
+                          {/* Quantity selector & line total calculation */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                            {isChecked && !isDepleted && (
+                              <div
+                                style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <label style={{ fontSize: '10px', color: '#64748B', fontWeight: 600 }}>Qty:</label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max={maxQty}
+                                  step="1"
+                                  value={currentQty}
+                                  onChange={(e) => {
+                                    const parsed = parseInt(e.target.value, 10);
+                                    if (isNaN(parsed)) {
+                                      setSelectedTokenQtys((prev) => ({ ...prev, [t.id]: 1 }));
+                                    } else {
+                                      const clamped = Math.max(1, Math.min(maxQty, Math.min(parsed, 2147483647)));
+                                      setSelectedTokenQtys((prev) => ({ ...prev, [t.id]: clamped }));
+                                    }
+                                  }}
+                                  style={{
+                                    width: '52px',
+                                    padding: '2px 4px',
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    fontFamily: 'JetBrains Mono, monospace',
+                                    textAlign: 'center',
+                                    border: '1px solid #D97706',
+                                    borderRadius: '4px',
+                                    background: '#FFFFFF',
+                                    color: '#0F172A',
+                                  }}
+                                />
+                              </div>
+                            )}
+
+                            <div style={{ textAlign: 'right', minWidth: '75px' }}>
+                              <span
+                                style={{
+                                  fontFamily: 'JetBrains Mono, monospace',
+                                  fontWeight: 800,
+                                  color: isDepleted ? '#94A3B8' : '#D97706',
+                                  fontSize: '12px',
+                                  display: 'block',
+                                }}
+                              >
+                                Rs. {(isChecked ? lineTotal : (unitVal * maxQty)).toLocaleString()}
+                              </span>
+                              <span style={{ fontSize: '9px', color: '#94A3B8', display: 'block' }}>
+                                {isChecked ? `(${currentQty} × Rs. ${unitVal.toLocaleString()})` : `@ Rs. ${unitVal.toLocaleString()}`}
+                              </span>
+                            </div>
                           </div>
                         </div>
                       );
@@ -1616,7 +1754,7 @@ export default function PurchasesView({
                     }}
                   >
                     <span style={{ fontWeight: 700, color: '#166534' }}>
-                      {selectedTokenIds.length} Token(s) Selected for Deduction
+                      {selectedTokenIds.length} Token Batch(es) Selected ({tokensTotalUnits} Unit{tokensTotalUnits === 1 ? '' : 's'})
                     </span>
                     <span style={{ fontWeight: 800, color: '#166534', fontFamily: 'JetBrains Mono, monospace' }}>
                       - Rs. {tokensAppliedAmount.toLocaleString()}
