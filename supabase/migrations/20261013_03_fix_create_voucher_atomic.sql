@@ -75,6 +75,7 @@ DECLARE
   v_alloc_qtys       INTEGER[] := '{}';
   v_rec              token_transactions;
   v_rec_qty          INTEGER;
+  v_cursor_row       RECORD;
   v_elem             JSONB;
   v_supplier         suppliers%ROWTYPE;
   v_client           clients%ROWTYPE;
@@ -182,8 +183,11 @@ BEGIN
 
     OPEN c_alloc_tokens(v_token_ids);
     LOOP
-      FETCH c_alloc_tokens INTO v_rec, v_rec_qty;
+      FETCH c_alloc_tokens INTO v_cursor_row;
       EXIT WHEN NOT FOUND;
+
+      v_rec     := v_cursor_row.t;
+      v_rec_qty := v_cursor_row.requested_qty;
 
       IF v_rec.usage_status IS DISTINCT FROM 'available' THEN
         CLOSE c_alloc_tokens;
@@ -372,6 +376,11 @@ BEGIN
   RETURN jsonb_build_object(
     'voucher_id',            v_voucher_id,
     'voucher_no',            v_voucher_no,
+    'voucher_type',          v_voucher_type,
+    'party_type',            v_party_type,
+    'party_id',              v_party_id,
+    'party_name',            v_party_name,
+    'date',                  v_date,
     'amount',                v_total_settlement,
     'cash_paid_amount',      v_amount,
     'tokens_applied_amount', v_tokens_amount,

@@ -292,3 +292,4 @@ To harden the Developer Panel and make it 100% production-ready, the following p
 
 8. **Connect Receipt Templates to Counter POS**:
    * In `PosBilling.tsx` and `SalesHistory.tsx`, query `/api/receipt-templates/assign?tenant_id=${tenant.id}` to render the receipt matching the store's assigned layout and paper size.
+ 

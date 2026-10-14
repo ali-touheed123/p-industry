@@ -248,11 +248,11 @@ BEGIN
       -- Supplier balance is adjusted exactly once — no separate voucher generated at purchase time.
       UPDATE suppliers
          SET current_balance     = v_new_balance,
-              last_payment_amount = CASE WHEN v_paid_amount > 0 THEN v_paid_amount
-                                         ELSE last_payment_amount END,
-              last_payment_date   = CASE WHEN v_paid_amount > 0 THEN v_date
-                                         ELSE last_payment_date END
-        WHERE id = v_supplier_id AND tenant_id = p_tenant_id;
+             last_payment_amount = CASE WHEN v_paid_amount > 0 THEN v_paid_amount
+                                        ELSE last_payment_amount END,
+             last_payment_date   = CASE WHEN v_paid_amount > 0 THEN v_date
+                                        ELSE last_payment_date END
+       WHERE id = v_supplier_id AND tenant_id = p_tenant_id;
     END IF;
   END IF;
 
