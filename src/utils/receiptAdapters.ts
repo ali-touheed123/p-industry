@@ -24,10 +24,8 @@ export function buildPosThermalHtml(
   const items: RenderReceiptItem[] = (data.items || []).map((item: any) => {
     const isRemoved = item.tokenAction === 'remove';
     const hasToken = Boolean(item.hasToken && (item.tokenValue || 0) > 0);
-    const tokenNote = hasToken
-      ? (isRemoved
-          ? `Token removed — Rs. ${Number(item.tokenValue * item.qty).toLocaleString()} deducted`
-          : `Token included — Rs. ${Number(item.tokenValue * item.qty).toLocaleString()} token value`)
+    const tokenNote = hasToken && isRemoved
+      ? `Token removed — Rs. ${Number(item.tokenValue * item.qty).toLocaleString()} deducted`
       : undefined;
 
     return {

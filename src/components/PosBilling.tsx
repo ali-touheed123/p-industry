@@ -262,7 +262,7 @@ export default function PosBilling({
 
     const fetchClientHistory = async () => {
       try {
-        const res = await fetch(`/api/invoices?tenant_id=${tenantId}&client_id=${selectedClient.id}&limit=100`);
+        const res = await fetch(`/api/invoices?tenant_id=${tenantId}&client_id=${selectedClient.id}&limit=100&include_items=true`);
         const data = await res.json();
         if (data.success && Array.isArray(data.invoices) && data.invoices.length > 0) {
           const invoices = data.invoices;
@@ -289,7 +289,7 @@ export default function PosBilling({
           // Build Product Last Purchase Map for this Client
           const historyMap: Record<string, ProductLastPurchase> = {};
           for (const inv of invoices) {
-            if (inv.status === 'cancelled') continue;
+            if (inv.status === 'cancelled' || inv.invoice_type === 'return') continue;
             const items = inv.invoice_items || inv.items || [];
             for (const it of items) {
               const record: ProductLastPurchase = {
@@ -2461,11 +2461,9 @@ export default function PosBilling({
                         Rs. {(item.qty * (item.rate || item.unit_price || 0)).toLocaleString()}
                       </div>
                     </div>
-                    {isTokenItem && (
+                    {isTokenItem && isRemoved && (
                       <div style={{ fontSize: '9px', color: '#333333', marginTop: '1px', fontStyle: 'italic' }}>
-                        {isRemoved
-                          ? `🎫 Token removed — Rs. ${(item.tokenValue * item.qty).toLocaleString()} deducted`
-                          : `🎫 Token included — Rs. ${(item.tokenValue * item.qty).toLocaleString()} token value`}
+                        🎫 Token removed — Rs. ${(item.tokenValue * item.qty).toLocaleString()} deducted
                       </div>
                     )}
                   </div>
