@@ -24,6 +24,7 @@ const PurchasesView = dynamic(() => import('@/components/PurchasesView'), { load
 const BranchOrders = dynamic(() => import('@/components/BranchOrders'), { loading: () => <ViewFallback /> });
 const TokenLedger = dynamic(() => import('@/components/TokenLedger'), { loading: () => <ViewFallback /> });
 const TokenManagementView = dynamic(() => import('@/components/TokenManagementView'), { loading: () => <ViewFallback /> });
+import { clearAllBulkDrafts } from '@/lib/bulkDraftStore';
 
 import {
   ShoppingCart,
@@ -149,6 +150,7 @@ export default function TenantAppPage({ params }: PageProps) {
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
     } catch {}
+    clearAllBulkDrafts();
     setCurrentUser(null);
   };
 
@@ -456,6 +458,7 @@ export default function TenantAppPage({ params }: PageProps) {
           try {
             await fetch('/api/auth/logout', { method: 'POST' });
           } catch {}
+          clearAllBulkDrafts();
           if (currentUser?.role === 'ceo') {
             setCurrentUser(null);
           } else {
