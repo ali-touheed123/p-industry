@@ -398,6 +398,215 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
+
+    // ── BATCH PRICE UPDATE MODE ───────────────────────────────────────────────
+    if (Array.isArray(body.items)) {
+      const { tenant_id, items: updates } = body;
+      if (!tenant_id || typeof tenant_id !== 'string') {
+        return NextResponse.json({ success: false, error: 'Tenant ID required' }, { status: 400 });
+      }
+
+      if (updates.length === 0) {
+        return NextResponse.json({ success: false, error: 'Items array must not be empty' }, { status: 400 });
+      }
+
+      if (updates.length > 250) {
+        return NextResponse.json({ success: false, error: 'Batch size exceeds maximum limit of 250 items' }, { status: 400 });
+      }
+
+      // Check for duplicate IDs in the submitted batch
+      const idSet = new Set<string>();
+      for (const u of updates) {
+        if (!u.id || typeof u.id !== 'string') {
+          return NextResponse.json({ success: false, error: 'Each item in batch must have a valid string id' }, { status: 400 });
+        }
+        if (idSet.has(u.id)) {
+          return NextResponse.json({ success: false, error: `Duplicate item ID "${u.id}" detected in batch` }, { status: 400 });
+        }
+        idSet.add(u.id);
+      }
+
+      // Authenticate calling user against requested tenant
+      const auth = await requireTenantAuth(req, tenant_id);
+      if (!auth.authorized) {
+        return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+      }
+
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const validItemIds = updates.map((u: any) => u.id).filter((id: string) => uuidRegex.test(id));
+
+      // Fetch all valid items belonging to this tenant to verify ownership
+      const { data: dbItems, error: fetchErr } = await supabaseAdmin
+        .from('items')
+        .select('id, code, cost_price, retail_price')
+        .eq('tenant_id', tenant_id)
+        .in('id', validItemIds);
+
+      if (fetchErr) throw fetchErr;
+
+      const tenantItemMap = new Map((dbItems || []).map(d => [d.id, d]));
+      const updated: any[] = [];
+      const errors: Array<{
+        id: string;
+        code?: string;
+        error: string;
+        failureType?: 'INVALID_FORMAT' | 'UPDATE_DATABASE_ERROR' | 'VERIFICATION_READ_ERROR' | 'DELETED_OR_INACCESSIBLE' | 'STALE_PRICE_CONFLICT' | 'UNRESOLVED_UPDATE_FAILURE';
+        conflictedFields?: Array<'cost' | 'retail'>;
+        currentPrices?: { cost_price: number; retail_price: number };
+      }> = [];
+
+      for (const u of updates) {
+        if (!uuidRegex.test(u.id)) {
+          errors.push({ id: u.id, error: 'Invalid UUID format for item ID', failureType: 'INVALID_FORMAT' });
+          continue;
+        }
+
+        const existingDbItem = tenantItemMap.get(u.id);
+        if (!existingDbItem) {
+          errors.push({ id: u.id, error: 'Item not found in authorized tenant catalog', failureType: 'DELETED_OR_INACCESSIBLE' });
+          continue;
+        }
+
+        // Validate price fields independently
+        const hasCost = u.cost_price !== undefined;
+        const hasRetail = u.retail_price !== undefined;
+
+        if (!hasCost && !hasRetail) {
+          errors.push({ id: u.id, code: existingDbItem.code, error: 'Update payload must specify at least one price field (cost_price or retail_price)', failureType: 'INVALID_FORMAT' });
+          continue;
+        }
+
+        const updatePayload: Record<string, number> = {};
+
+        // Cost price validation
+        if (hasCost) {
+          if (typeof u.cost_price !== 'number' || !Number.isFinite(u.cost_price) || isNaN(u.cost_price)) {
+            errors.push({ id: u.id, code: existingDbItem.code, error: 'Cost price must be a valid finite number', failureType: 'INVALID_FORMAT' });
+            continue;
+          }
+          // Reject more than two decimal places without rounding:
+          const costStr = u.cost_price.toString();
+          if (costStr.includes('.') && costStr.split('.')[1].length > 2) {
+            errors.push({ id: u.id, code: existingDbItem.code, error: 'Cost price cannot exceed two decimal places', failureType: 'INVALID_FORMAT' });
+            continue;
+          }
+          if (u.cost_price <= 0) {
+            errors.push({ id: u.id, code: existingDbItem.code, error: 'Cost price must be greater than zero', failureType: 'INVALID_FORMAT' });
+            continue;
+          }
+          // Concurrency predicate requirement:
+          if (typeof u.expected_cost !== 'number' || !Number.isFinite(u.expected_cost) || u.expected_cost < 0) {
+            errors.push({ id: u.id, code: existingDbItem.code, error: 'Concurrency validation failure: expected_cost is required and must be a non-negative finite number', failureType: 'INVALID_FORMAT' });
+            continue;
+          }
+          updatePayload.cost_price = u.cost_price;
+        }
+
+        // Retail price validation
+        if (hasRetail) {
+          if (typeof u.retail_price !== 'number' || !Number.isFinite(u.retail_price) || isNaN(u.retail_price)) {
+            errors.push({ id: u.id, code: existingDbItem.code, error: 'Retail price must be a valid finite number', failureType: 'INVALID_FORMAT' });
+            continue;
+          }
+          const retailStr = u.retail_price.toString();
+          if (retailStr.includes('.') && retailStr.split('.')[1].length > 2) {
+            errors.push({ id: u.id, code: existingDbItem.code, error: 'Retail price cannot exceed two decimal places', failureType: 'INVALID_FORMAT' });
+            continue;
+          }
+          if (u.retail_price < 0) {
+            errors.push({ id: u.id, code: existingDbItem.code, error: 'Retail price cannot be negative', failureType: 'INVALID_FORMAT' });
+            continue;
+          }
+          // Concurrency predicate requirement:
+          if (typeof u.expected_retail !== 'number' || !Number.isFinite(u.expected_retail) || u.expected_retail < 0) {
+            errors.push({ id: u.id, code: existingDbItem.code, error: 'Concurrency validation failure: expected_retail is required and must be a non-negative finite number', failureType: 'INVALID_FORMAT' });
+            continue;
+          }
+          updatePayload.retail_price = u.retail_price;
+        }
+
+        // Atomic update statement with field-specific concurrency predicates
+        let query = supabaseAdmin
+          .from('items')
+          .update(updatePayload)
+          .eq('id', u.id)
+          .eq('tenant_id', tenant_id);
+
+        if (hasCost) {
+          query = query.eq('cost_price', u.expected_cost);
+        }
+        if (hasRetail) {
+          query = query.eq('retail_price', u.expected_retail);
+        }
+
+        const { data: updatedItem, error: updateErr } = await query
+          .select('id, code, cost_price, retail_price')
+          .maybeSingle();
+
+        if (updateErr) {
+          errors.push({ id: u.id, code: existingDbItem.code, error: `Database update failed: ${updateErr.message}`, failureType: 'UPDATE_DATABASE_ERROR' });
+          continue;
+        }
+
+        if (!updatedItem) {
+          // Zero rows updated: perform diagnostic reread
+          const { data: currentItem, error: readErr } = await supabaseAdmin
+            .from('items')
+            .select('id, code, cost_price, retail_price')
+            .eq('id', u.id)
+            .eq('tenant_id', tenant_id)
+            .maybeSingle();
+
+          if (readErr) {
+            errors.push({ id: u.id, code: existingDbItem.code, error: `Verification read failed: ${readErr.message}`, failureType: 'VERIFICATION_READ_ERROR' });
+            continue;
+          }
+
+          if (!currentItem) {
+            errors.push({ id: u.id, code: existingDbItem.code, error: 'Product was deleted or is no longer accessible to this store', failureType: 'DELETED_OR_INACCESSIBLE' });
+            continue;
+          }
+
+          const costConflict = hasCost && Number(currentItem.cost_price) !== u.expected_cost;
+          const retailConflict = hasRetail && Number(currentItem.retail_price) !== u.expected_retail;
+          const conflictedFields: Array<'cost' | 'retail'> = [];
+          if (costConflict) conflictedFields.push('cost');
+          if (retailConflict) conflictedFields.push('retail');
+
+          if (conflictedFields.length > 0) {
+            errors.push({
+              id: u.id,
+              code: currentItem.code,
+              error: `Concurrent modification: ${conflictedFields.join(' and ')} price was modified by another user`,
+              failureType: 'STALE_PRICE_CONFLICT',
+              conflictedFields,
+              currentPrices: {
+                cost_price: Number(currentItem.cost_price),
+                retail_price: Number(currentItem.retail_price),
+              },
+            });
+          } else {
+            errors.push({
+              id: u.id,
+              code: currentItem.code,
+              error: 'Database update did not affect any rows, but current prices match expected values. Please retry.',
+              failureType: 'UNRESOLVED_UPDATE_FAILURE',
+            });
+          }
+        } else {
+          updated.push({
+            id: updatedItem.id,
+            code: updatedItem.code,
+            cost_price: hasCost ? Number(updatedItem.cost_price) : undefined,
+            retail_price: hasRetail ? Number(updatedItem.retail_price) : undefined,
+          });
+        }
+      }
+
+      return NextResponse.json({ success: true, updated, errors, count: updated.length });
+    }
+
+    // ── SINGLE ITEM UPDATE MODE ───────────────────────────────────────────────
     const { id, ...updateFields } = body;
 
     if (!id) {

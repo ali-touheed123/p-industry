@@ -16,6 +16,11 @@ import {
   RefreshCw,
   Sparkles,
   Trash2,
+  DollarSign,
+  AlertTriangle,
+  RotateCcw,
+  Check,
+  ArrowRight,
 } from 'lucide-react';
 import AiInvoiceScan from './AiInvoiceScan';
 import {
@@ -116,6 +121,10 @@ export default function StockInventory({
   }, [tenantId]);
 
   useEffect(() => { fetchBrandsAndSeries(); }, [fetchBrandsAndSeries]);
+
+  // Lookup maps for fast O(1) resolution across search and price editor
+  const brandsMap = useMemo(() => new Map(brands.map((b) => [b.id, b.name])), [brands]);
+  const seriesMap = useMemo(() => new Map(allSeries.map((s) => [s.id, s.name])), [allSeries]);
 
   // Helper: match item unit string to config unit string safely without accidental fuzzy collisions
   const matchUnitToConfig = (itemUnitRaw: string, configUnitRaw: string): boolean => {
@@ -277,6 +286,490 @@ export default function StockInventory({
 
 
 
+  // ── MODAL: BULK PRICE EDITOR STATE & CRITERIA ─────────────────────────────
+  interface BulkPriceRowState {
+    item: Item;
+    costInput: string;
+    retailInput: string;
+    isCostOverride: boolean;
+    isRetailOverride: boolean;
+    expectedCost: number;
+    expectedRetail: number;
+    status: 'idle' | 'conflict' | 'error' | 'success';
+    errorMessage?: string;
+    failureType?: 'INVALID_FORMAT' | 'UPDATE_DATABASE_ERROR' | 'VERIFICATION_READ_ERROR' | 'DELETED_OR_INACCESSIBLE' | 'STALE_PRICE_CONFLICT' | 'UNRESOLVED_UPDATE_FAILURE';
+    conflictedFields?: Array<'cost' | 'retail'>;
+    currentPrices?: { cost_price: number; retail_price: number };
+  }
+
+  const [showBulkPriceModal, setShowBulkPriceModal] = useState<boolean>(false);
+  const [showPriceReviewModal, setShowPriceReviewModal] = useState<boolean>(false);
+  const [priceFilterBrandId, setPriceFilterBrandId] = useState<string>('ALL');
+  const [priceFilterSeriesId, setPriceFilterSeriesId] = useState<string>('ALL');
+  const [priceFilterCategory, setPriceFilterCategory] = useState<string>('ALL');
+  const [priceFilterUnit, setPriceFilterUnit] = useState<string>('ALL');
+  const [commonCostInput, setCommonCostInput] = useState<string>('');
+  const [commonRetailInput, setCommonRetailInput] = useState<string>('');
+  const [bulkPriceSubmitting, setBulkPriceSubmitting] = useState<boolean>(false);
+  const [bulkPriceError, setBulkPriceError] = useState<string | null>(null);
+  const [bulkPriceRows, setBulkPriceRows] = useState<BulkPriceRowState[]>([]);
+
+  // Dependent Series options
+  const priceFilterSeriesOptions = useMemo(() => {
+    if (priceFilterBrandId === 'ALL') {
+      return allSeries;
+    }
+    return allSeries.filter((s) => s.brand_id === priceFilterBrandId);
+  }, [allSeries, priceFilterBrandId]);
+
+  // Dependent Category options
+  const priceFilterCategoryOptions = useMemo(() => {
+    const brandName = priceFilterBrandId !== 'ALL' ? brandsMap.get(priceFilterBrandId) : null;
+    const matching = items.filter((p) => {
+      if (priceFilterBrandId !== 'ALL') {
+        const matchesBrand = p.brand_id === priceFilterBrandId || (brandName && p.brand === brandName);
+        if (!matchesBrand) return false;
+      }
+      if (priceFilterSeriesId !== 'ALL') {
+        if (p.series_id !== priceFilterSeriesId) return false;
+      }
+      return true;
+    });
+    const cats = new Set(matching.map((p) => p.category).filter(Boolean) as string[]);
+    return Array.from(cats);
+  }, [items, priceFilterBrandId, priceFilterSeriesId, brandsMap]);
+
+  // Dependent Unit options
+  const priceFilterUnitOptions = useMemo(() => {
+    const brandName = priceFilterBrandId !== 'ALL' ? brandsMap.get(priceFilterBrandId) : null;
+    const matching = items.filter((p) => {
+      if (priceFilterBrandId !== 'ALL') {
+        const matchesBrand = p.brand_id === priceFilterBrandId || (brandName && p.brand === brandName);
+        if (!matchesBrand) return false;
+      }
+      if (priceFilterSeriesId !== 'ALL') {
+        if (p.series_id !== priceFilterSeriesId) return false;
+      }
+      if (priceFilterCategory !== 'ALL') {
+        if (p.category !== priceFilterCategory) return false;
+      }
+      return true;
+    });
+    const units = new Set(matching.map((p) => p.pack_size || p.unit).filter(Boolean) as string[]);
+    return Array.from(units);
+  }, [items, priceFilterBrandId, priceFilterSeriesId, priceFilterCategory, brandsMap]);
+
+  // Matched products based on dependent criteria
+  const matchedPriceItems = useMemo(() => {
+    const brandName = priceFilterBrandId !== 'ALL' ? brandsMap.get(priceFilterBrandId) : null;
+    return items.filter((p) => {
+      if (priceFilterBrandId !== 'ALL') {
+        const matchesBrand = p.brand_id === priceFilterBrandId || (brandName && p.brand === brandName);
+        if (!matchesBrand) return false;
+      }
+      if (priceFilterSeriesId !== 'ALL') {
+        if (p.series_id !== priceFilterSeriesId) return false;
+      }
+      if (priceFilterCategory !== 'ALL') {
+        if (p.category !== priceFilterCategory) return false;
+      }
+      if (priceFilterUnit !== 'ALL') {
+        const matchesUnit = p.unit === priceFilterUnit || p.pack_size === priceFilterUnit;
+        if (!matchesUnit) return false;
+      }
+      return true;
+    });
+  }, [items, priceFilterBrandId, priceFilterSeriesId, priceFilterCategory, priceFilterUnit, brandsMap]);
+
+  // Synchronize matching products to bulkPriceRows, preserving existing edits and statuses
+  useEffect(() => {
+    if (!showBulkPriceModal) return;
+    setBulkPriceRows((prevRows) => {
+      const prevMap = new Map(prevRows.map((r) => [r.item.id, r]));
+      return matchedPriceItems.map((item) => {
+        const existing = prevMap.get(item.id);
+        if (existing) {
+          return {
+            ...existing,
+            item,
+          };
+        }
+        return {
+          item,
+          costInput: commonCostInput.trim() !== '' ? commonCostInput.trim() : (item.cost_price ? String(item.cost_price) : ''),
+          retailInput: commonRetailInput.trim() !== '' ? commonRetailInput.trim() : (item.retail_price ? String(item.retail_price) : ''),
+          isCostOverride: false,
+          isRetailOverride: false,
+          expectedCost: Number(item.cost_price) || 0,
+          expectedRetail: Number(item.retail_price) || 0,
+          status: 'idle',
+        };
+      });
+    });
+  }, [showBulkPriceModal, matchedPriceItems]);
+
+  const handlePriceBrandChange = (newBrandId: string) => {
+    setPriceFilterBrandId(newBrandId);
+    setPriceFilterSeriesId('ALL');
+    setPriceFilterCategory('ALL');
+    setPriceFilterUnit('ALL');
+  };
+
+  const handlePriceSeriesChange = (newSeriesId: string) => {
+    setPriceFilterSeriesId(newSeriesId);
+    setPriceFilterCategory('ALL');
+    setPriceFilterUnit('ALL');
+  };
+
+  const handlePriceCategoryChange = (newCat: string) => {
+    setPriceFilterCategory(newCat);
+    setPriceFilterUnit('ALL');
+  };
+
+  const handleApplyCommonPrices = () => {
+    const trimmedCost = commonCostInput.trim();
+    const trimmedRetail = commonRetailInput.trim();
+
+    setBulkPriceRows((prev) =>
+      prev.map((row) => {
+        let updatedCost = row.costInput;
+        let updatedRetail = row.retailInput;
+
+        if (trimmedCost !== '' && !row.isCostOverride) {
+          updatedCost = trimmedCost;
+        }
+        if (trimmedRetail !== '' && !row.isRetailOverride) {
+          updatedRetail = trimmedRetail;
+        }
+
+        return {
+          ...row,
+          costInput: updatedCost,
+          retailInput: updatedRetail,
+          status: 'idle',
+        };
+      })
+    );
+  };
+
+  const handleResetAllOverrides = () => {
+    setBulkPriceRows((prev) =>
+      prev.map((row) => ({
+        ...row,
+        costInput: commonCostInput.trim() !== '' ? commonCostInput.trim() : (row.item.cost_price ? String(row.item.cost_price) : ''),
+        retailInput: commonRetailInput.trim() !== '' ? commonRetailInput.trim() : (row.item.retail_price ? String(row.item.retail_price) : ''),
+        isCostOverride: false,
+        isRetailOverride: false,
+        status: 'idle',
+      }))
+    );
+  };
+
+  const handleResetRowToCommon = (itemId: string) => {
+    setBulkPriceRows((prev) =>
+      prev.map((row) => {
+        if (row.item.id !== itemId) return row;
+        return {
+          ...row,
+          costInput: commonCostInput.trim() !== '' ? commonCostInput.trim() : (row.item.cost_price ? String(row.item.cost_price) : ''),
+          retailInput: commonRetailInput.trim() !== '' ? commonRetailInput.trim() : (row.item.retail_price ? String(row.item.retail_price) : ''),
+          isCostOverride: false,
+          isRetailOverride: false,
+          status: 'idle',
+          errorMessage: undefined,
+          failureType: undefined,
+          conflictedFields: undefined,
+          currentPrices: undefined,
+        };
+      })
+    );
+  };
+
+  const handleRowCostChange = (itemId: string, val: string) => {
+    setBulkPriceRows((prev) =>
+      prev.map((row) => {
+        if (row.item.id !== itemId) return row;
+        return {
+          ...row,
+          costInput: val,
+          isCostOverride: true,
+          status: 'idle',
+        };
+      })
+    );
+  };
+
+  const handleRowRetailChange = (itemId: string, val: string) => {
+    setBulkPriceRows((prev) =>
+      prev.map((row) => {
+        if (row.item.id !== itemId) return row;
+        return {
+          ...row,
+          retailInput: val,
+          isRetailOverride: true,
+          status: 'idle',
+        };
+      })
+    );
+  };
+
+  const handleAcceptConflictPrice = (itemId: string) => {
+    setBulkPriceRows((prev) =>
+      prev.map((row) => {
+        if (row.item.id !== itemId || !row.currentPrices) return row;
+        return {
+          ...row,
+          expectedCost: row.currentPrices.cost_price,
+          expectedRetail: row.currentPrices.retail_price,
+          costInput: String(row.currentPrices.cost_price),
+          retailInput: String(row.currentPrices.retail_price),
+          isCostOverride: false,
+          isRetailOverride: false,
+          status: 'idle',
+          errorMessage: undefined,
+          failureType: undefined,
+          conflictedFields: undefined,
+          currentPrices: undefined,
+        };
+      })
+    );
+  };
+
+  const handleForceProposedPrice = (itemId: string) => {
+    setBulkPriceRows((prev) =>
+      prev.map((row) => {
+        if (row.item.id !== itemId || !row.currentPrices) return row;
+        return {
+          ...row,
+          expectedCost: row.currentPrices.cost_price,
+          expectedRetail: row.currentPrices.retail_price,
+          status: 'idle',
+          errorMessage: undefined,
+          failureType: undefined,
+          conflictedFields: undefined,
+          currentPrices: undefined,
+        };
+      })
+    );
+  };
+
+  const toCents = (val: number | string | undefined | null): number | null => {
+    if (val === undefined || val === null || val === '') return null;
+    const num = Number(val);
+    if (!Number.isFinite(num) || isNaN(num)) return null;
+    return Math.round(num * 100);
+  };
+
+  const validatePriceField = (
+    val: string,
+    isCost: boolean
+  ): { valid: boolean; error?: string; cents: number | null } => {
+    const trimmed = val.trim();
+    if (trimmed === '') return { valid: true, cents: null };
+    const num = Number(trimmed);
+    if (!Number.isFinite(num) || isNaN(num)) {
+      return { valid: false, error: 'Must be a finite number', cents: null };
+    }
+    if (trimmed.includes('.') && trimmed.split('.')[1].length > 2) {
+      return { valid: false, error: 'Max 2 decimal places', cents: null };
+    }
+    if (isCost && num <= 0) {
+      return { valid: false, error: 'Cost must be > 0', cents: null };
+    }
+    if (!isCost && num < 0) {
+      return { valid: false, error: 'Retail cannot be negative', cents: null };
+    }
+    return { valid: true, cents: Math.round(num * 100) };
+  };
+
+  const rowsWithChanges = useMemo(() => {
+    return bulkPriceRows.map((row) => {
+      const costValidation = validatePriceField(row.costInput, true);
+      const retailValidation = validatePriceField(row.retailInput, false);
+
+      const hasInvalidCost = !costValidation.valid;
+      const hasInvalidRetail = !retailValidation.valid;
+
+      const costChanged =
+        costValidation.valid &&
+        costValidation.cents !== null &&
+        costValidation.cents !== toCents(row.expectedCost);
+
+      const retailChanged =
+        retailValidation.valid &&
+        retailValidation.cents !== null &&
+        retailValidation.cents !== toCents(row.expectedRetail);
+
+      const isChanged = costChanged || retailChanged;
+
+      const proposedCostNum =
+        costValidation.valid && costValidation.cents !== null
+          ? costValidation.cents / 100
+          : row.expectedCost;
+      const proposedRetailNum =
+        retailValidation.valid && retailValidation.cents !== null
+          ? retailValidation.cents / 100
+          : row.expectedRetail;
+
+      const marginWarning = proposedCostNum >= proposedRetailNum;
+
+      return {
+        row,
+        costValidation,
+        retailValidation,
+        costChanged,
+        retailChanged,
+        isChanged,
+        hasInvalidInput: hasInvalidCost || hasInvalidRetail,
+        marginWarning,
+        proposedCostNum,
+        proposedRetailNum,
+      };
+    });
+  }, [bulkPriceRows]);
+
+  const changedRows = useMemo(
+    () => rowsWithChanges.filter((r) => r.isChanged),
+    [rowsWithChanges]
+  );
+
+  const hasAnyInvalidInput = useMemo(
+    () => rowsWithChanges.some((r) => r.hasInvalidInput),
+    [rowsWithChanges]
+  );
+
+  const openBulkPriceModal = () => {
+    setPriceFilterBrandId('ALL');
+    setPriceFilterSeriesId('ALL');
+    setPriceFilterCategory('ALL');
+    setPriceFilterUnit('ALL');
+    setCommonCostInput('');
+    setCommonRetailInput('');
+    setBulkPriceError(null);
+    setShowPriceReviewModal(false);
+    setShowBulkPriceModal(true);
+  };
+
+  const handleOpenReview = () => {
+    setBulkPriceError(null);
+    if (hasAnyInvalidInput) {
+      setBulkPriceError('Please correct invalid price values before reviewing.');
+      return;
+    }
+    if (changedRows.length === 0) {
+      setBulkPriceError('No price changes detected. Modify at least one price to continue.');
+      return;
+    }
+    if (changedRows.length > 250) {
+      setBulkPriceError(`Batch size (${changedRows.length}) exceeds the maximum limit of 250 items. Please refine your criteria.`);
+      return;
+    }
+    setShowPriceReviewModal(true);
+  };
+
+  const handleSaveBulkPrices = async () => {
+    if (!tenantId) {
+      setBulkPriceError('Tenant ID missing.');
+      return;
+    }
+
+    setBulkPriceSubmitting(true);
+    setBulkPriceError(null);
+
+    try {
+      const updates = changedRows.map(({ row, costChanged, retailChanged }) => {
+        const payloadItem: any = { id: row.item.id };
+        if (costChanged) {
+          payloadItem.cost_price = Number(Number(row.costInput).toFixed(2));
+          payloadItem.expected_cost = row.expectedCost;
+        }
+        if (retailChanged) {
+          payloadItem.retail_price = Number(Number(row.retailInput).toFixed(2));
+          payloadItem.expected_retail = row.expectedRetail;
+        }
+        return payloadItem;
+      });
+
+      const res = await fetch('/api/items', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          items: updates,
+        }),
+      });
+
+      if (!res.ok && res.status >= 500) {
+        throw new Error(`Server returned error status ${res.status}. Pending edits have been preserved.`);
+      }
+
+      const data = await res.json();
+      if (!data.success && !Array.isArray(data.updated) && !Array.isArray(data.errors)) {
+        throw new Error(data.error || 'Failed to update prices. Pending edits preserved.');
+      }
+
+      const updatedList: any[] = data.updated || [];
+      const errorList: any[] = data.errors || [];
+      const updatedMap = new Map(updatedList.map((u) => [u.id, u]));
+      const errorMap = new Map(errorList.map((e) => [e.id, e]));
+
+      setBulkPriceRows((prev) =>
+        prev.map((row) => {
+          if (updatedMap.has(row.item.id)) {
+            const u = updatedMap.get(row.item.id);
+            const newExpectedCost = u.cost_price !== undefined ? Number(u.cost_price) : row.expectedCost;
+            const newExpectedRetail = u.retail_price !== undefined ? Number(u.retail_price) : row.expectedRetail;
+            return {
+              ...row,
+              expectedCost: newExpectedCost,
+              expectedRetail: newExpectedRetail,
+              costInput: String(newExpectedCost),
+              retailInput: String(newExpectedRetail),
+              isCostOverride: false,
+              isRetailOverride: false,
+              status: 'success',
+              errorMessage: undefined,
+              failureType: undefined,
+              conflictedFields: undefined,
+              currentPrices: undefined,
+            };
+          }
+          if (errorMap.has(row.item.id)) {
+            const err = errorMap.get(row.item.id);
+            return {
+              ...row,
+              status: err.failureType === 'STALE_PRICE_CONFLICT' ? 'conflict' : 'error',
+              errorMessage: err.error,
+              failureType: err.failureType,
+              conflictedFields: err.conflictedFields,
+              currentPrices: err.currentPrices,
+            };
+          }
+          return row;
+        })
+      );
+
+      setShowPriceReviewModal(false);
+
+      if (updatedList.length > 0) {
+        onStockUpdated?.();
+      }
+
+      if (errorList.length === 0) {
+        showToast(`Successfully updated prices for ${updatedList.length} products.`);
+      } else if (updatedList.length > 0) {
+        showToast(`Updated ${updatedList.length} products. ${errorList.length} products had conflicts or errors.`);
+        setBulkPriceError(`${errorList.length} product(s) could not be updated due to concurrency conflicts or errors. Review the table below.`);
+      } else {
+        setBulkPriceError(`Failed to update ${errorList.length} product(s). Concurrency conflicts detected; review below.`);
+      }
+    } catch (err: any) {
+      setBulkPriceError(err.message || 'Ambiguous network error: updates could not be confirmed. Pending edits preserved.');
+    } finally {
+      setBulkPriceSubmitting(false);
+    }
+  };
+
   // Inventory stats calculations (Matching painterp top row)
   const totalSKUs = items.length;
   const totalStockUnits = items.reduce((acc, p) => acc + (Number(p.stock_qty) || 0), 0);
@@ -286,7 +779,7 @@ export default function StockInventory({
     0
   );
 
-  // Filter products
+  // Filter products: Universal Inventory Search (7 fields with whitespace trimming & case-insensitivity)
   const filteredProducts = items.filter((p) => {
     if (selectedCategory !== 'All' && p.category !== selectedCategory) return false;
 
@@ -295,13 +788,24 @@ export default function StockInventory({
     if (stockStatus === 'in_stock' && p.stock_qty <= minAlert) return false;
     if (stockStatus === 'out_of_stock' && p.stock_qty > 0) return false;
 
-    if (tableSearch.trim() !== '') {
-      const q = tableSearch.toLowerCase();
+    const trimmedQuery = tableSearch.trim().toLowerCase();
+    if (trimmedQuery !== '') {
+      const brandStr = (p.brand || (p.brand_id ? brandsMap.get(p.brand_id) : '') || '').toLowerCase();
+      const seriesStr = (p.series_name || (p.series_id ? seriesMap.get(p.series_id) : '') || '').toLowerCase();
+      const packUnitStr = `${p.pack_size || ''} ${p.unit || ''}`.toLowerCase();
+      const nameStr = (p.name || '').toLowerCase();
+      const codeStr = (p.code || '').toLowerCase();
+      const shadeStr = (p.shade_code || '').toLowerCase();
+      const categoryStr = (p.category || '').toLowerCase();
+
       return (
-        p.name.toLowerCase().includes(q) ||
-        p.code.toLowerCase().includes(q) ||
-        (p.shade_code && p.shade_code.toLowerCase().includes(q)) ||
-        (p.category && p.category.toLowerCase().includes(q))
+        nameStr.includes(trimmedQuery) ||
+        codeStr.includes(trimmedQuery) ||
+        shadeStr.includes(trimmedQuery) ||
+        brandStr.includes(trimmedQuery) ||
+        seriesStr.includes(trimmedQuery) ||
+        categoryStr.includes(trimmedQuery) ||
+        packUnitStr.includes(trimmedQuery)
       );
     }
     return true;
@@ -1094,6 +1598,17 @@ export default function StockInventory({
 
               <button
                 type="button"
+                onClick={openBulkPriceModal}
+                className="inv-btn-secondary"
+                title="Bulk update cost and retail prices with concurrency safety"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#ECFDF5', borderColor: '#A7F3D0', color: '#047857', fontWeight: 600 }}
+              >
+                <DollarSign style={{ width: 14, height: 14, color: '#059669' }} />
+                Bulk Edit Prices
+              </button>
+
+              <button
+                type="button"
                 onClick={openBulkModal}
                 className="inv-btn-secondary"
                 title="Add multiple products of same brand in one go"
@@ -1148,8 +1663,37 @@ export default function StockInventory({
               <tbody>
                 {sortedProducts.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ padding: '3.5rem 1rem', textAlign: 'center', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace', fontSize: '12px' }}>
-                      No products found. Click &quot;+ Add Product&quot; above.
+                    <td colSpan={8} style={{ padding: '3.5rem 1rem', textAlign: 'center', color: '#64748B', fontSize: '12px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                        <span>
+                          {selectedCategory !== 'All'
+                            ? `No products found in "${selectedCategory}" matching your criteria.`
+                            : 'No products found. Click "+ Add Product" above.'}
+                        </span>
+                        {selectedCategory !== 'All' && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCategory('All')}
+                            className="inv-btn-secondary"
+                            style={{
+                              marginTop: '4px',
+                              padding: '6px 14px',
+                              fontSize: '12px',
+                              color: '#2563EB',
+                              borderColor: '#BFDBFE',
+                              background: '#EFF6FF',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              cursor: 'pointer',
+                              fontWeight: 600,
+                            }}
+                          >
+                            <Filter style={{ width: 13, height: 13 }} />
+                            Search across All Categories
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ) : (
@@ -2166,6 +2710,611 @@ export default function StockInventory({
               >
                 <Boxes style={{ width: 16, height: 16 }} />
                 {bulkSubmitting ? 'Saving all products...' : `Save All ${bulkRows.filter(r => r.shadeName.trim() && r.code.trim()).length > 0 ? `(${bulkRows.filter(r => r.shadeName.trim() && r.code.trim()).length} products)` : ''} to Catalog`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ── MODAL: BULK PRICE EDITOR ── */}
+      {showBulkPriceModal && (
+        <div className="pos-modal-overlay" style={{ alignItems: 'flex-start', paddingTop: '24px' }}>
+          <div className="pos-modal-card" style={{ maxWidth: '1080px', width: '96vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
+            {/* Header */}
+            <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #E2E8F0', background: '#F0FDF4', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <DollarSign style={{ width: 20, height: 20, color: '#059669' }} />
+                <div>
+                  <h3 style={{ fontWeight: 700, fontSize: '15px', color: '#065F46' }}>Bulk Price Editor</h3>
+                  <p style={{ fontSize: '11px', color: '#047857', marginTop: '1px' }}>
+                    Update cost & retail prices with strict optimistic concurrency control (OCC)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowBulkPriceModal(false);
+                  setShowPriceReviewModal(false);
+                }}
+                style={{ background: 'none', border: 'none', color: '#94A3B8', fontSize: '18px', fontWeight: 700, cursor: 'pointer', lineHeight: 1 }}
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ overflowY: 'auto', flex: 1, padding: '1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {/* Error banner if any */}
+              {bulkPriceError && (
+                <div style={{ padding: '10px 14px', background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: '8px', color: '#991B1B', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <AlertTriangle style={{ width: 16, height: 16, flexShrink: 0, color: '#DC2626' }} />
+                  <span>{bulkPriceError}</span>
+                </div>
+              )}
+
+              {/* ── Section 1: Dependent Selection Criteria ── */}
+              <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#475569' }}>
+                    1. Filter Target Products (Brand → Series → Category → Pack Size)
+                  </span>
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#2563EB', background: '#EFF6FF', padding: '2px 8px', borderRadius: '4px' }}>
+                    {matchedPriceItems.length} Product(s) Matched
+                  </span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
+                  {/* Brand */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#64748B', marginBottom: '4px' }}>
+                      Brand
+                    </label>
+                    <select
+                      value={priceFilterBrandId}
+                      onChange={(e) => handlePriceBrandChange(e.target.value)}
+                      className="pos-text-input"
+                      style={{ fontSize: '12px', padding: '6px 8px' }}
+                    >
+                      <option value="ALL">All Brands</option>
+                      {brands.map((b) => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Series */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#64748B', marginBottom: '4px' }}>
+                      Series
+                    </label>
+                    <select
+                      value={priceFilterSeriesId}
+                      onChange={(e) => handlePriceSeriesChange(e.target.value)}
+                      className="pos-text-input"
+                      style={{ fontSize: '12px', padding: '6px 8px' }}
+                    >
+                      <option value="ALL">All Series</option>
+                      {priceFilterSeriesOptions.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Category */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#64748B', marginBottom: '4px' }}>
+                      Category
+                    </label>
+                    <select
+                      value={priceFilterCategory}
+                      onChange={(e) => handlePriceCategoryChange(e.target.value)}
+                      className="pos-text-input"
+                      style={{ fontSize: '12px', padding: '6px 8px' }}
+                    >
+                      <option value="ALL">All Categories</option>
+                      {priceFilterCategoryOptions.map((cat) => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Pack Size / Unit */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#64748B', marginBottom: '4px' }}>
+                      Pack Size / Unit
+                    </label>
+                    <select
+                      value={priceFilterUnit}
+                      onChange={(e) => setPriceFilterUnit(e.target.value)}
+                      className="pos-text-input"
+                      style={{ fontSize: '12px', padding: '6px 8px' }}
+                    >
+                      <option value="ALL">All Pack Sizes</option>
+                      {priceFilterUnitOptions.map((u) => (
+                        <option key={u} value={u}>{u}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Section 2: Common Price Inputs ── */}
+              <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '8px', padding: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#065F46' }}>
+                    2. Common Pricing Baseline (Applies to non-overridden rows)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleResetAllOverrides}
+                    style={{ fontSize: '11px', color: '#047857', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', fontWeight: 600 }}
+                  >
+                    Reset All Row Overrides
+                  </button>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '10px', alignItems: 'flex-end' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#065F46', marginBottom: '4px' }}>
+                      Common Cost Price (Rs.)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      placeholder="e.g. 1500"
+                      value={commonCostInput}
+                      onChange={(e) => setCommonCostInput(e.target.value)}
+                      className="pos-text-input"
+                      style={{ background: '#ffffff', borderColor: '#86EFAC', fontSize: '12px', fontFamily: 'JetBrains Mono, monospace' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#065F46', marginBottom: '4px' }}>
+                      Common Retail Price (Rs.)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="e.g. 1850"
+                      value={commonRetailInput}
+                      onChange={(e) => setCommonRetailInput(e.target.value)}
+                      className="pos-text-input"
+                      style={{ background: '#ffffff', borderColor: '#86EFAC', fontSize: '12px', fontFamily: 'JetBrains Mono, monospace' }}
+                    />
+                  </div>
+
+                  <div>
+                    <button
+                      type="button"
+                      onClick={handleApplyCommonPrices}
+                      style={{
+                        padding: '8px 16px',
+                        background: '#059669',
+                        color: '#ffffff',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        borderRadius: '6px',
+                        border: 'none',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      Apply Common Prices
+                    </button>
+                  </div>
+                </div>
+                <p style={{ fontSize: '10px', color: '#047857', marginTop: '6px' }}>
+                  Note: Values applied here will only update rows that haven&apos;t been individually customized. Overrides have amber borders and take precedence.
+                </p>
+              </div>
+
+              {/* ── Section 3: Matching Products Table with Overrides & OCC ── */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#475569' }}>
+                    3. Matched Products & Per-Row Overrides
+                  </span>
+                  <span style={{ fontSize: '11px', color: '#64748B' }}>
+                    {changedRows.length} item(s) pending price change
+                  </span>
+                </div>
+
+                <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden' }}>
+                  <div style={{ maxHeight: '38vh', overflowY: 'auto' }}>
+                    <table className="inv-data-table" style={{ width: '100%', tableLayout: 'fixed', fontSize: '12px' }}>
+                      <thead>
+                        <tr>
+                          <th style={{ width: '120px' }}>SKU / Code</th>
+                          <th>Product Name & Shade</th>
+                          <th style={{ width: '110px' }}>Unit / Pack</th>
+                          <th style={{ width: '120px', textAlign: 'right' }}>Current Baseline</th>
+                          <th style={{ width: '140px', textAlign: 'right' }}>Proposed Cost</th>
+                          <th style={{ width: '140px', textAlign: 'right' }}>Proposed Retail</th>
+                          <th style={{ width: '90px', textAlign: 'center' }}>Margin</th>
+                          <th style={{ width: '110px', textAlign: 'center' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bulkPriceRows.length === 0 ? (
+                          <tr>
+                            <td colSpan={8} style={{ padding: '2rem', textAlign: 'center', color: '#94A3B8' }}>
+                              No products match the selected criteria.
+                            </td>
+                          </tr>
+                        ) : (
+                          rowsWithChanges.map(({ row, costValidation, retailValidation, isChanged, marginWarning, proposedCostNum, proposedRetailNum }) => {
+                            const isCostOverridden = row.isCostOverride;
+                            const isRetailOverridden = row.isRetailOverride;
+
+                            return (
+                              <React.Fragment key={row.item.id}>
+                                <tr style={{ background: row.status === 'conflict' ? '#FEF2F2' : row.status === 'success' ? '#F0FDF4' : isChanged ? '#F8FAFC' : 'transparent' }}>
+                                  <td style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#475569' }}>
+                                    {row.item.code}
+                                  </td>
+                                  <td>
+                                    <div style={{ fontWeight: 600, color: '#0F172A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                      {row.item.name}
+                                    </div>
+                                    {row.item.shade_code && row.item.shade_code !== '—' && (
+                                      <span style={{ fontSize: '10px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
+                                        Shade: {row.item.shade_code}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td style={{ color: '#475569' }}>
+                                    {row.item.pack_size || row.item.unit || 'Can'}
+                                  </td>
+                                  <td style={{ textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', fontSize: '11px', color: '#64748B' }}>
+                                    <div>C: Rs. {Number(row.expectedCost).toLocaleString()}</div>
+                                    <div>R: Rs. {Number(row.expectedRetail).toLocaleString()}</div>
+                                  </td>
+                                  <td style={{ textAlign: 'right' }}>
+                                    <div style={{ position: 'relative' }}>
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0.01"
+                                        value={row.costInput}
+                                        onChange={(e) => handleRowCostChange(row.item.id, e.target.value)}
+                                        style={{
+                                          width: '100%',
+                                          padding: '4px 6px',
+                                          fontSize: '11px',
+                                          fontFamily: 'JetBrains Mono, monospace',
+                                          textAlign: 'right',
+                                          borderRadius: '4px',
+                                          border: !costValidation.valid
+                                            ? '1px solid #EF4444'
+                                            : isCostOverridden
+                                            ? '1px solid #F59E0B'
+                                            : '1px solid #CBD5E1',
+                                          background: !costValidation.valid
+                                            ? '#FEF2F2'
+                                            : isCostOverridden
+                                            ? '#FFFBEB'
+                                            : '#ffffff',
+                                          outline: 'none',
+                                        }}
+                                      />
+                                      {isCostOverridden && (
+                                        <span style={{ position: 'absolute', left: '4px', top: '3px', fontSize: '8px', color: '#B45309', fontWeight: 700, pointerEvents: 'none' }}>
+                                          OVR
+                                        </span>
+                                      )}
+                                    </div>
+                                    {!costValidation.valid && (
+                                      <div style={{ fontSize: '9px', color: '#DC2626', marginTop: '1px', textAlign: 'right' }}>
+                                        {costValidation.error}
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td style={{ textAlign: 'right' }}>
+                                    <div style={{ position: 'relative' }}>
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        value={row.retailInput}
+                                        onChange={(e) => handleRowRetailChange(row.item.id, e.target.value)}
+                                        style={{
+                                          width: '100%',
+                                          padding: '4px 6px',
+                                          fontSize: '11px',
+                                          fontFamily: 'JetBrains Mono, monospace',
+                                          textAlign: 'right',
+                                          borderRadius: '4px',
+                                          border: !retailValidation.valid
+                                            ? '1px solid #EF4444'
+                                            : isRetailOverridden
+                                            ? '1px solid #F59E0B'
+                                            : '1px solid #CBD5E1',
+                                          background: !retailValidation.valid
+                                            ? '#FEF2F2'
+                                            : isRetailOverridden
+                                            ? '#FFFBEB'
+                                            : '#ffffff',
+                                          outline: 'none',
+                                        }}
+                                      />
+                                      {isRetailOverridden && (
+                                        <span style={{ position: 'absolute', left: '4px', top: '3px', fontSize: '8px', color: '#B45309', fontWeight: 700, pointerEvents: 'none' }}>
+                                          OVR
+                                        </span>
+                                      )}
+                                    </div>
+                                    {!retailValidation.valid && (
+                                      <div style={{ fontSize: '9px', color: '#DC2626', marginTop: '1px', textAlign: 'right' }}>
+                                        {retailValidation.error}
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    {marginWarning ? (
+                                      <span
+                                        style={{ fontSize: '10px', background: '#FEF3C7', color: '#B45309', padding: '2px 4px', borderRadius: '3px', fontWeight: 700, cursor: 'help' }}
+                                        title={`Warning: Proposed Cost (Rs. ${proposedCostNum}) >= Retail (Rs. ${proposedRetailNum}). Saving is permitted.`}
+                                      >
+                                        ≤0
+                                      </span>
+                                    ) : (
+                                      <span style={{ fontSize: '10px', color: '#059669', fontWeight: 700, fontFamily: 'JetBrains Mono, monospace' }}>
+                                        +{(proposedRetailNum - proposedCostNum).toFixed(0)}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                                      {(isCostOverridden || isRetailOverridden) && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleResetRowToCommon(row.item.id)}
+                                          style={{ padding: '3px 6px', background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '4px', color: '#475569', fontSize: '10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '3px' }}
+                                          title="Reset overrides back to common input"
+                                        >
+                                          <RotateCcw style={{ width: 10, height: 10 }} />
+                                          Reset
+                                        </button>
+                                      )}
+                                      {row.status === 'success' && (
+                                        <span style={{ color: '#059669', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '2px', fontWeight: 600 }}>
+                                          <Check style={{ width: 12, height: 12 }} /> Saved
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+
+                                {/* Concurrency Conflict or Error Resolution Banner */}
+                                {row.status === 'conflict' && (
+                                  <tr style={{ background: '#FEF2F2' }}>
+                                    <td colSpan={8} style={{ padding: '8px 12px', borderTop: '1px dashed #FCA5A5', borderBottom: '1px solid #FECACA' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#991B1B', fontSize: '11px' }}>
+                                          <AlertTriangle style={{ width: 14, height: 14, color: '#DC2626' }} />
+                                          <span>
+                                            <strong>Concurrency Conflict:</strong> Another user updated prices on the server.
+                                            {row.currentPrices && (
+                                              <span> Latest server prices: Cost: Rs. {row.currentPrices.cost_price}, Retail: Rs. {row.currentPrices.retail_price}.</span>
+                                            )}
+                                          </span>
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleAcceptConflictPrice(row.item.id)}
+                                            style={{
+                                              padding: '3px 8px',
+                                              background: '#FEE2E2',
+                                              border: '1px solid #FCA5A5',
+                                              borderRadius: '4px',
+                                              color: '#991B1B',
+                                              fontSize: '11px',
+                                              fontWeight: 600,
+                                              cursor: 'pointer',
+                                            }}
+                                          >
+                                            Accept Latest Prices
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleForceProposedPrice(row.item.id)}
+                                            style={{
+                                              padding: '3px 8px',
+                                              background: '#DC2626',
+                                              border: 'none',
+                                              borderRadius: '4px',
+                                              color: '#ffffff',
+                                              fontSize: '11px',
+                                              fontWeight: 700,
+                                              cursor: 'pointer',
+                                            }}
+                                          >
+                                            Override with My Proposed Price
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+
+                                {row.status === 'error' && (
+                                  <tr style={{ background: '#FEF2F2' }}>
+                                    <td colSpan={8} style={{ padding: '6px 12px', color: '#991B1B', fontSize: '11px' }}>
+                                      <strong>Error:</strong> {row.errorMessage || 'Failed to update this product.'}
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '1rem 1.25rem', borderTop: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#F8FAFC', flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowBulkPriceModal(false);
+                  setShowPriceReviewModal(false);
+                }}
+                style={{ padding: '8px 16px', background: '#F1F5F9', color: '#475569', fontWeight: 700, fontSize: '12px', borderRadius: '6px', border: '1px solid #CBD5E1', cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleOpenReview}
+                disabled={changedRows.length === 0 || hasAnyInvalidInput || bulkPriceSubmitting}
+                style={{
+                  padding: '9px 20px',
+                  background: changedRows.length === 0 || hasAnyInvalidInput || bulkPriceSubmitting ? '#94A3B8' : '#059669',
+                  color: '#ffffff',
+                  fontWeight: 700,
+                  fontSize: '13px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  cursor: changedRows.length === 0 || hasAnyInvalidInput || bulkPriceSubmitting ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <span>Review & Save Changes</span>
+                <span style={{ background: 'rgba(255,255,255,0.25)', padding: '1px 6px', borderRadius: '4px', fontSize: '11px' }}>
+                  {changedRows.length}
+                </span>
+                <ArrowRight style={{ width: 14, height: 14 }} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: REVIEW BEFORE SAVE DRAWER ── */}
+      {showPriceReviewModal && (
+        <div className="pos-modal-overlay" style={{ alignItems: 'center', zIndex: 1100 }}>
+          <div className="pos-modal-card" style={{ maxWidth: '780px', width: '92vw', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #E2E8F0', background: '#F8FAFC', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <h3 style={{ fontWeight: 700, fontSize: '14px', color: '#0F172A' }}>Review Price Changes</h3>
+                <p style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
+                  Please confirm the {changedRows.length} product price update(s) before applying to database.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPriceReviewModal(false)}
+                style={{ background: 'none', border: 'none', color: '#94A3B8', fontSize: '16px', fontWeight: 700, cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ overflowY: 'auto', flex: 1, padding: '1rem' }}>
+              <table className="inv-data-table" style={{ width: '100%', tableLayout: 'fixed', fontSize: '12px' }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: '110px' }}>SKU</th>
+                    <th>Product</th>
+                    <th style={{ textAlign: 'right' }}>Cost Change</th>
+                    <th style={{ textAlign: 'right' }}>Retail Change</th>
+                    <th style={{ width: '80px', textAlign: 'center' }}>Margin</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {changedRows.map(({ row, costChanged, retailChanged, marginWarning, proposedCostNum, proposedRetailNum }) => (
+                    <tr key={row.item.id}>
+                      <td style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#475569' }}>
+                        {row.item.code}
+                      </td>
+                      <td style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontWeight: 600, color: '#0F172A' }}>{row.item.name}</span>
+                        {row.item.shade_code && row.item.shade_code !== '—' && (
+                          <span style={{ color: '#64748B', fontSize: '11px', marginLeft: '6px' }}>
+                            ({row.item.shade_code})
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', fontSize: '11px' }}>
+                        {costChanged ? (
+                          <span>
+                            <span style={{ color: '#94A3B8', textDecoration: 'line-through' }}>Rs. {Number(row.expectedCost).toLocaleString()}</span>
+                            {' → '}
+                            <strong style={{ color: '#0F172A' }}>Rs. {Number(row.costInput).toLocaleString()}</strong>
+                          </span>
+                        ) : (
+                          <span style={{ color: '#94A3B8' }}>Unchanged</span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', fontSize: '11px' }}>
+                        {retailChanged ? (
+                          <span>
+                            <span style={{ color: '#94A3B8', textDecoration: 'line-through' }}>Rs. {Number(row.expectedRetail).toLocaleString()}</span>
+                            {' → '}
+                            <strong style={{ color: '#0F172A' }}>Rs. {Number(row.retailInput).toLocaleString()}</strong>
+                          </span>
+                        ) : (
+                          <span style={{ color: '#94A3B8' }}>Unchanged</span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        {marginWarning ? (
+                          <span style={{ fontSize: '10px', background: '#FEF3C7', color: '#B45309', padding: '2px 4px', borderRadius: '3px', fontWeight: 700 }}>
+                            ≤0
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: '10px', color: '#059669', fontWeight: 700, fontFamily: 'JetBrains Mono, monospace' }}>
+                            +{(proposedRetailNum - proposedCostNum).toFixed(0)}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ padding: '1rem 1.25rem', borderTop: '1px solid #E2E8F0', display: 'flex', gap: '8px', background: '#F8FAFC' }}>
+              <button
+                type="button"
+                onClick={() => setShowPriceReviewModal(false)}
+                style={{ flex: 1, padding: '10px', background: '#F1F5F9', color: '#334155', fontWeight: 700, fontSize: '12px', borderRadius: '6px', border: '1px solid #CBD5E1', cursor: 'pointer' }}
+              >
+                Back to Edit
+              </button>
+              <button
+                type="button"
+                disabled={bulkPriceSubmitting}
+                onClick={handleSaveBulkPrices}
+                style={{
+                  flex: 2,
+                  padding: '10px',
+                  background: '#059669',
+                  color: '#ffffff',
+                  fontWeight: 700,
+                  fontSize: '13px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  cursor: bulkPriceSubmitting ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  opacity: bulkPriceSubmitting ? 0.7 : 1,
+                }}
+              >
+                <CheckCircle2 style={{ width: 16, height: 16 }} />
+                <span>{bulkPriceSubmitting ? 'Updating Database...' : `Confirm & Save ${changedRows.length} Product Price(s)`}</span>
               </button>
             </div>
           </div>
