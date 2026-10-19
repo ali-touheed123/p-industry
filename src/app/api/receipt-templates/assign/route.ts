@@ -3,6 +3,14 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { DEFAULT_TEMPLATE_JSON } from '@/types/receipt';
 import { requireDevAuth, requireTenantAuth } from '@/lib/session';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+const NO_CACHE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+  'Pragma': 'no-cache',
+};
+
 // GET: Fetch assignment for single tenant or all tenants
 export async function GET(req: NextRequest) {
   try {
@@ -13,7 +21,7 @@ export async function GET(req: NextRequest) {
     if (tenant_id) {
       const auth = await requireTenantAuth(req, tenant_id);
       if (!auth.authorized) {
-        return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+        return NextResponse.json({ success: false, error: auth.error }, { status: auth.status, headers: NO_CACHE_HEADERS });
       }
 
       const { data: assignment, error: assignErr } = await supabaseAdmin
@@ -27,7 +35,7 @@ export async function GET(req: NextRequest) {
           success: true,
           is_custom: true,
           template: assignment.receipt_templates,
-        });
+        }, { headers: NO_CACHE_HEADERS });
       }
 
       // Fallback to platform default template
@@ -43,7 +51,7 @@ export async function GET(req: NextRequest) {
           success: true,
           is_custom: false,
           template: defaultTemplate,
-        });
+        }, { headers: NO_CACHE_HEADERS });
       }
 
       // If even default is not found, fallback to first non-deleted or static default
@@ -65,13 +73,13 @@ export async function GET(req: NextRequest) {
           is_default: true,
           is_deleted: false,
         },
-      });
+      }, { headers: NO_CACHE_HEADERS });
     }
 
     // 2. Fetch all tenants with their assigned template (for Dev Panel Assignment table)
     const devAuth = await requireDevAuth(req);
     if (!devAuth.authorized) {
-      return NextResponse.json({ success: false, error: devAuth.error }, { status: devAuth.status });
+      return NextResponse.json({ success: false, error: devAuth.error }, { status: devAuth.status, headers: NO_CACHE_HEADERS });
     }
 
     const { data: tenants, error: tenantErr } = await supabaseAdmin
@@ -106,10 +114,10 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    return NextResponse.json({ success: true, assignments: result });
+    return NextResponse.json({ success: true, assignments: result }, { headers: NO_CACHE_HEADERS });
   } catch (err: any) {
     console.error('Error fetching receipt template assignments:', err);
-    return NextResponse.json({ success: false, error: err.message || 'Failed to fetch assignments' }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message || 'Failed to fetch assignments' }, { status: 500, headers: NO_CACHE_HEADERS });
   }
 }
 
@@ -118,39 +126,54 @@ export async function POST(req: NextRequest) {
   try {
     const auth = await requireDevAuth(req);
     if (!auth.authorized) {
-      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status, headers: NO_CACHE_HEADERS });
     }
 
     const body = await req.json();
     const { tenant_id, template_id } = body;
 
     if (!tenant_id) {
-      return NextResponse.json({ success: false, error: 'tenant_id is required' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'tenant_id is required' }, { status: 400, headers: NO_CACHE_HEADERS });
     }
 
-    // If template_id is null or empty string, remove override (revert to default)
+    // If template_id is null or empty string, remove override (revert to dynamic default)
     if (!template_id) {
       await supabaseAdmin
         .from('tenant_receipt_template')
         .delete()
         .eq('tenant_id', tenant_id);
 
-      return NextResponse.json({ success: true, message: 'Reverted to platform default template' });
+      return NextResponse.json({ success: true, is_custom: false, message: 'Reverted to platform default template' }, { headers: NO_CACHE_HEADERS });
     }
 
     // Verify template exists and not deleted
     const { data: tmpl, error: tmplErr } = await supabaseAdmin
       .from('receipt_templates')
-      .select('id')
+      .select('id, is_default')
       .eq('id', template_id)
       .eq('is_deleted', false)
       .single();
 
     if (tmplErr || !tmpl) {
-      return NextResponse.json({ success: false, error: 'Invalid or deleted template' }, { status: 404 });
+      return NextResponse.json({ success: false, error: 'Invalid or deleted template' }, { status: 404, headers: NO_CACHE_HEADERS });
     }
 
-    // Upsert assignment
+    // Rule D & Invariant: If assigning the default template, do not pin tenant to a static UUID.
+    // Delete the assignment row so the branch dynamically inherits the platform default and future changes.
+    if (tmpl.is_default) {
+      await supabaseAdmin
+        .from('tenant_receipt_template')
+        .delete()
+        .eq('tenant_id', tenant_id);
+
+      return NextResponse.json({
+        success: true,
+        is_custom: false,
+        message: 'Assigned to dynamic platform default (unpinned)',
+      }, { headers: NO_CACHE_HEADERS });
+    }
+
+    // Upsert assignment for custom template
     const { data, error } = await supabaseAdmin
       .from('tenant_receipt_template')
       .upsert({ tenant_id, template_id }, { onConflict: 'tenant_id' })
@@ -159,10 +182,10 @@ export async function POST(req: NextRequest) {
 
     if (error) throw error;
 
-    return NextResponse.json({ success: true, assignment: data });
+    return NextResponse.json({ success: true, is_custom: true, assignment: data }, { headers: NO_CACHE_HEADERS });
   } catch (err: any) {
     console.error('Error assigning receipt template:', err);
-    return NextResponse.json({ success: false, error: err.message || 'Failed to assign template' }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message || 'Failed to assign template' }, { status: 500, headers: NO_CACHE_HEADERS });
   }
 }
 
@@ -171,14 +194,14 @@ export async function DELETE(req: NextRequest) {
   try {
     const auth = await requireDevAuth(req);
     if (!auth.authorized) {
-      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status, headers: NO_CACHE_HEADERS });
     }
 
     const { searchParams } = new URL(req.url);
     const tenant_id = searchParams.get('tenant_id');
 
     if (!tenant_id) {
-      return NextResponse.json({ success: false, error: 'tenant_id is required' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'tenant_id is required' }, { status: 400, headers: NO_CACHE_HEADERS });
     }
 
     const { error } = await supabaseAdmin
@@ -188,9 +211,9 @@ export async function DELETE(req: NextRequest) {
 
     if (error) throw error;
 
-    return NextResponse.json({ success: true, message: 'Reverted to platform default template' });
+    return NextResponse.json({ success: true, message: 'Reverted to platform default template' }, { headers: NO_CACHE_HEADERS });
   } catch (err: any) {
     console.error('Error removing assignment:', err);
-    return NextResponse.json({ success: false, error: err.message || 'Failed to remove assignment' }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message || 'Failed to remove assignment' }, { status: 500, headers: NO_CACHE_HEADERS });
   }
 }

@@ -190,6 +190,8 @@ export default function PosBilling({
 
   // Assigned receipt template for this branch (DEV-07)
   const [assignedTemplate, setAssignedTemplate] = useState<ReceiptTemplate | null>(null);
+  const assignedTemplateRef = useRef<ReceiptTemplate | null>(assignedTemplate);
+  assignedTemplateRef.current = assignedTemplate;
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const prevLineItemsCountRef = useRef<number>(0);
@@ -234,21 +236,95 @@ export default function PosBilling({
     fetchClients();
   }, [tenantId]);
 
-  // Fetch assigned receipt template for this tenant on mount (DEV-07)
+  // Silent background refresh of assigned receipt template (focus, visibility, 45s interval)
   useEffect(() => {
     if (!tenantId) return;
-    const fetchTemplate = async () => {
+
+    let isMounted = true;
+    let inFlight = false;
+    let currentController: AbortController | null = null;
+
+    const performTemplateRefresh = async () => {
+      // Prevent overlapping refresh calls within the active effect lifecycle
+      if (inFlight) return;
+      // Do not poll when document is hidden
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+
+      inFlight = true;
+      const controller = new AbortController();
+      currentController = controller;
+
       try {
-        const res = await fetch(`/api/receipt-templates/assign?tenant_id=${tenantId}`);
-        const data = await res.json();
-        if (data.success && data.template) {
-          setAssignedTemplate(data.template);
+        const res = await fetch(`/api/receipt-templates/assign?tenant_id=${tenantId}`, {
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+            'Pragma': 'no-cache',
+          },
+          signal: controller.signal,
+        });
+
+        if (!res.ok) {
+          // Preserve last valid template and active billing state
+          return;
         }
-      } catch (err) {
-        console.error('Failed to load receipt template for tenant:', err);
+
+        const data = await res.json();
+        if (isMounted && data.success && data.template) {
+          const current = assignedTemplateRef.current;
+          const incoming = data.template as ReceiptTemplate;
+
+          // Compare print-affecting fields before replacing template in memory
+          const isSame =
+            current &&
+            current.id === incoming.id &&
+            current.paper_size === incoming.paper_size &&
+            JSON.stringify(current.template_json) === JSON.stringify(incoming.template_json);
+
+          if (!isSame) {
+            assignedTemplateRef.current = incoming;
+            setAssignedTemplate(incoming);
+          }
+        }
+      } catch (err: any) {
+        // Silent failure: preserve last valid template, active cart, and all billing state
+        if (err.name !== 'AbortError') {
+          console.debug('[PosBilling] Background template refresh skipped:', err.message);
+        }
+      } finally {
+        inFlight = false;
       }
     };
-    fetchTemplate();
+
+    // Initial fetch on mount
+    performTemplateRefresh();
+
+    // Window focus and visibility listeners
+    const handleFocus = () => {
+      performTemplateRefresh();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        performTemplateRefresh();
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // 45-second polling interval while mounted
+    const intervalId = setInterval(performTemplateRefresh, 45000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (currentController) {
+        currentController.abort();
+      }
+    };
   }, [tenantId]);
 
 

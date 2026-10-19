@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Store, Check, RefreshCw, Layers, ShieldCheck, Printer, ArrowRight } from 'lucide-react';
+import { Store, Check, RefreshCw, Layers, ShieldCheck, Printer, ArrowRight, Sliders } from 'lucide-react';
 import { ReceiptTemplate } from '@/types/receipt';
 
 interface TenantAssignmentRow {
@@ -17,12 +17,14 @@ interface DevTemplateAssignViewProps {
   templates: ReceiptTemplate[];
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
   onPreviewTemplate: (template: ReceiptTemplate, tenantName?: string) => void;
+  onCustomizeBranch?: (tenantId: string, tenantName: string) => void;
 }
 
 export const DevTemplateAssignView: React.FC<DevTemplateAssignViewProps> = ({
   templates,
   onShowToast,
   onPreviewTemplate,
+  onCustomizeBranch,
 }) => {
   const [assignments, setAssignments] = useState<TenantAssignmentRow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -41,7 +43,11 @@ export const DevTemplateAssignView: React.FC<DevTemplateAssignViewProps> = ({
     try {
       setLoading(true);
       const res = await fetch('/api/receipt-templates/assign', {
-        headers: getDevAuthHeaders(),
+        headers: getDevAuthHeaders({
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+          'Pragma': 'no-cache',
+        }),
+        cache: 'no-store',
       });
       const data = await res.json();
       if (data.success) {
@@ -322,11 +328,13 @@ export const DevTemplateAssignView: React.FC<DevTemplateAssignViewProps> = ({
                             ⚡ Platform Default ({defaultTemplate ? defaultTemplate.name : 'Standard'})
                           </option>
                           <optgroup label="Specific Templates">
-                            {templates.map((t) => (
-                              <option key={t.id} value={t.id}>
-                                {t.name} ({t.paper_size})
-                              </option>
-                            ))}
+                            {templates
+                              .filter((t) => !t.is_default)
+                              .map((t) => (
+                                <option key={t.id} value={t.id}>
+                                  {t.name} ({t.paper_size})
+                                </option>
+                              ))}
                           </optgroup>
                         </select>
 
@@ -383,27 +391,51 @@ export const DevTemplateAssignView: React.FC<DevTemplateAssignViewProps> = ({
                     </td>
 
                     <td style={{ padding: '16px 20px', textAlign: 'right' }}>
-                      {activeTmpl && (
-                        <button
-                          onClick={() => onPreviewTemplate(activeTmpl, a.tenant_name)}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            padding: '6px 12px',
-                            background: 'rgba(255, 255, 255, 0.06)',
-                            border: '1px solid rgba(255, 255, 255, 0.12)',
-                            borderRadius: '8px',
-                            color: '#FFFFFF',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <Printer style={{ width: 13, height: 13, color: '#D4AF37' }} />
-                          Preview
-                        </button>
-                      )}
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                        {onCustomizeBranch && (
+                          <button
+                            onClick={() => onCustomizeBranch(a.tenant_id, a.tenant_name)}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '6px 12px',
+                              background: 'rgba(212, 175, 55, 0.15)',
+                              border: '1px solid rgba(212, 175, 55, 0.35)',
+                              borderRadius: '8px',
+                              color: '#D4AF37',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
+                            title={`Customize receipt layout specifically for ${a.tenant_name}`}
+                          >
+                            <Sliders style={{ width: 13, height: 13 }} />
+                            Customize
+                          </button>
+                        )}
+                        {activeTmpl && (
+                          <button
+                            onClick={() => onPreviewTemplate(activeTmpl, a.tenant_name)}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '6px 12px',
+                              background: 'rgba(255, 255, 255, 0.06)',
+                              border: '1px solid rgba(255, 255, 255, 0.12)',
+                              borderRadius: '8px',
+                              color: '#FFFFFF',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <Printer style={{ width: 13, height: 13, color: '#D4AF37' }} />
+                            Preview
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

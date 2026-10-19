@@ -59,6 +59,11 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
   const [activeDesignerTab, setActiveDesignerTab] = useState<DesignerTab>('layout');
   const [saving, setSaving] = useState<boolean>(false);
 
+  // Scoped Branch Customization State
+  const [scopedTenantId, setScopedTenantId] = useState<string | null>(null);
+  const [scopedTenantName, setScopedTenantName] = useState<string | null>(null);
+  const [isBranchCustom, setIsBranchCustom] = useState<boolean>(false);
+
   // Preview options
   const [previewScale, setPreviewScale] = useState<number>(1);
   const [previewShopName, setPreviewShopName] = useState<string>('');
@@ -76,7 +81,11 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
     try {
       setLoading(true);
       const res = await fetch('/api/receipt-templates', {
-        headers: getDevAuthHeaders(),
+        headers: getDevAuthHeaders({
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+          'Pragma': 'no-cache',
+        }),
+        cache: 'no-store',
       });
       const data = await res.json();
       if (data.success) {
@@ -97,6 +106,9 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
 
   // Open Designer for New Template
   const handleCreateNew = () => {
+    setScopedTenantId(null);
+    setScopedTenantName(null);
+    setIsBranchCustom(false);
     setEditingTemplateId(null);
     setTemplateName('Thermal 80mm Custom Design');
     setTemplateDesc('Tailored receipt format for retail checkout.');
@@ -109,6 +121,9 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
 
   // Open Designer for Existing Template
   const handleEdit = (tmpl: ReceiptTemplate) => {
+    setScopedTenantId(null);
+    setScopedTenantName(null);
+    setIsBranchCustom(false);
     setEditingTemplateId(tmpl.id);
     setTemplateName(tmpl.name);
     setTemplateDesc(tmpl.description || '');
@@ -117,6 +132,75 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
     setTemplateJson(normalizeTemplate(tmpl.template_json || DEFAULT_TEMPLATE_JSON, tmpl.paper_size).template_json);
     setActiveDesignerTab('layout');
     setIsDesigning(true);
+  };
+
+  // Open Designer Scoped Specifically for One Branch
+  const handleCustomizeBranch = async (tenantId: string, tenantName: string) => {
+    try {
+      setLoading(true);
+      const res = await fetch(`/api/receipt-templates/branch?tenant_id=${tenantId}`, {
+        headers: getDevAuthHeaders({
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+          'Pragma': 'no-cache',
+        }),
+        cache: 'no-store',
+      });
+      const data = await res.json();
+      if (data.success && data.template) {
+        setScopedTenantId(tenantId);
+        setScopedTenantName(tenantName);
+        setIsBranchCustom(Boolean(data.is_custom));
+        setEditingTemplateId(data.template.id);
+        setTemplateName(data.template.name || `${tenantName} Receipt Layout`);
+        setTemplateDesc(data.template.description || `Branch receipt customization for ${tenantName}`);
+        setPaperSize(data.template.paper_size || 'thermal_80');
+        setIsDefault(false);
+        setTemplateJson(normalizeTemplate(data.template.template_json || DEFAULT_TEMPLATE_JSON, data.template.paper_size || 'thermal_80').template_json);
+        setPreviewShopName(tenantName);
+        setActiveDesignerTab('layout');
+        setIsDesigning(true);
+      } else {
+        onShowToast(data.error || 'Failed to fetch branch receipt template', 'error');
+      }
+    } catch (err: any) {
+      onShowToast(err.message || 'Error opening branch designer', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Reset Branch to Platform Default from Designer
+  const handleResetBranchToDefault = async () => {
+    if (!scopedTenantId) return;
+    if (!confirm(`Are you sure you want to reset ${scopedTenantName || 'this branch'} to the Platform Default receipt? Any branch customizations will be removed.`)) {
+      return;
+    }
+    try {
+      setSaving(true);
+      const res = await fetch(`/api/receipt-templates/branch?tenant_id=${scopedTenantId}`, {
+        method: 'DELETE',
+        headers: getDevAuthHeaders({
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+          'Pragma': 'no-cache',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        onShowToast(`Branch receipt reset to Platform Default.`);
+        setIsBranchCustom(false);
+        if (data.template) {
+          setTemplateName(data.template.name);
+          setPaperSize(data.template.paper_size);
+          setTemplateJson(normalizeTemplate(data.template.template_json || DEFAULT_TEMPLATE_JSON, data.template.paper_size).template_json);
+        }
+      } else {
+        onShowToast(data.error || 'Failed to reset branch template', 'error');
+      }
+    } catch (err: any) {
+      onShowToast(err.message || 'Error resetting branch receipt', 'error');
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Clone Template
@@ -202,6 +286,37 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
 
     try {
       setSaving(true);
+
+      // Branch Scoped Customization: saves via branch route to isolate changes completely
+      if (scopedTenantId) {
+        const res = await fetch('/api/receipt-templates/branch', {
+          method: 'POST',
+          headers: getDevAuthHeaders({
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+          }),
+          body: JSON.stringify({
+            tenant_id: scopedTenantId,
+            name: templateName.trim(),
+            paper_size: paperSize,
+            template_json: templateJson,
+          }),
+        });
+
+        const data = await res.json();
+        if (data.success) {
+          onShowToast(`Receipt layout updated specifically for ${scopedTenantName}! Platform default and other branches are untouched.`);
+          setIsDesigning(false);
+          setScopedTenantId(null);
+          setScopedTenantName(null);
+          fetchTemplates();
+        } else {
+          onShowToast(data.error || 'Failed to save branch layout', 'error');
+        }
+        return;
+      }
+
+      // Platform / Library Template Save
       const isEditing = Boolean(editingTemplateId);
       const endpoint = '/api/receipt-templates';
       const method = isEditing ? 'PATCH' : 'POST';
@@ -223,7 +338,13 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
 
       const data = await res.json();
       if (data.success) {
-        onShowToast(isEditing ? 'Receipt template updated!' : 'New receipt template created!');
+        onShowToast(
+          isDefault
+            ? 'Platform Default saved! All branches inheriting the default will automatically resolve these settings.'
+            : isEditing
+            ? 'Receipt template updated!'
+            : 'New receipt template created!'
+        );
         setIsDesigning(false);
         fetchTemplates();
       } else {
@@ -412,6 +533,7 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
             handleEdit(tmpl);
             if (tenantName) setPreviewShopName(tenantName);
           }}
+          onCustomizeBranch={handleCustomizeBranch}
         />
       )}
 
@@ -692,29 +814,73 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  fontSize: '12px',
-                  color: '#E2E8F0',
-                  cursor: 'pointer',
-                  userSelect: 'none',
-                  background: 'rgba(255, 255, 255, 0.04)',
-                  padding: '6px 12px',
-                  borderRadius: '8px',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={isDefault}
-                  onChange={(e) => setIsDefault(e.target.checked)}
-                  style={{ accentColor: '#D4AF37', cursor: 'pointer' }}
-                />
-                Platform Default
-              </label>
+              {scopedTenantId ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '5px 12px',
+                      borderRadius: '8px',
+                      background: 'rgba(212, 175, 55, 0.15)',
+                      border: '1px solid rgba(212, 175, 55, 0.4)',
+                      color: '#D4AF37',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                    }}
+                  >
+                    🏢 Branch Scope: {scopedTenantName}
+                  </span>
+                  {isBranchCustom && (
+                    <button
+                      onClick={handleResetBranchToDefault}
+                      disabled={saving}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '6px 12px',
+                        borderRadius: '8px',
+                        background: 'rgba(239, 68, 68, 0.1)',
+                        border: '1px solid rgba(239, 68, 68, 0.25)',
+                        color: '#F87171',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        cursor: saving ? 'not-allowed' : 'pointer',
+                      }}
+                      title="Remove branch override and revert to dynamic Global Default"
+                    >
+                      <RotateCcw style={{ width: 12, height: 12 }} />
+                      Reset to Default
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    fontSize: '12px',
+                    color: '#E2E8F0',
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    padding: '6px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isDefault}
+                    onChange={(e) => setIsDefault(e.target.checked)}
+                    style={{ accentColor: '#D4AF37', cursor: 'pointer' }}
+                  />
+                  Platform Default
+                </label>
+              )}
 
               <button
                 onClick={handleSave}

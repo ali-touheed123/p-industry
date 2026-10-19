@@ -2,7 +2,8 @@
 
 import React, { useState } from 'react';
 import { Tenant } from '@/types';
-import { Settings, ShieldCheck, Users, Percent, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Settings, ShieldCheck, Users, Percent, Sparkles, CheckCircle2, AlertCircle, Printer } from 'lucide-react';
+import BranchReceiptSettings from '@/components/BranchReceiptSettings';
 
 interface SettingsViewProps {
   tenant?: Tenant | null;
@@ -10,6 +11,7 @@ interface SettingsViewProps {
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpdated }) => {
+  const [subTab, setSubTab] = useState<'commission' | 'receipt'>('commission');
   const [commissionEnabled, setCommissionEnabled] = useState<boolean>(
     tenant?.commission_enabled ?? false
   );
@@ -102,38 +104,100 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '900px', margin: '0 auto', paddingBottom: '2rem' }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <h2 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
-            Branch Rules &amp; Commission Settings
+            Branch Settings &amp; Configuration
           </h2>
           <p className="ceo-font-sans" style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '2px' }}>
-            Configure staff sales incentives, commission pools, and branch parameters.
+            Configure branch rules, staff commissions, and branch-specific receipt layouts.
           </p>
+        </div>
+
+        {/* Sub-tab Switch */}
+        <div style={{ display: 'flex', background: '#F1F5F9', padding: '4px', borderRadius: '10px', border: '1px solid #E2E8F0' }}>
+          <button
+            type="button"
+            onClick={() => setSubTab('commission')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              borderRadius: '7px',
+              border: 'none',
+              fontSize: '12px',
+              fontWeight: subTab === 'commission' ? 700 : 500,
+              background: subTab === 'commission' ? '#FFFFFF' : 'transparent',
+              color: subTab === 'commission' ? '#0F172A' : '#64748B',
+              cursor: 'pointer',
+              boxShadow: subTab === 'commission' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+            }}
+          >
+            <Settings style={{ width: 14, height: 14 }} />
+            Branch &amp; Commission
+          </button>
+          <button
+            type="button"
+            onClick={() => setSubTab('receipt')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              borderRadius: '7px',
+              border: 'none',
+              fontSize: '12px',
+              fontWeight: subTab === 'receipt' ? 700 : 500,
+              background: subTab === 'receipt' ? '#FFFFFF' : 'transparent',
+              color: subTab === 'receipt' ? '#0F172A' : '#64748B',
+              cursor: 'pointer',
+              boxShadow: subTab === 'receipt' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+            }}
+          >
+            <Printer style={{ width: 14, height: 14 }} />
+            Receipt Layout
+          </button>
         </div>
       </div>
 
-      {feedback && (
-        <div
-          style={{
-            padding: '10px 14px',
-            borderRadius: '8px',
-            background: feedback.type === 'success' ? '#064E3B' : '#7F1D1D',
-            color: '#FFFFFF',
-            fontSize: '12.5px',
-            fontWeight: 600,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            border: `1px solid ${feedback.type === 'success' ? '#059669' : '#DC2626'}`,
-          }}
-        >
-          {feedback.type === 'success' ? <CheckCircle2 style={{ width: 16, height: 16 }} /> : <AlertCircle style={{ width: 16, height: 16 }} />}
-          {feedback.message}
-        </div>
-      )}
+      {subTab === 'receipt' ? (
+        tenant?.id ? (
+          <BranchReceiptSettings
+            tenantId={tenant.id}
+            tenantName={tenant.name}
+            tenantPhone={tenant.phone}
+            tenantAddress={tenant.address}
+            staffName="CEO Admin"
+          />
+        ) : (
+          <div style={{ textAlign: 'center', padding: '40px', color: '#64748B' }}>
+            No branch selected for receipt settings.
+          </div>
+        )
+      ) : (
+        <>
+          {feedback && (
+            <div
+              style={{
+                padding: '10px 14px',
+                borderRadius: '8px',
+                background: feedback.type === 'success' ? '#064E3B' : '#7F1D1D',
+                color: '#FFFFFF',
+                fontSize: '12.5px',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                border: `1px solid ${feedback.type === 'success' ? '#059669' : '#DC2626'}`,
+              }}
+            >
+              {feedback.type === 'success' ? <CheckCircle2 style={{ width: 16, height: 16 }} /> : <AlertCircle style={{ width: 16, height: 16 }} />}
+              {feedback.message}
+            </div>
+          )}
 
-      <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
         {/* ── CARD 1: Staff Commission Control ── */}
         <div className="ceo-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -370,6 +434,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ tenant, onTenantUpda
           {saving ? 'Saving Changes...' : '💾 Save Branch & Commission Settings'}
         </button>
       </form>
+      </>
+      )}
     </div>
   );
 };

@@ -24,6 +24,7 @@ const PurchasesView = dynamic(() => import('@/components/PurchasesView'), { load
 const BranchOrders = dynamic(() => import('@/components/BranchOrders'), { loading: () => <ViewFallback /> });
 const TokenLedger = dynamic(() => import('@/components/TokenLedger'), { loading: () => <ViewFallback /> });
 const TokenManagementView = dynamic(() => import('@/components/TokenManagementView'), { loading: () => <ViewFallback /> });
+const BranchReceiptSettings = dynamic(() => import('@/components/BranchReceiptSettings'), { loading: () => <ViewFallback /> });
 import { clearAllBulkDrafts } from '@/lib/bulkDraftStore';
 
 import {
@@ -56,6 +57,7 @@ import {
   Wallet,
   LockOpen,
   AlertCircle,
+  Printer,
 } from 'lucide-react';
 
 interface PageProps {
@@ -76,7 +78,7 @@ export default function TenantAppPage({ params }: PageProps) {
   const [loginRoleTab, setLoginRoleTab] = useState<'staff' | 'ceo'>('staff');
   const [loginError, setLoginError] = useState('');
   const [activeTab, setActiveTab] = useState<
-    'pos' | 'inventory' | 'purchases' | 'sales' | 'customers' | 'returns' | 'orders' | 'hold_invoices' | 'credit_recovery' | 'reports' | 'day_close' | 'stock' | 'ledgers' | 'credit' | 'shift' | 'ceo_reports' | 'tokens' | 'token_management'
+    'pos' | 'inventory' | 'purchases' | 'sales' | 'customers' | 'returns' | 'orders' | 'hold_invoices' | 'credit_recovery' | 'reports' | 'day_close' | 'stock' | 'ledgers' | 'credit' | 'shift' | 'ceo_reports' | 'tokens' | 'token_management' | 'receipt'
   >('pos');
   const [pendingOrdersCount, setPendingOrdersCount] = useState<number>(0);
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
@@ -478,6 +480,7 @@ export default function TenantAppPage({ params }: PageProps) {
     { id: 'customers',        label: 'Customers',         icon: Users },
     { id: 'tokens',           label: 'Tokens',            icon: Coins },
     { id: 'token_management', label: 'Token Config',      icon: Sliders },
+    { id: 'receipt',          label: 'Receipt Settings',  icon: Printer },
     { id: 'orders',           label: 'Branch Orders',     icon: PackagePlus, badgeCount: pendingOrdersCount },
     { id: 'hold_invoices',   label: 'Hold Invoices',     icon: PauseCircle },
     { id: 'credit_recovery', label: 'Credit & Recovery', icon: Scale },
@@ -801,6 +804,15 @@ export default function TenantAppPage({ params }: PageProps) {
             <TokenManagementView
               tenantId={tenant.id}
               tenantName={tenant.name}
+            />
+          )}
+          {activeTab === 'receipt' && (
+            <BranchReceiptSettings
+              tenantId={tenant.id}
+              tenantName={tenant.name}
+              tenantPhone={tenant.phone}
+              tenantAddress={tenant.address}
+              staffName={currentUser?.full_name || currentUser?.username || 'Staff'}
             />
           )}
           {(activeTab === 'credit_recovery' || activeTab === 'credit') && (
