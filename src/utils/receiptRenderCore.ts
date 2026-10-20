@@ -170,8 +170,10 @@ export function buildReceiptPageCss(layout: LayoutConfig, paperSize: PaperSize):
   const marginBottom = clampNumber(layout.marginBottom, 0, 50, 6);
   const marginLeft = clampNumber(layout.marginLeft, 0, 50, 4);
 
-  // Thermal roll: size is fixed width with standard roll cut segment height (297mm)
-  // Sheet paper: size is standard A4 or A5 portrait
+  // Thermal roll: initial @page uses 297mm as a safe CSS fallback; a small inline
+  // script in the document body dynamically overrides this to the exact content height,
+  // eliminating the blank whitespace at the bottom of the printed receipt.
+  // Sheet paper: standard A4 or A5 portrait — no dynamic sizing needed.
   const pageRule = isThermal
     ? `@page { size: ${widthMm}mm 297mm; margin: 0; }`
     : `@page { size: ${validPaperSize.toUpperCase()} portrait; margin: 0; }`;
@@ -366,6 +368,10 @@ export function normalizeTemplate(
 
 /**
  * Wraps body HTML content into a full, self-contained HTML document with embedded CSS.
+ *
+ * For thermal paper sizes, an inline script is injected at the end of <body> to measure
+ * the actual rendered content height and override the @page size to fit exactly. This
+ * eliminates the blank trailing whitespace caused by the 297mm CSS fallback height.
  */
 export function renderReceiptHtmlDocument(
   bodyHtml: string,
@@ -374,7 +380,36 @@ export function renderReceiptHtmlDocument(
   paperSize: PaperSize
 ): string {
   const safeTitle = escapeHtml(title || 'Receipt');
+  const validPaperSize: PaperSize = VALID_PAPER_SIZES.includes(paperSize) ? paperSize : 'thermal_80';
+  const isThermal = validPaperSize.startsWith('thermal');
+  const widthMm = (PAPER_SIZE_CONFIG[validPaperSize] || PAPER_SIZE_CONFIG.thermal_80).widthMm;
   const css = buildReceiptPageCss(layout, paperSize);
+
+  // For thermal receipts: measure content height after render and inject a precise
+  // @page override to eliminate blank trailing space on the printed roll/preview.
+  // Uses a buffer of 6mm (safety margin) so content is never clipped.
+  const thermalFitScript = isThermal ? `
+<script>
+(function() {
+  try {
+    var b = document.body;
+    var h = document.documentElement;
+    var heightPx = Math.max(
+      b ? b.scrollHeight : 0,
+      b ? b.offsetHeight : 0,
+      h ? h.scrollHeight : 0,
+      h ? h.offsetHeight : 0
+    );
+    if (heightPx > 0) {
+      var heightMm = Math.ceil(heightPx * 25.4 / 96) + 6;
+      var s = document.createElement('style');
+      s.setAttribute('data-thermal-fit', 'true');
+      s.textContent = '@page { size: ${widthMm}mm ' + heightMm + 'mm; margin: 0; }';
+      document.head.appendChild(s);
+    }
+  } catch(e) {}
+})();
+</script>` : '';
 
   return `<!DOCTYPE html>
 <html>
@@ -387,6 +422,7 @@ ${css}
 </head>
 <body>
 ${bodyHtml}
+${thermalFitScript}
 </body>
 </html>`.trim();
 }

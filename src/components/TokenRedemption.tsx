@@ -459,6 +459,25 @@ export default function TokenRedemption({
     <div class="double-divider"></div>
     <div class="center" style="font-size: 9px;">Physical Tokens Deposited Into Safe</div>
     <div class="center" style="font-size: 9px; margin-top: 4px;">Powered by Pyntflow ERP</div>
+    <script>
+(function() {
+  try {
+    var b = document.body;
+    var h = document.documentElement;
+    var heightPx = Math.max(
+      b ? b.scrollHeight : 0, b ? b.offsetHeight : 0,
+      h ? h.scrollHeight : 0, h ? h.offsetHeight : 0
+    );
+    if (heightPx > 0) {
+      var hMm = Math.ceil(heightPx * 25.4 / 96) + 6;
+      var s = document.createElement('style');
+      s.setAttribute('data-thermal-fit', 'true');
+      s.textContent = '@page { size: 80mm ' + hMm + 'mm; margin: 0; }';
+      document.head.appendChild(s);
+    }
+  } catch(e) {}
+})();
+    </script>
   </body>
 </html>`;
 
