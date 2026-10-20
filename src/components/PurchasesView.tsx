@@ -383,7 +383,7 @@ export default function PurchasesView({
     showFeedback(`Initiated new Purchase Record #${nextRecord}`);
   };
 
-  const handleSavePurchase = async (): Promise<boolean> => {
+  const handleSavePurchase = async (skipReset = false): Promise<boolean> => {
     // Task T3: Synchronous ref check prevents microsecond double-clicks
     if (isSubmittingRef.current) return false;
     if (items.length === 0) {
@@ -488,7 +488,7 @@ export default function PurchasesView({
         setSelectedTokenIds([]);
         setSelectedTokenQtys({});
         fetchAvailableTokens();
-        handleNewPurchase();
+        if (!skipReset) handleNewPurchase();
         return true;
       }
 
@@ -519,10 +519,14 @@ export default function PurchasesView({
       showFeedback('Cannot print empty invoice.');
       return;
     }
-    // Task T3: Guard voucher modal — only open on CONFIRMED success
-    const saved = await handleSavePurchase();
+    // Save with skipReset=true so items/state are still intact for printing.
+    // After printing we manually reset — this avoids the modal showing empty data.
+    const saved = await handleSavePurchase(true);
     if (saved) {
-      setShowVoucherModal(true);
+      // Fire Chrome print preview directly via iframe — no intermediate modal.
+      handlePrintVoucher();
+      // Now safe to reset the form.
+      handleNewPurchase();
     }
   };
 
