@@ -10,7 +10,7 @@
  * (or after a 3-second safety timeout if `afterprint` does not fire).
  */
 
-export function printViaIframe(htmlContent: string): void {
+export function printViaIframe(htmlContent: string, onError?: (err: Error) => void): boolean {
   // Remove any leftover iframe from a previous print
   const existing = document.getElementById('__thermal_print_iframe__');
   if (existing) existing.remove();
@@ -33,11 +33,12 @@ export function printViaIframe(htmlContent: string): void {
 
   const doc = iframe.contentWindow?.document;
   if (!doc) {
-    // Safety fallback: if iframe fails, fall back to window.print
-    console.warn('[iframePrint] Could not access iframe document. Falling back to window.print().');
+    // Workstream H: Do NOT call window.print() — it prints the top-level application dashboard!
+    console.error('[iframePrint] Could not access iframe document context.');
     iframe.remove();
-    window.print();
-    return;
+    const err = new Error('Printer iframe document could not be initialized.');
+    if (onError) onError(err);
+    return false;
   }
 
   doc.open();
@@ -71,6 +72,7 @@ export function printViaIframe(htmlContent: string): void {
   // Trigger print — synchronous call inside iframe's window context
   iframe.contentWindow?.focus();
   iframe.contentWindow?.print();
+  return true;
 }
 
 /**

@@ -361,7 +361,7 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
   const handleTestPrint = () => {
     const printArea = document.getElementById('designer-preview-receipt');
     if (!printArea) {
-      window.print();
+      onShowToast('Receipt preview element not found. Please wait for the preview to render and try again.', 'error');
       return;
     }
 
@@ -385,7 +385,10 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
   </body>
 </html>`;
 
-    printViaIframe(htmlDoc);
+    const printOk = printViaIframe(htmlDoc);
+    if (!printOk) {
+      onShowToast('Could not initialize printer dialog.', 'error');
+    }
   };
 
   // Helper to toggle table columns

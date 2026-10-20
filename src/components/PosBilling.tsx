@@ -1062,7 +1062,10 @@ export default function PosBilling({
           showFeedback(isEditingExisting ? `Invoice #${finalServerInvoiceNo} updated & printing...` : `Invoice ${finalServerInvoiceNo} finalized & printing...`);
           // UX-01: Print via hidden iframe — avoids popup blocker on post-async calls (DEV-07: applies assigned template)
           const iframeHtml = buildPosThermalHtml(completedInvoice, tenantName, staffName, assignedTemplate);
-          printViaIframe(iframeHtml);
+          const printOk = printViaIframe(iframeHtml);
+          if (!printOk) {
+            showFeedback(`Invoice ${finalServerInvoiceNo} saved, but printing failed. Reprint from Sales History.`);
+          }
         } else {
           setPrintReceiptData(null);
           showFeedback(isEditingExisting ? `Invoice #${finalServerInvoiceNo} updated successfully.` : `Invoice ${finalServerInvoiceNo} saved to database.`);

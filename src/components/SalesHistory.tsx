@@ -3,7 +3,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Invoice, InvoiceItem } from '@/types';
 import { printViaIframe } from '@/utils/iframePrint';
+import { escapeHtml } from '@/utils/receiptRenderCore';
 import { buildSalesHistoryThermalHtml } from '@/utils/receiptAdapters';
+import { serializeCsv, downloadCsv } from '@/utils/csvSerializer';
 import { ReceiptTemplate } from '@/types/receipt';
 import {
   Search,
@@ -483,64 +485,344 @@ export default function SalesHistory({
     };
   }, [filteredInvoices]);
 
-  // Export to CSV
-  const handleExportCSV = () => {
-    if (!filteredInvoices.length) {
-      alert('No sales records to export for the selected period.');
-      return;
-    }
+  // Workstream D: State for tracking export progress
+  const [exportingSales, setExportingSales] = useState(false);
 
-    const headers = [
-      'Invoice No',
-      'Date',
-      'Time',
-      'Type',
-      'Customer',
-      'Payment Mode',
-      'Items Count',
-      'Subtotal (PKR)',
-      'Discount (PKR)',
-      'Delivery (PKR)',
-      'Net Total (PKR)',
-      'Paid Amount (PKR)',
-      'Due Balance (PKR)',
-      'Status',
-      'Remarks',
-    ];
+  // Export to CSV — Workstream D: Export all invoices matching active filters independently of loaded page limit
+  const handleExportCSV = async () => {
+    if (!tenantId || exportingSales) return;
+    setExportingSales(true);
 
-    const rows = filteredInvoices.map((inv) => {
-      const createdDate = inv.created_at ? new Date(inv.created_at) : new Date();
-      const timeStr = createdDate.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
-      return [
-        `"${inv.invoice_no}"`,
-        `"${inv.date}"`,
-        `"${timeStr}"`,
-        `"${inv.invoice_type === 'return' ? 'RETURN' : 'SALE'}"`,
-        `"${inv.client_name || 'Walk-in Customer'}"`,
-        `"${inv.payment_type?.toUpperCase() || 'CASH'}"`,
-        (inv.invoice_items || inv.items)?.length || 0,
-        inv.subtotal || 0,
-        inv.discount || 0,
-        inv.delivery_charge || 0,
-        inv.net_total || 0,
-        inv.paid_amount || 0,
-        inv.due_amount || 0,
-        `"${inv.status}"`,
-        `"${inv.remarks || ''}"`,
+    try {
+      // 1. Fetch all matching invoices from the server following cursor pagination
+      let allInvoices: Invoice[] = [];
+      let cursor: string | null = null;
+      let hasMoreRecords = true;
+      let safetyIteration = 0;
+      const MAX_PAGES = 100; // Protect against infinite loops (100 * 100 = 10,000 records)
+
+      while (hasMoreRecords && safetyIteration < MAX_PAGES) {
+        safetyIteration++;
+        let url = `/api/invoices?tenant_id=${tenantId}&limit=100`;
+        if (startDate && activeDatePreset !== 'all') {
+          url += `&start_date=${startDate}`;
+        }
+        if (endDate && activeDatePreset !== 'all') {
+          url += `&end_date=${endDate}`;
+        }
+        if (typeFilter === 'sales' || typeFilter === 'return') {
+          url += `&type=${typeFilter}`;
+        }
+        if (paymentFilter !== 'all') {
+          url += `&payment_type=${paymentFilter}`;
+        }
+        if (cursor) {
+          url += `&cursor=${encodeURIComponent(cursor)}`;
+        }
+
+        const res = await fetch(url);
+        if (!res.ok) {
+          throw new Error(`Server returned HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        if (!data.success || !Array.isArray(data.invoices)) {
+          throw new Error(data.error || 'Malformed API response during export pagination');
+        }
+
+        allInvoices = [...allInvoices, ...data.invoices];
+
+        const next = data.next_cursor || data.pagination?.next_cursor || null;
+        hasMoreRecords = Boolean(data.pagination?.has_more ?? (next !== null && data.invoices.length === 100));
+
+        // If cursor failed to advance or there are no more records, terminate
+        if (!next || next === cursor) {
+          hasMoreRecords = false;
+        } else {
+          cursor = next;
+        }
+      }
+
+      // Deduplicate invoices by ID
+      const seenIds = new Set<string>();
+      const dedupedInvoices = allInvoices.filter((inv) => {
+        if (!inv.id || seenIds.has(inv.id)) return false;
+        seenIds.add(inv.id);
+        return true;
+      });
+
+      // 2. Apply client-side search consistently to the complete retrieved candidate dataset
+      const finalInvoices = dedupedInvoices.filter((inv) => {
+        if (searchQuery.trim()) {
+          const q = searchQuery.toLowerCase();
+          const matchNo = inv.invoice_no?.toLowerCase().includes(q);
+          const matchClient = inv.client_name?.toLowerCase().includes(q);
+          const matchRemarks = inv.remarks?.toLowerCase().includes(q);
+          const invoiceItems = inv.invoice_items || inv.items;
+          const matchItem = invoiceItems?.some((it) =>
+            it.item_name?.toLowerCase().includes(q) ||
+            it.item_code?.toLowerCase().includes(q) ||
+            it.shade_code?.toLowerCase().includes(q)
+          );
+          if (!matchNo && !matchClient && !matchRemarks && !matchItem) {
+            return false;
+          }
+        }
+        return true;
+      });
+
+      if (!finalInvoices.length) {
+        alert('No sales records to export for the selected filters.');
+        return;
+      }
+
+      // 3. Serialize securely using shared csvSerializer
+      const headers = [
+        'Invoice No',
+        'Date',
+        'Time',
+        'Type',
+        'Customer',
+        'Payment Mode',
+        'Items Count',
+        'Subtotal (PKR)',
+        'Discount (PKR)',
+        'Delivery (PKR)',
+        'Net Total (PKR)',
+        'Paid Amount (PKR)',
+        'Due Balance (PKR)',
+        'Status',
+        'Remarks',
       ];
+
+      const rows: any[][] = finalInvoices.map((inv) => {
+        const createdDate = inv.created_at ? new Date(inv.created_at) : new Date();
+        const timeStr = createdDate.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
+        return [
+          inv.invoice_no,
+          inv.date,
+          timeStr,
+          inv.invoice_type === 'return' ? 'RETURN' : 'SALE',
+          inv.client_name || 'Walk-in Customer',
+          inv.payment_type?.toUpperCase() || 'CASH',
+          (inv.invoice_items || inv.items)?.length || 0,
+          inv.subtotal || 0,
+          inv.discount || 0,
+          inv.delivery_charge || 0,
+          inv.net_total || 0,
+          inv.paid_amount || 0,
+          inv.due_amount || 0,
+          inv.status,
+          inv.remarks || '',
+        ];
+      });
+
+      const csvContent = serializeCsv([headers, ...rows]);
+      downloadCsv(
+        `PaintERP_SalesReport_${tenantName.replace(/\s+/g, '_')}_${startDate || 'start'}_to_${endDate || 'end'}`,
+        csvContent
+      );
+    } catch (err: any) {
+      console.error('Failed to export complete sales history:', err);
+      alert(`Export failed: ${err.message || 'Unable to retrieve complete sales records.'}`);
+    } finally {
+      setExportingSales(false);
+    }
+  };
+
+  // Page-wide Sales History Report Print (F-01) — Isolated A4 printing via iframe
+  const handlePrintReport = () => {
+    const reportDateRange =
+      startDate && endDate
+        ? `${startDate} to ${endDate}`
+        : startDate
+        ? `From ${startDate}`
+        : endDate
+        ? `Up to ${endDate}`
+        : 'All Dates';
+
+    const activeFilterLabels = [
+      `Date: ${reportDateRange}`,
+      `Type: ${typeFilter.toUpperCase()}`,
+      `Payment: ${paymentFilter.toUpperCase()}`,
+      searchQuery.trim() ? `Search: "${searchQuery.trim()}"` : null,
+    ]
+      .filter(Boolean)
+      .join(' | ');
+
+    const now = new Date();
+    const generatedAt = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}`;
+
+    const rowsHtml = filteredInvoices
+      .map((inv, idx) => {
+        const isReturn = inv.invoice_type === 'return';
+        const createdDate = inv.created_at ? new Date(inv.created_at) : null;
+        const timeStr = createdDate
+          ? createdDate.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })
+          : '';
+        const itemsCount = (inv.invoice_items || inv.items)?.length || 0;
+        const subtotal = Number(inv.subtotal || 0);
+        const discount = Number(inv.discount || 0);
+        const netTotal = Number(inv.net_total || 0);
+        const paidAmount = Number(inv.paid_amount || 0);
+        const dueAmount = Number(inv.due_amount || 0);
+
+        const paymentLabel =
+          inv.payment_type === 'credit'
+            ? 'ON ACCOUNT'
+            : (inv.payment_type || 'cash').toUpperCase();
+
+        return `
+          <tr style="background:${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};border-bottom:1px solid #e2e8f0;">
+            <td style="padding:6px 8px;font-family:monospace;font-weight:700;">
+              ${escapeHtml(inv.invoice_no)}
+              ${isReturn ? '<span style="color:#dc2626;font-size:9px;font-weight:800;margin-left:4px;">[RETURN]</span>' : ''}
+            </td>
+            <td style="padding:6px 8px;font-family:monospace;font-size:11px;">
+              ${escapeHtml(inv.date || '')} ${escapeHtml(timeStr)}
+            </td>
+            <td style="padding:6px 8px;">
+              ${escapeHtml(inv.client_name || 'Walk-in Customer')}
+              ${inv.created_by ? `<div style="font-size:9.5px;color:#64748b;">By: ${escapeHtml(inv.created_by)}</div>` : ''}
+            </td>
+            <td style="padding:6px 8px;font-family:monospace;font-size:11px;">
+              ${escapeHtml(paymentLabel)}
+            </td>
+            <td style="padding:6px 8px;text-align:center;font-family:monospace;">
+              ${itemsCount}
+            </td>
+            <td style="padding:6px 8px;text-align:right;font-family:monospace;">
+              Rs. ${subtotal.toLocaleString()}
+            </td>
+            <td style="padding:6px 8px;text-align:right;font-family:monospace;color:${discount > 0 ? '#dc2626' : '#94a3b8'};">
+              ${discount > 0 ? `-Rs. ${discount.toLocaleString()}` : '—'}
+            </td>
+            <td style="padding:6px 8px;text-align:right;font-family:monospace;font-weight:800;color:${isReturn ? '#dc2626' : '#0f172a'};">
+              ${isReturn ? '-' : ''}Rs. ${netTotal.toLocaleString()}
+            </td>
+            <td style="padding:6px 8px;text-align:right;font-family:monospace;color:#16a34a;font-weight:600;">
+              Rs. ${paidAmount.toLocaleString()}
+            </td>
+            <td style="padding:6px 8px;text-align:right;font-family:monospace;font-weight:700;color:${dueAmount > 0 ? '#d97706' : '#94a3b8'};">
+              ${dueAmount > 0 ? `Rs. ${dueAmount.toLocaleString()}` : 'Rs. 0'}
+            </td>
+            <td style="padding:6px 8px;text-align:center;font-size:10px;font-weight:700;">
+              ${escapeHtml(isReturn ? 'RETURN' : (inv.status || 'COMPLETED').toUpperCase())}
+            </td>
+          </tr>
+        `;
+      })
+      .join('');
+
+    const emptyRowHtml = `
+      <tr>
+        <td colspan="11" style="padding:24px;text-align:center;color:#64748b;font-style:italic;">
+          No invoices found matching active filters.
+        </td>
+      </tr>
+    `;
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Sales History Report - ${escapeHtml(tenantName)}</title>
+  <style>
+    @page { size: A4 portrait; margin: 12mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; font-size: 11px; color: #0f172a; background: #fff; line-height: 1.35; padding: 10px; }
+    .header { border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 12px; }
+    .title { font-size: 18px; font-weight: 800; color: #0f172a; }
+    .meta { font-size: 10.5px; color: #475569; margin-top: 3px; }
+    .filters { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 10px; margin-bottom: 12px; font-size: 10px; color: #334155; }
+    .kpis { display: flex; gap: 8px; margin-bottom: 14px; }
+    .kpi { flex: 1; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; background: #f8fafc; }
+    .kpi-title { font-size: 9.5px; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.03em; }
+    .kpi-val { font-size: 14px; font-weight: 800; color: #0f172a; margin-top: 2px; font-family: monospace; }
+    table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+    th { background: #0f172a; color: #fff; padding: 7px 8px; text-align: left; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.04em; font-family: monospace; }
+    th.right, td.right { text-align: right; }
+    th.center, td.center { text-align: center; }
+    .footer { margin-top: 14px; border-top: 1px solid #cbd5e1; padding-top: 6px; font-size: 9px; color: #94a3b8; display: flex; justify-content: space-between; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;">
+      <div>
+        <div class="title">${escapeHtml(tenantName)}</div>
+        <div style="font-size:12px;font-weight:700;color:#f97316;margin-top:2px;">SALES HISTORY & REVENUE REPORT</div>
+      </div>
+      <div style="text-align:right;" class="meta">
+        <div>Generated: <strong>${escapeHtml(generatedAt)}</strong></div>
+        <div>Period: <strong>${escapeHtml(reportDateRange)}</strong></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="filters">
+    <strong>Active Filters:</strong> ${escapeHtml(activeFilterLabels)}
+  </div>
+
+  <div class="kpis">
+    <div class="kpi">
+      <div class="kpi-title">Net Sales</div>
+      <div class="kpi-val" style="color:#0f172a;">Rs. ${summaryMetrics.netSales.toLocaleString()}</div>
+      <div style="font-size:9px;color:#64748b;margin-top:1px;">${summaryMetrics.completedCount} sales${summaryMetrics.returnCount > 0 ? ` • ${summaryMetrics.returnCount} returns` : ''}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-title">Physical Cash</div>
+      <div class="kpi-val" style="color:#16a34a;">Rs. ${summaryMetrics.physicalCash.toLocaleString()}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-title">Digital Paid</div>
+      <div class="kpi-val" style="color:#2563eb;">Rs. ${summaryMetrics.digitalPaid.toLocaleString()}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-title">Credit / On Account</div>
+      <div class="kpi-val" style="color:#d97706;">Rs. ${summaryMetrics.creditAmount.toLocaleString()}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-title">Invoices / Items</div>
+      <div class="kpi-val">${summaryMetrics.totalInvoices} <span style="font-size:10px;font-weight:500;color:#64748b;">(${summaryMetrics.totalItemsCount} items)</span></div>
+      <div style="font-size:9px;color:#64748b;margin-top:1px;">Avg Ticket: Rs. ${summaryMetrics.avgTicket.toLocaleString()}</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Invoice #</th>
+        <th>Date &amp; Time</th>
+        <th>Customer</th>
+        <th>Payment</th>
+        <th class="center">Items</th>
+        <th class="right">Subtotal</th>
+        <th class="right">Discount</th>
+        <th class="right">Net Total</th>
+        <th class="right">Paid</th>
+        <th class="right">Balance</th>
+        <th class="center">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml || emptyRowHtml}
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <div>PyntFlow Industrial ERP • Sales History Report • ${escapeHtml(tenantName)}</div>
+    <div>Total Records: ${filteredInvoices.length} Invoices</div>
+  </div>
+</body>
+</html>`;
+
+    const ok = printViaIframe(html, (err) => {
+      console.error('[SalesHistory] Report printing error:', err);
     });
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute(
-      'download',
-      `PaintERP_SalesReport_${tenantName.replace(/\s+/g, '_')}_${startDate || 'start'}_to_${endDate || 'end'}.csv`
-    );
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    if (!ok) {
+      alert('Could not initialize print dialog. Please check browser print/popup permissions and try again.');
+    }
   };
 
   // WhatsApp Share Receipt Image (Registered Customers Only)
@@ -769,26 +1051,27 @@ export default function SalesHistory({
 
           <button
             onClick={handleExportCSV}
+            disabled={exportingSales}
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
               padding: '8px 14px',
-              background: '#0F172A',
+              background: exportingSales ? '#475569' : '#0F172A',
               border: 'none',
               borderRadius: '8px',
               fontSize: '13px',
               fontWeight: 600,
               color: '#FFFFFF',
-              cursor: 'pointer',
+              cursor: exportingSales ? 'not-allowed' : 'pointer',
             }}
           >
             <FileSpreadsheet style={{ width: 14, height: 14, color: '#38BDF8' }} />
-            Export CSV
+            {exportingSales ? 'Exporting All...' : 'Export CSV'}
           </button>
 
           <button
-            onClick={() => window.print()}
+            onClick={handlePrintReport}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -2547,7 +2830,10 @@ export default function SalesHistory({
                 onClick={() => {
                   if (thermalPrintInvoice) {
                     const html = buildSalesHistoryThermalHtml(thermalPrintInvoice, tenantName, assignedTemplate);
-                    printViaIframe(html);
+                    const printOk = printViaIframe(html);
+                    if (!printOk) {
+                      alert('Could not initialize printer dialog. Please verify browser permissions and try again.');
+                    }
                   }
                 }}
                 style={{

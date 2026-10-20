@@ -259,7 +259,10 @@ export default function BranchReceiptSettings({
     };
 
     const html = renderReceiptDocument(testReceiptData, templateJson, paperSize);
-    printViaIframe(html);
+    const printOk = printViaIframe(html);
+    if (!printOk) {
+      alert('Could not initialize print dialog. Please check browser popups/printer permissions.');
+    }
   };
 
   // Mock invoice data customized for this branch in live preview

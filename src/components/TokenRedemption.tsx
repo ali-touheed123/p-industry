@@ -2,6 +2,8 @@
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Client, Brand, BrandSeries, SeriesTokenConfig } from '@/types';
+import { printViaIframe } from '@/utils/iframePrint';
+import { escapeHtml } from '@/utils/receiptRenderCore';
 import {
   Ticket,
   Search,
@@ -376,99 +378,97 @@ export default function TokenRedemption({
     }
   };
 
-  // ── Thermal Slip Printing ─────────────────────────────────────────────────
+  // ── Thermal Slip Printing (F-03d / F-03e) — Isolated 80mm thermal printing via iframe
   const handlePrintSlip = () => {
     if (!completedRedemption) return;
-    const slipEl = document.getElementById('token-redemption-slip');
-    if (!slipEl) return;
 
-    const printWin = window.open('', '_blank', 'width=380,height=600');
-    if (!printWin) {
-      window.print();
-      return;
+    const itemsRows = completedRedemption.items
+      .map(
+        (it) => `
+        <tr>
+          <td>${escapeHtml(it.brandName)} ${escapeHtml(it.seriesName)}<br/><span style="font-size:9px;color:#333;">(${escapeHtml(it.unitName)})</span></td>
+          <td class="right">${it.quantity}</td>
+          <td class="right">${it.tokenValue}</td>
+          <td class="right">${it.lineTotal.toLocaleString()}</td>
+        </tr>
+      `
+      )
+      .join('');
+
+    const htmlDoc = `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Redemption Voucher - ${escapeHtml(completedRedemption.redemptionNo)}</title>
+    <style>
+      @page { margin: 0; size: 80mm 297mm; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font-family: 'Courier New', Courier, monospace;
+        width: 72mm;
+        margin: 0 auto;
+        padding: 10px 4px;
+        color: #000;
+        font-size: 11px;
+      }
+      .center { text-align: center; }
+      .right { text-align: right; }
+      .bold { font-weight: bold; }
+      .divider { border-top: 1px dashed #000; margin: 6px 0; }
+      .double-divider { border-top: 2px solid #000; margin: 8px 0; }
+      table { width: 100%; border-collapse: collapse; margin: 4px 0; }
+      th, td { padding: 2px 0; font-size: 10px; }
+      .total-row { font-size: 13px; font-weight: bold; }
+    </style>
+  </head>
+  <body>
+    <div class="center bold" style="font-size: 15px;">${escapeHtml(tenantName)}</div>
+    <div class="center">TOKEN CASHOUT VOUCHER</div>
+    <div class="center" style="font-size: 9px;">Cash Paid From Drawer</div>
+    <div class="divider"></div>
+    <div>Voucher #: ${escapeHtml(completedRedemption.redemptionNo)}</div>
+    <div>Date: ${escapeHtml(completedRedemption.date)}</div>
+    <div>Customer: ${escapeHtml(completedRedemption.clientName)}</div>
+    <div>Cashier: ${escapeHtml(staffName)}</div>
+    ${completedRedemption.shiftId ? `<div>Shift ID: #${escapeHtml(completedRedemption.shiftId.slice(0, 8))}</div>` : ''}
+    <div class="divider"></div>
+    <table>
+      <thead>
+        <tr>
+          <th style="text-align: left;">Item / Unit</th>
+          <th class="right">Qty</th>
+          <th class="right">Val</th>
+          <th class="right">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${itemsRows}
+      </tbody>
+    </table>
+    <div class="divider"></div>
+    <table>
+      <tr>
+        <td>Total Tokens Redeemed:</td>
+        <td class="right bold">${completedRedemption.totalTokens} Tokens</td>
+      </tr>
+      <tr class="total-row">
+        <td>CASH PAID OUT:</td>
+        <td class="right">Rs. ${completedRedemption.totalAmount.toLocaleString()}</td>
+      </tr>
+    </table>
+    <div class="double-divider"></div>
+    <div class="center" style="font-size: 9px;">Physical Tokens Deposited Into Safe</div>
+    <div class="center" style="font-size: 9px; margin-top: 4px;">Powered by Pyntflow ERP</div>
+  </body>
+</html>`;
+
+    const ok = printViaIframe(htmlDoc, (err) => {
+      console.error('[TokenRedemption] Receipt printing error:', err);
+    });
+
+    if (!ok) {
+      alert('Could not initialize print dialog. Please check browser print/popup permissions and try again.');
     }
-
-    printWin.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Redemption Voucher - ${completedRedemption.redemptionNo}</title>
-          <style>
-            @page { margin: 0; size: 80mm 297mm; }
-            body {
-              font-family: 'Courier New', Courier, monospace;
-              width: 72mm;
-              margin: 0 auto;
-              padding: 10px 4px;
-              color: #000;
-              font-size: 11px;
-            }
-            .center { text-align: center; }
-            .right { text-align: right; }
-            .bold { font-weight: bold; }
-            .divider { border-top: 1px dashed #000; margin: 6px 0; }
-            .double-divider { border-top: 2px solid #000; margin: 8px 0; }
-            table { width: 100%; border-collapse: collapse; margin: 4px 0; }
-            th, td { padding: 2px 0; font-size: 10px; }
-            .total-row { font-size: 13px; font-weight: bold; }
-          </style>
-        </head>
-        <body>
-          <div class="center bold" style="font-size: 15px;">${tenantName}</div>
-          <div class="center">TOKEN CASHOUT VOUCHER</div>
-          <div class="center" style="font-size: 9px;">Cash Paid From Drawer</div>
-          <div class="divider"></div>
-          <div>Voucher #: ${completedRedemption.redemptionNo}</div>
-          <div>Date: ${completedRedemption.date}</div>
-          <div>Customer: ${completedRedemption.clientName}</div>
-          <div>Cashier: ${staffName}</div>
-          ${completedRedemption.shiftId ? `<div>Shift ID: #${completedRedemption.shiftId.slice(0, 8)}</div>` : ''}
-          <div class="divider"></div>
-          <table>
-            <thead>
-              <tr>
-                <th style="text-align: left;">Item / Unit</th>
-                <th class="right">Qty</th>
-                <th class="right">Val</th>
-                <th class="right">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${completedRedemption.items
-                .map(
-                  (it) => `
-                <tr>
-                  <td>${it.brandName} ${it.seriesName}<br/><span style="font-size:9px;color:#333;">(${it.unitName})</span></td>
-                  <td class="right">${it.quantity}</td>
-                  <td class="right">${it.tokenValue}</td>
-                  <td class="right">${it.lineTotal.toLocaleString()}</td>
-                </tr>
-              `
-                )
-                .join('')}
-            </tbody>
-          </table>
-          <div class="divider"></div>
-          <table>
-            <tr>
-              <td>Total Tokens Redeemed:</td>
-              <td class="right bold">${completedRedemption.totalTokens} Tokens</td>
-            </tr>
-            <tr class="total-row">
-              <td>CASH PAID OUT:</td>
-              <td class="right">Rs. ${completedRedemption.totalAmount.toLocaleString()}</td>
-            </tr>
-          </table>
-          <div class="double-divider"></div>
-          <div class="center" style="font-size: 9px;">Physical Tokens Deposited Into Safe</div>
-          <div class="center" style="font-size: 9px; margin-top: 4px;">Powered by Pyntflow ERP</div>
-          <script>
-            window.onload = function() { window.print(); window.close(); }
-          </script>
-        </body>
-      </html>
-    `);
-    printWin.document.close();
   };
 
   const resetForm = () => {

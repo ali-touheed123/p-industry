@@ -4,6 +4,8 @@ import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { Shift, PettyExpense, Tenant, TokenTransaction } from '@/types';
 import { calculateExpectedClosingCash } from '@/utils/cashReconciliation';
+import { printViaIframe } from '@/utils/iframePrint';
+import { escapeHtml } from '@/utils/receiptRenderCore';
 
 interface Props {
   shift: Shift | null;
@@ -552,6 +554,134 @@ export default function ShiftDrawer({
       : `https://wa.me/?text=${encodeURIComponent(message)}`;
 
     window.open(url, '_blank');
+  };
+
+  // Shift Closing Receipt Print (F-03c) — Isolated 80mm thermal printing via iframe
+  const handlePrintShiftReceipt = (snap: ShiftClosingSnapshot) => {
+    const varianceStr =
+      snap.variance < 0
+        ? `- Rs. ${Math.abs(snap.variance).toLocaleString()} (SHORT)`
+        : snap.variance > 0
+        ? `+ Rs. ${snap.variance.toLocaleString()} (OVER)`
+        : 'Rs. 0 (BALANCED)';
+
+    const htmlDoc = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Shift Closing Receipt - ${escapeHtml(snap.shiftId)}</title>
+  <style>
+    @page { size: 80mm auto; margin: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 72mm;
+      margin: 0 auto;
+      padding: 6mm 2mm;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 11px;
+      color: #000;
+      background: #fff;
+      line-height: 1.3;
+    }
+    .center { text-align: center; }
+    .right { text-align: right; }
+    .bold { font-weight: bold; }
+    .divider { border-top: 1px dashed #000; margin: 6px 0; }
+    .double-divider { border-top: 2px solid #000; margin: 8px 0; }
+    .row { display: flex; justify-content: space-between; margin: 2px 0; }
+    .section-title { font-weight: bold; font-size: 11.5px; margin: 4px 0 2px 0; }
+  </style>
+</head>
+<body>
+  <div class="center">
+    <div class="bold" style="font-size: 15px;">${escapeHtml(snap.tenantName)}</div>
+    <div class="bold" style="font-size: 12px; margin-top: 2px;">SHIFT CLOSING RECEIPT</div>
+    <div style="font-size: 10px; color: #444; margin-top: 2px;">${escapeHtml(snap.closeDateTime)}</div>
+    <div style="font-size: 10px; color: #444;">Cashier: ${escapeHtml(snap.staffName)}</div>
+    <div style="font-size: 10px; color: #444;">Shift ID: #${escapeHtml(snap.shiftId.slice(0, 8))}</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="row">
+    <span>Opening Cash:</span>
+    <span class="right">Rs. ${snap.openingCash.toLocaleString()}</span>
+  </div>
+  <div class="row">
+    <span>Cash Sales:</span>
+    <span class="right">+ Rs. ${snap.cashSales.toLocaleString()}</span>
+  </div>
+  ${snap.bankSales > 0 ? `
+  <div class="row">
+    <span>Bank / Card Sales:</span>
+    <span class="right">Rs. ${snap.bankSales.toLocaleString()}</span>
+  </div>` : ''}
+  ${snap.creditSales > 0 ? `
+  <div class="row">
+    <span>Credit / Udhaar:</span>
+    <span class="right">Rs. ${snap.creditSales.toLocaleString()}</span>
+  </div>` : ''}
+  <div class="row">
+    <span>Petty Expenses:</span>
+    <span class="right">- Rs. ${snap.totalExpenses.toLocaleString()}</span>
+  </div>
+  ${snap.tokensRedeemed > 0 ? `
+  <div class="row">
+    <span>Token Cash Payouts:</span>
+    <span class="right">- Rs. ${snap.tokensRedeemed.toLocaleString()}</span>
+  </div>` : ''}
+
+  <div class="divider"></div>
+
+  <div class="row bold">
+    <span>Expected Cash:</span>
+    <span class="right">Rs. ${snap.expectedCash.toLocaleString()}</span>
+  </div>
+  <div class="row bold">
+    <span>Actual Cash Counted:</span>
+    <span class="right">Rs. ${snap.actualPhysicalCash.toLocaleString()}</span>
+  </div>
+  <div class="row bold" style="font-size: 11.5px; margin-top: 3px;">
+    <span>Variance:</span>
+    <span class="right">${escapeHtml(varianceStr)}</span>
+  </div>
+
+  ${snap.denominationSummary ? `
+  <div class="divider"></div>
+  <div class="section-title">CASH NOTES COUNTED:</div>
+  <div style="font-size: 10px; word-break: break-word; line-height: 1.25;">
+    ${escapeHtml(snap.denominationSummary)}
+  </div>` : ''}
+
+  <div class="divider"></div>
+  <div class="section-title">TOKEN SUMMARY:</div>
+  <div class="row">
+    <span>Tokens Issued:</span>
+    <span class="right">Rs. ${snap.tokensIssued.toLocaleString()}</span>
+  </div>
+  <div class="row">
+    <span>Tokens Redeemed:</span>
+    <span class="right">Rs. ${snap.tokensRedeemed.toLocaleString()}</span>
+  </div>
+  <div class="row">
+    <span>Shop Retained:</span>
+    <span class="right">Rs. ${snap.retainedTotal.toLocaleString()}</span>
+  </div>
+
+  <div class="double-divider"></div>
+  <div class="center" style="font-size: 9px; color: #555;">
+    PyntFlow ERP • Shift Reconciliation Slip
+  </div>
+</body>
+</html>`;
+
+    const ok = printViaIframe(htmlDoc, (err) => {
+      console.error('[ShiftDrawer] Receipt printing error:', err);
+    });
+
+    if (!ok) {
+      alert('Could not initialize print dialog. Please check browser print/popup permissions and try again.');
+    }
   };
 
   // Whether close button should be enabled
@@ -1554,7 +1684,7 @@ export default function ShiftDrawer({
               </div>
 
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button onClick={() => window.print()} style={{ flex: 1, padding: '9px', background: '#f97316', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: '700', cursor: 'pointer', fontSize: '13px' }}>
+                <button onClick={() => handlePrintShiftReceipt(snap)} style={{ flex: 1, padding: '9px', background: '#f97316', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: '700', cursor: 'pointer', fontSize: '13px' }}>
                   Print Receipt
                 </button>
                 {/* Feature #1: Redirect to login after dismissing print summary */}

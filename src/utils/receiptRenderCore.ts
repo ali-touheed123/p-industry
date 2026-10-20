@@ -544,20 +544,65 @@ export function renderReceiptBodyHtml(
       ? `<div style="font-size:9px;color:#555;font-style:italic;margin-top:1px">${escapeHtml(it.tokenNote)}</div>`
       : '';
 
+    // Reconcile item-table column percentages for all four supported combinations (Workstream G):
+    // Case 1: Name 56%, Qty 9%, Rate 16%, Amount 19% (sum = 100%)
+    // Case 2: Name 42%, Code 15%, Qty 9%, Rate 16%, Amount 18% (sum = 100%)
+    // Case 3: Name 45%, Qty 9%, Rate 16%, Discount 12%, Amount 18% (sum = 100%)
+    // Case 4: Name 32%, Code 15%, Qty 9%, Rate 16%, Discount 11%, Amount 17% (sum = 100%)
+    let nameWidth = 56;
+    let codeWidth = 0;
+    let qtyWidth = 9;
+    let rateWidth = 16;
+    let discountWidth = 0;
+    let amountWidth = 19;
+
+    const withCode = hasCol('code');
+    const withDisc = hasCol('discount');
+
+    if (withCode && withDisc) {
+      // Case 4
+      nameWidth = 32;
+      codeWidth = 15;
+      qtyWidth = 9;
+      rateWidth = 16;
+      discountWidth = 11;
+      amountWidth = 17;
+    } else if (withCode && !withDisc) {
+      // Case 2
+      nameWidth = 42;
+      codeWidth = 15;
+      qtyWidth = 9;
+      rateWidth = 16;
+      amountWidth = 18;
+    } else if (!withCode && withDisc) {
+      // Case 3
+      nameWidth = 45;
+      qtyWidth = 9;
+      rateWidth = 16;
+      discountWidth = 12;
+      amountWidth = 18;
+    } else {
+      // Case 1
+      nameWidth = 56;
+      qtyWidth = 9;
+      rateWidth = 16;
+      amountWidth = 19;
+    }
+
     // If using separate tabular columns
     if (hasCol('code') || hasCol('discount')) {
       return `
       <tr style="${borderStyle}">
-        ${hasCol('code') ? `<td style="${paddingStyle}font-size:0.85em;color:#555;vertical-align:top">${escapeHtml(it.code || '—')}</td>` : ''}
-        ${hasCol('name') ? `<td style="${paddingStyle}vertical-align:top">
-          <div style="font-weight:700">${escapeHtml(it.name)}</div>
+        ${hasCol('code') ? `<td style="${paddingStyle}width:${codeWidth}%;font-size:0.85em;color:#555;vertical-align:top;word-break:break-all">${escapeHtml(it.code || '—')}</td>` : ''}
+        ${hasCol('name') ? `<td style="${paddingStyle}width:${nameWidth}%;vertical-align:top;white-space:normal;word-break:break-word;overflow-wrap:break-word">
+          <div style="font-weight:700;line-height:1.25">${escapeHtml(it.name)}</div>
           ${it.shadeCode ? `<div style="font-size:0.85em;color:#555">Shade: ${escapeHtml(it.shadeCode)}</div>` : ''}
           ${tokenNoteHtml}
         </td>` : ''}
-        ${hasCol('qty') ? `<td style="${paddingStyle}text-align:center;vertical-align:top;font-weight:700">${it.qty}</td>` : ''}
-        ${hasCol('rate') ? `<td style="${paddingStyle}text-align:right;vertical-align:top">${fmt(it.rate)}</td>` : ''}
-        ${hasCol('discount') ? `<td style="${paddingStyle}text-align:right;vertical-align:top">${it.discount ? `-${fmt(it.discount)}` : '—'}</td>` : ''}
-        ${hasCol('amount') ? `<td style="${paddingStyle}text-align:right;vertical-align:top;font-weight:700">${fmt(it.total)}</td>` : ''}
+        ${hasCol('qty') ? `<td style="${paddingStyle}width:${qtyWidth}%;text-align:center;vertical-align:top;font-weight:700">${it.qty}</td>` : ''}
+        ${hasCol('rate') ? `<td style="${paddingStyle}width:${rateWidth}%;text-align:right;vertical-align:top">${fmt(it.rate)}</td>` : ''}
+        ${hasCol('discount') ? `<td style="${paddingStyle}width:${discountWidth}%;text-align:right;vertical-align:top">${it.discount ? `-${fmt(it.discount)}` : '—'}</td>` : ''}
+        ${hasCol('amount') ? `<td style="${paddingStyle}width:${amountWidth}%;text-align:right;vertical-align:top;font-weight:700">${fmt(it.total)}</td>` : ''}
       </tr>`;
     }
 
@@ -565,27 +610,56 @@ export function renderReceiptBodyHtml(
     return `
     <div style="${paddingStyle}${borderStyle}">
       <div style="display:flex;justify-content:space-between">
-        <div>
-          <div style="font-weight:700">${escapeHtml(it.name)}</div>
+        <div style="white-space:normal;word-break:break-word;overflow-wrap:break-word;flex:1;padding-right:4px">
+          <div style="font-weight:700;line-height:1.25">${escapeHtml(it.name)}</div>
           <div style="font-size:9.5px;color:#444">${subLine}</div>
         </div>
-        <div style="font-weight:700">${escapeHtml(cur)} ${fmt(it.total)}</div>
+        <div style="font-weight:700;white-space:nowrap">${escapeHtml(cur)} ${fmt(it.total)}</div>
       </div>
       ${tokenNoteHtml}
     </div>`;
   }).join('');
 
+  // Pre-calculate header column widths matching rows exactly
+  let headNameWidth = 56;
+  let headCodeWidth = 0;
+  let headQtyWidth = 9;
+  let headRateWidth = 16;
+  let headDiscWidth = 0;
+  let headAmountWidth = 19;
+
+  if (hasCol('code') && hasCol('discount')) {
+    headNameWidth = 32;
+    headCodeWidth = 15;
+    headQtyWidth = 9;
+    headRateWidth = 16;
+    headDiscWidth = 11;
+    headAmountWidth = 17;
+  } else if (hasCol('code') && !hasCol('discount')) {
+    headNameWidth = 42;
+    headCodeWidth = 15;
+    headQtyWidth = 9;
+    headRateWidth = 16;
+    headAmountWidth = 18;
+  } else if (!hasCol('code') && hasCol('discount')) {
+    headNameWidth = 45;
+    headQtyWidth = 9;
+    headRateWidth = 16;
+    headDiscWidth = 12;
+    headAmountWidth = 18;
+  }
+
   const itemsTableSection = (hasCol('code') || hasCol('discount'))
     ? `<div style="padding-bottom:6px;margin-bottom:6px;${headerSeparatorCss}">
-        <table style="width:100%;border-collapse:collapse;font-size:${itemsTable.fontSize}px">
+        <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:${itemsTable.fontSize}px">
           <thead>
             <tr style="border-bottom:1px solid #000;text-align:left">
-              ${hasCol('code') ? `<th style="padding:${itemsTable.rowPadding}px 0;width:15%">Code</th>` : ''}
-              ${hasCol('name') ? `<th style="padding:${itemsTable.rowPadding}px 0">Item</th>` : ''}
-              ${hasCol('qty') ? `<th style="padding:${itemsTable.rowPadding}px 0;text-align:center;width:12%">Qty</th>` : ''}
-              ${hasCol('rate') ? `<th style="padding:${itemsTable.rowPadding}px 0;text-align:right;width:20%">Rate</th>` : ''}
-              ${hasCol('discount') ? `<th style="padding:${itemsTable.rowPadding}px 0;text-align:right;width:15%">Disc</th>` : ''}
-              ${hasCol('amount') ? `<th style="padding:${itemsTable.rowPadding}px 0;text-align:right;width:22%">Total</th>` : ''}
+              ${hasCol('code') ? `<th style="padding:${itemsTable.rowPadding}px 0;width:${headCodeWidth}%">Code</th>` : ''}
+              ${hasCol('name') ? `<th style="padding:${itemsTable.rowPadding}px 0;width:${headNameWidth}%">Item</th>` : ''}
+              ${hasCol('qty') ? `<th style="padding:${itemsTable.rowPadding}px 0;text-align:center;width:${headQtyWidth}%">Qty</th>` : ''}
+              ${hasCol('rate') ? `<th style="padding:${itemsTable.rowPadding}px 0;text-align:right;width:${headRateWidth}%">Rate</th>` : ''}
+              ${hasCol('discount') ? `<th style="padding:${itemsTable.rowPadding}px 0;text-align:right;width:${headDiscWidth}%">Disc</th>` : ''}
+              ${hasCol('amount') ? `<th style="padding:${itemsTable.rowPadding}px 0;text-align:right;width:${headAmountWidth}%">Total</th>` : ''}
             </tr>
           </thead>
           <tbody>

@@ -31,6 +31,8 @@ import {
   Sparkles,
 } from 'lucide-react';
 import AiInvoiceScan from './AiInvoiceScan';
+import { printViaIframe } from '@/utils/iframePrint';
+import { escapeHtml } from '@/utils/receiptRenderCore';
 
 interface PurchasesViewProps {
   tenantId?: string;
@@ -521,6 +523,112 @@ export default function PurchasesView({
     const saved = await handleSavePurchase();
     if (saved) {
       setShowVoucherModal(true);
+    }
+  };
+
+  // Purchase Voucher Print (F-03b) — Isolated A4 printing via iframe
+  const handlePrintVoucher = () => {
+    const itemsHtml = items
+      .map(
+        (i, idx) => `
+        <tr style="border-bottom: 1px solid #f1f5f9; background: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+          <td style="padding: 6px 8px; font-weight: 600;">${escapeHtml(i.productName)}</td>
+          <td style="padding: 6px 8px; text-align: center; font-family: monospace;">${escapeHtml(i.qty)} ${escapeHtml(i.unit)}</td>
+          <td style="padding: 6px 8px; text-align: right; font-family: monospace;">Rs. ${Number(i.rate || 0).toLocaleString()}</td>
+          <td style="padding: 6px 8px; text-align: right; font-weight: 700; font-family: monospace;">Rs. ${(Number(i.rate || 0) * Number(i.qty || 0)).toLocaleString()}</td>
+        </tr>
+      `
+      )
+      .join('');
+
+    const htmlDoc = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Purchase Voucher - #${escapeHtml(recordNo)} (${escapeHtml(purchaseInvNo)})</title>
+  <style>
+    @page { size: A4 portrait; margin: 15mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; font-size: 11px; color: #0f172a; background: #fff; line-height: 1.4; padding: 12px; }
+    .header { border-bottom: 2px solid #0f172a; padding-bottom: 10px; margin-bottom: 14px; }
+    .tenant { font-size: 18px; font-weight: 800; color: #0f172a; }
+    .title { font-size: 13px; font-weight: 700; color: #f97316; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.03em; }
+    .meta-box { border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; background: #f8fafc; margin-bottom: 14px; font-family: monospace; font-size: 11px; }
+    .meta-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+    .meta-row:last-child { margin-bottom: 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 14px; }
+    th { background: #0f172a; color: #fff; padding: 8px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; font-family: monospace; }
+    th.left, td.left { text-align: left; }
+    th.center, td.center { text-align: center; }
+    th.right, td.right { text-align: right; }
+    .total-box { border-top: 2px solid #0f172a; padding-top: 8px; display: flex; justify-content: space-between; font-weight: 900; font-size: 14px; font-family: monospace; }
+    .footer { margin-top: 20px; border-top: 1px solid #cbd5e1; padding-top: 8px; font-size: 9.5px; color: #94a3b8; display: flex; justify-content: space-between; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div style="display: flex; justify-content: space-between; align-items: flex-end;">
+      <div>
+        <div class="tenant">${escapeHtml(tenantName)}</div>
+        <div class="title">Goods Receipt / Purchase Voucher</div>
+      </div>
+      <div style="text-align: right; font-size: 10px; color: #64748b;">
+        <div>Officer: <strong>${escapeHtml(staffName)}</strong></div>
+        <div>Date: <strong>${escapeHtml(invoiceDate)}</strong></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="meta-box">
+    <div class="meta-row">
+      <span style="color: #64748b;">Voucher / Record No:</span>
+      <span style="font-weight: 800; color: #0f172a;">#${escapeHtml(recordNo)} (${escapeHtml(purchaseInvNo)})</span>
+    </div>
+    <div class="meta-row">
+      <span style="color: #64748b;">Supplier:</span>
+      <span style="font-weight: 700; color: #0f172a;">${escapeHtml(selectedSupplier?.name || '—')}</span>
+    </div>
+    <div class="meta-row">
+      <span style="color: #64748b;">Invoice Date:</span>
+      <span>${escapeHtml(invoiceDate)}</span>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="left">Item</th>
+        <th class="center">Qty</th>
+        <th class="right">Rate</th>
+        <th class="right">Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${itemsHtml || '<tr><td colspan="4" style="text-align: center; padding: 12px; color: #64748b;">No line items</td></tr>'}
+    </tbody>
+  </table>
+
+  <div class="total-box">
+    <span>Net Voucher Value:</span>
+    <span style="color: #f97316;">Rs. ${netBillValue.toLocaleString()}</span>
+  </div>
+
+  <div class="footer">
+    <div>PyntFlow Industrial ERP • Goods Receipt / Purchase Voucher</div>
+    <div>Total Items: ${items.length}</div>
+  </div>
+</body>
+</html>`;
+
+    const ok = printViaIframe(htmlDoc, (err) => {
+      console.error('[PurchasesView] Voucher printing error:', err);
+    });
+
+    if (ok) {
+      setShowVoucherModal(false);
+      showFeedback('Print job sent to browser.');
+    } else {
+      showFeedback('Could not initialize print dialog. Please check browser permissions.');
     }
   };
 
@@ -2140,10 +2248,7 @@ export default function PurchasesView({
                 Close
               </button>
               <button
-                onClick={() => {
-                  window.print();
-                  setShowVoucherModal(false);
-                }}
+                onClick={handlePrintVoucher}
                 style={{ padding: '7px 16px', background: '#F97316', color: '#FFFFFF', border: 'none', borderRadius: '6px', fontWeight: 700, fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
               >
                 <Printer style={{ width: 14, height: 14 }} />

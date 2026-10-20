@@ -20,6 +20,7 @@ import {
   FileSpreadsheet,
 } from 'lucide-react';
 import { DatePeriodFilter } from './DatePeriodFilter';
+import { serializeCsv, downloadCsv } from '@/utils/csvSerializer';
 
 interface TokensViewProps {
   branch: Branch;
@@ -297,62 +298,109 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
     });
   }, [filteredTransactions, customerFilter]);
 
-  // CSV Export
+  // CSV Export — Workstream E: Respect active tab (Stockpile vs Customer) and all active subtab/filters
   const handleExportCSV = () => {
-    if (!filteredTransactions.length) {
-      alert('No token records to export for the selected period.');
-      return;
-    }
+    if (mainTab === 'stockpile') {
+      if (!stockpileData.length) {
+        alert('No stockpile token records to export for the selected filter.');
+        return;
+      }
 
-    const headers = [
-      'ID',
-      'Date',
-      'Time',
-      'Transaction Type',
-      'Customer / Client',
-      'Item Name',
-      'Brand',
-      'Category',
-      'Token Value (PKR)',
-      'Redeemed (PKR)',
-      'Usage Status',
-      'Applied PO No',
-      'Supplier Name',
-      'Used Date',
-      'Notes',
-    ];
-
-    const rows = filteredTransactions.map((t) => {
-      const createdDate = t.created_at ? new Date(t.created_at) : new Date();
-      const timeStr = createdDate.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
-      const dateStr = createdDate.toISOString().split('T')[0];
-      return [
-        `"${t.id}"`,
-        `"${dateStr}"`,
-        `"${timeStr}"`,
-        `"${t.type || t.transaction_type}"`,
-        `"${t.client_name || 'Walk-in'}"`,
-        `"${t.item_name || '—'}"`,
-        `"${t.brand_name || t.brand || '—'}"`,
-        `"${t.series_name || t.category || '—'}"`,
-        t.total_amount || t.token_value || 0,
-        t.total_amount || t.redeemed_amount || 0,
-        `"${t.usage_status || 'available'}"`,
-        `"${t.purchases?.purchase_no || t.used_against_purchase_id || '—'}"`,
-        `"${t.purchases?.supplier_name || '—'}"`,
-        `"${t.used_date ? t.used_date.split('T')[0] : '—'}"`,
-        `"${(t.notes || '').replace(/"/g, '""')}"`,
+      const headers = [
+        'Date',
+        'Time',
+        'Origin / Source',
+        'Transaction Type',
+        'Brand',
+        'Series',
+        'Unit / Pack',
+        'Quantity',
+        'Token Value (PKR)',
+        'Stockpile Status',
+        'Applied Supplier PO',
+        'Supplier Name',
+        'Notes',
       ];
-    });
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `CEO_TokenLedger_${branch.name.replace(/\s+/g, '_')}_${startDate || 'start'}_to_${endDate || 'end'}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+      const rows: any[][] = stockpileData.map((t) => {
+        const createdDate = t.created_at ? new Date(t.created_at) : new Date();
+        const dateStr = createdDate.toISOString().split('T')[0];
+        const timeStr = createdDate.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
+        const isUsed = t.usage_status === 'used' || t.usage_status === 'settled' || Boolean(t.used_against_purchase_id) || Boolean(t.used_against_voucher_id);
+        const statusLabel = t.usage_status === 'written_off' ? 'Written Off' : isUsed ? 'Applied to PO' : 'Available in Shop';
+
+        return [
+          dateStr,
+          timeStr,
+          t.client_name || 'Counter Sale (Shop Retained)',
+          (t.type || t.transaction_type) === 'redeemed' ? 'Customer Redeemed' : (t.type || t.transaction_type) === 'opening_stock' ? 'Opening Stock' : 'POS Retained',
+          t.brand_name || t.brand || 'General',
+          t.series_name || '—',
+          t.unit_name || t.category || '—',
+          Number(t.remaining_quantity ?? t.quantity ?? 1),
+          Number(t.token_value || 0),
+          statusLabel,
+          t.purchases?.purchase_no || t.used_against_purchase_id || '—',
+          t.purchases?.supplier_name || '—',
+          t.notes || '',
+        ];
+      });
+
+      const csvContent = serializeCsv([headers, ...rows]);
+      downloadCsv(
+        `CEO_Stockpile_${branch.name.replace(/\s+/g, '_')}_${stockpileSubTab}_${startDate || 'start'}_to_${endDate || 'end'}`,
+        csvContent
+      );
+    } else {
+      // Customer Token Activity
+      if (!customerData.length) {
+        alert('No customer token activity to export for the selected filter.');
+        return;
+      }
+
+      const headers = [
+        'Date',
+        'Time',
+        'Activity Type',
+        'Customer / Painter',
+        'Brand',
+        'Series',
+        'Unit',
+        'Token Value (PKR)',
+        'Redeemed Cash (PKR)',
+        'Stockpile Join Status',
+        'Notes',
+      ];
+
+      const rows: any[][] = customerData.map((t) => {
+        const createdDate = t.created_at ? new Date(t.created_at) : new Date();
+        const dateStr = createdDate.toISOString().split('T')[0];
+        const timeStr = createdDate.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
+        const isRedeemed = (t.type || t.transaction_type) === 'redeemed';
+        const isUsed = t.usage_status === 'used' || t.usage_status === 'settled' || Boolean(t.used_against_purchase_id);
+        const joinStatus = isRedeemed ? (isUsed ? 'Stockpiled (Applied to PO)' : 'Stockpiled in Safe') : 'N/A (Issued)';
+
+        return [
+          dateStr,
+          timeStr,
+          isRedeemed ? 'Redeemed for Cash' : 'Issued to Customer',
+          t.client_name || 'Walk-in Customer',
+          t.brand_name || t.brand || 'General',
+          t.series_name || '—',
+          t.unit_name || t.category || '—',
+          Number(t.token_value || 0),
+          isRedeemed ? Number(t.redeemed_amount || t.total_amount || t.token_value || 0) : 0,
+          joinStatus,
+          t.notes || '',
+        ];
+      });
+
+      const csvContent = serializeCsv([headers, ...rows]);
+      downloadCsv(
+        `CEO_CustomerTokens_${branch.name.replace(/\s+/g, '_')}_${customerFilter}_${startDate || 'start'}_to_${endDate || 'end'}`,
+        csvContent
+      );
+    }
   };
 
   return (

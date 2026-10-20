@@ -21,8 +21,12 @@ import {
   RotateCcw,
   Check,
   ArrowRight,
+  FileSpreadsheet,
+  Printer,
 } from 'lucide-react';
 import AiInvoiceScan from './AiInvoiceScan';
+import { exportToXlsx } from '@/utils/excelExporter';
+import { printViaIframe } from '@/utils/iframePrint';
 import {
   getBulkDraft,
   setBulkDraft,
@@ -1342,28 +1346,110 @@ export default function StockInventory({
     }
   };
 
-  // Export CSV
-  const handleExportCSV = () => {
-    if (items.length === 0) return;
-    const headers = ['Code', 'Product Name', 'Category', 'Pack Size', 'Shade', 'Stock Qty', 'Retail Price'];
-    const rows = items.map((i) => [
-      i.code,
-      `"${i.name.replace(/"/g, '""')}"`,
-      i.category || 'General',
-      i.pack_size || i.unit || 'Can',
-      i.shade_code || 'Standard',
-      i.stock_qty,
-      i.retail_price,
-    ]);
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `PaintERP_Inventory_${tenantName.replace(/\s+/g, '_')}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    showToast('Inventory manifest exported to CSV!');
+  // State for Export dropdown menu (Requirement A: Exactly Excel and Print)
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
+
+  // Workstream C: Export to Excel (.xlsx) using sortedProducts
+  const handleExportExcel = async () => {
+    setShowExportMenu(false);
+    if (sortedProducts.length === 0) {
+      showToast('No inventory records to export for the current filters.');
+      return;
+    }
+    setExportingExcel(true);
+    try {
+      await exportToXlsx(
+        `Inventory_${tenantName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`,
+        sortedProducts,
+        [
+          { header: 'Product Code', type: 'String', width: 14, getValue: (i) => i.code || '—' },
+          { header: 'Product Name', type: 'String', width: 30, getValue: (i) => i.name },
+          { header: 'Category', type: 'String', width: 20, getValue: (i) => i.category || 'General' },
+          { header: 'Brand', type: 'String', width: 16, getValue: (i) => i.brand || '—' },
+          { header: 'Pack Size / Unit', type: 'String', width: 16, getValue: (i) => i.pack_size || i.unit || 'Can' },
+          { header: 'Shade Code', type: 'String', width: 16, getValue: (i) => i.shade_code || 'Standard' },
+          { header: 'Stock Qty', type: 'Number', width: 14, format: '#,##0', getValue: (i) => i.stock_qty },
+          { header: 'Cost Price (PKR)', type: 'Number', width: 16, format: '#,##0.00', getValue: (i) => i.cost_price || 0 },
+          { header: 'Retail Price (PKR)', type: 'Number', width: 16, format: '#,##0.00', getValue: (i) => i.retail_price || 0 },
+          { header: 'Stock Valuation (PKR)', type: 'Number', width: 20, format: '#,##0.00', getValue: (i) => (i.stock_qty || 0) * (i.cost_price || 0) },
+        ],
+        'Inventory'
+      );
+      showToast(`Exported ${sortedProducts.length} inventory items to Excel!`);
+    } catch (err: any) {
+      console.error('Failed to export inventory to Excel:', err);
+      showToast('Failed to generate Excel file.');
+    } finally {
+      setExportingExcel(false);
+    }
+  };
+
+  // Workstream C: Print Inventory Report (isolated printable report, NOT whole ERP shell)
+  const handlePrintInventory = () => {
+    setShowExportMenu(false);
+    if (sortedProducts.length === 0) {
+      showToast('No inventory records to print.');
+      return;
+    }
+
+    const rowsHtml = sortedProducts.map((i, idx) => `
+      <tr style="border-bottom: 1px solid #E2E8F0; ${idx % 2 === 1 ? 'background: #F8FAFC;' : ''}">
+        <td style="padding: 6px 8px; font-family: monospace; font-size: 11px;">${i.code || '—'}</td>
+        <td style="padding: 6px 8px; font-weight: 600;">${i.name}</td>
+        <td style="padding: 6px 8px;">${i.category || 'General'}</td>
+        <td style="padding: 6px 8px;">${i.pack_size || i.unit || '—'}</td>
+        <td style="padding: 6px 8px; text-align: center; font-weight: 700;">${i.stock_qty}</td>
+        <td style="padding: 6px 8px; text-align: right;">Rs. ${(i.retail_price || 0).toLocaleString()}</td>
+      </tr>
+    `).join('');
+
+    const printHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Inventory Manifest — ${tenantName}</title>
+  <style>
+    @page { size: A4 portrait; margin: 12mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #0F172A; padding: 10px; }
+    .header { margin-bottom: 16px; border-bottom: 2px solid #0F172A; padding-bottom: 8px; display: flex; justify-content: space-between; align-items: flex-end; }
+    .title { font-size: 18px; font-weight: 800; color: #0F172A; }
+    .sub { font-size: 11px; color: #64748B; margin-top: 2px; }
+    table { width: 100%; border-collapse: collapse; text-align: left; margin-top: 10px; }
+    th { background: #0F172A; color: #FFF; padding: 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+    td { font-size: 11px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="title">${tenantName} — Inventory Manifest</div>
+      <div class="sub">Generated on ${new Date().toLocaleString()} · Filtered records: ${sortedProducts.length} items</div>
+    </div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 15%;">Code</th>
+        <th style="width: 35%;">Product Name</th>
+        <th style="width: 20%;">Category</th>
+        <th style="width: 12%;">Pack / Unit</th>
+        <th style="width: 8%; text-align: center;">Qty</th>
+        <th style="width: 10%; text-align: right;">Retail</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml}
+    </tbody>
+  </table>
+</body>
+</html>`;
+
+    const printOk = printViaIframe(printHtml);
+    if (!printOk) {
+      showToast('Could not open print window. Please check permissions.');
+    }
   };
 
   return (
@@ -1543,15 +1629,91 @@ export default function StockInventory({
                 {isRefreshing ? 'Syncing...' : 'Refresh Stock'}
               </button>
 
-              <button
-                type="button"
-                onClick={handleExportCSV}
-                className="inv-btn-secondary"
-                title="Export stock manifest to CSV"
-              >
-                <Download style={{ width: 14, height: 14 }} />
-                Export CSV
-              </button>
+              {/* Workstream C: Export Menu offering exactly Excel and Print */}
+              <div style={{ position: 'relative' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowExportMenu(!showExportMenu)}
+                  disabled={exportingExcel}
+                  className="inv-btn-secondary"
+                  title="Export inventory data"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <Download style={{ width: 14, height: 14, color: '#38BDF8' }} />
+                  {exportingExcel ? 'Exporting...' : 'Export'}
+                </button>
+
+                {showExportMenu && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: '100%',
+                      right: 0,
+                      marginTop: '6px',
+                      background: '#0F172A',
+                      border: '1px solid #334155',
+                      borderRadius: '8px',
+                      padding: '4px',
+                      minWidth: '150px',
+                      boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
+                      zIndex: 50,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '2px',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={handleExportExcel}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '8px 12px',
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#F8FAFC',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        borderRadius: '6px',
+                        textAlign: 'left',
+                        width: '100%',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = '#1E293B')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      <FileSpreadsheet style={{ width: 15, height: 15, color: '#10B981' }} />
+                      Excel (.xlsx)
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handlePrintInventory}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '8px 12px',
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#F8FAFC',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        borderRadius: '6px',
+                        textAlign: 'left',
+                        width: '100%',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = '#1E293B')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      <Printer style={{ width: 15, height: 15, color: '#F97316' }} />
+                      Print
+                    </button>
+                  </div>
+                )}
+              </div>
 
               <button
                 type="button"

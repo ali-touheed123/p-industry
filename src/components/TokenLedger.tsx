@@ -26,6 +26,7 @@ import {
   ShoppingBag,
   ExternalLink,
 } from 'lucide-react';
+import { serializeCsv, downloadCsv } from '@/utils/csvSerializer';
 
 interface Props {
   tenantId: string;
@@ -505,8 +506,8 @@ export default function TokenLedger({
 
   // ── CSV Export ─────────────────────────────────────────────────────────────
   const handleExportCSV = () => {
-    if (!filteredTransactions.length) {
-      alert('No token records to export for the selected period.');
+    if (!customerActivityTransactions.length) {
+      alert('No token records to export for the selected filters.');
       return;
     }
 
@@ -529,41 +530,35 @@ export default function TokenLedger({
       'Notes',
     ];
 
-    const rows = filteredTransactions.map((t) => {
+    const rows: any[][] = customerActivityTransactions.map((t: TokenTransaction) => {
       const createdDate = t.created_at ? new Date(t.created_at) : new Date();
       const timeStr = createdDate.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
       const dateStr = createdDate.toISOString().split('T')[0];
       return [
-        `"${t.id}"`,
-        `"${dateStr}"`,
-        `"${timeStr}"`,
-        `"${t.type || '—'}"`,
-        `"${t.client_name || 'Walk-in Customer'}"`,
-        `"${t.brand_name || '—'}"`,
-        `"${t.series_name || '—'}"`,
-        `"${t.unit_name || '—'}"`,
+        t.id,
+        dateStr,
+        timeStr,
+        t.type || '—',
+        t.client_name || 'Walk-in Customer',
+        t.brand_name || '—',
+        t.series_name || '—',
+        t.unit_name || '—',
         Number(t.token_value) || 0,
         Number(t.quantity) || 0,
         Number(t.remaining_quantity) || 0,
         Number(t.total_amount) || 0,
-        `"${t.usage_status || 'N/A'}"`,
-        `"${t.purchases?.purchase_no || t.used_against_purchase_id || '—'}"`,
-        `"${t.purchases?.supplier_name || '—'}"`,
-        `"${(t.notes || '').replace(/"/g, '""')}"`,
+        t.usage_status || 'N/A',
+        t.purchases?.purchase_no || t.used_against_purchase_id || '—',
+        t.purchases?.supplier_name || '—',
+        t.notes || '',
       ];
     });
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute(
-      'download',
-      `PaintERP_TokenLedger_${tenantName.replace(/\s+/g, '_')}_${startDate || 'start'}_to_${endDate || 'end'}.csv`
+    const csvContent = serializeCsv([headers, ...rows]);
+    downloadCsv(
+      `PaintERP_TokenLedger_${tenantName.replace(/\s+/g, '_')}_${customerTypeFilter}_${startDate || 'start'}_to_${endDate || 'end'}`,
+      csvContent
     );
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   };
 
   return (
