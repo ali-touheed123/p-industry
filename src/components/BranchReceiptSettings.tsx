@@ -216,6 +216,8 @@ export default function BranchReceiptSettings({
 
     const testReceiptData: RenderReceiptData = {
       tenantName: effectiveShopName || 'PyntFlow Store',
+      tenantAddress: templateJson.header.customAddress?.trim() || tenantAddress || 'Branch Address',
+      tenantPhone: templateJson.header.customPhone?.trim() || tenantPhone || '+92 300 0000000',
       invoiceNo: 'TEST-0042',
       date: new Date().toISOString().split('T')[0],
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),

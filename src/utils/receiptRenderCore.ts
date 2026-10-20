@@ -480,6 +480,8 @@ export interface RenderReceiptPaymentSplit {
 
 export interface RenderReceiptData {
   tenantName: string;
+  tenantAddress?: string;
+  tenantPhone?: string;
   invoiceNo?: string;
   date?: string;
   time?: string;
@@ -526,19 +528,21 @@ export function renderReceiptBodyHtml(
   const phoneSize = header.phoneSize ?? 10;
 
   const shopNameHtml = header.showShopName
-    ? `<h2 style="font-size:${shopNameSize}px;font-weight:900;${shopNameTransform}letter-spacing:${shopNameSpacing};margin:0 0 2px 0">${escapeHtml(header.customShopName || data.tenantName || 'PyntFlow Store')}</h2>`
+    ? `<h2 style="font-size:${shopNameSize}px;font-weight:900;${shopNameTransform}letter-spacing:${shopNameSpacing};margin:0 0 2px 0;color:#000">${escapeHtml(header.customShopName || data.tenantName || 'PyntFlow Store')}</h2>`
     : '';
 
-  const addressHtml = (header.showAddress && (header.customAddress || !header.customShopName))
-    ? `<p style="font-size:${addressSize}px;color:#333;margin:0">${escapeHtml(header.customAddress || 'Retail & Industrial Paint Hub')}</p>`
+  const effectiveAddress = header.customAddress?.trim() || data.tenantAddress?.trim() || 'Retail & Industrial Paint Hub';
+  const addressHtml = header.showAddress
+    ? `<p style="font-size:${addressSize}px;color:#000;margin:0">${escapeHtml(effectiveAddress)}</p>`
     : '';
 
-  const phoneHtml = (header.showPhone && header.customPhone)
-    ? `<p style="font-size:${phoneSize}px;color:#333;margin:2px 0 0 0">${escapeHtml(header.phonePrefix?.trim() || 'Tel:')} ${escapeHtml(header.customPhone)}</p>`
+  const effectivePhone = header.customPhone?.trim() || data.tenantPhone?.trim() || '';
+  const phoneHtml = (header.showPhone && effectivePhone)
+    ? `<p style="font-size:${phoneSize}px;color:#000;margin:2px 0 0 0">${escapeHtml(header.phonePrefix?.trim() || 'Tel:')} ${escapeHtml(effectivePhone)}</p>`
     : '';
 
   const reprintNoticeHtml = data.isReprint
-    ? `<div style="font-size:10px;font-weight:800;color:#555;margin-top:3px;letter-spacing:0.05em">&#9851; DUPLICATE RECEIPT</div>`
+    ? `<div style="font-size:10px;font-weight:800;color:#000;margin-top:3px;letter-spacing:0.05em">&#9851; DUPLICATE RECEIPT</div>`
     : '';
 
   const headerSeparatorCss = getSeparatorCss(header.separator);
@@ -557,8 +561,8 @@ export function renderReceiptBodyHtml(
 
   // T-19 (Option A): Invoice Number is mandatory; rendered whenever data.invoiceNo is available
   if (data.invoiceNo) {
-    infoRows.push(`<div style="display:flex;justify-content:space-between">
-      <span style="color:#555">${escapeHtml(invoiceInfo.invoiceLabel || 'Invoice #')}</span>
+    infoRows.push(`<div style="display:flex;justify-content:space-between;color:#000">
+      <span>${escapeHtml(invoiceInfo.invoiceLabel || 'Invoice #')}</span>
       <span style="font-weight:700">${escapeHtml(data.invoiceNo)}</span>
     </div>`);
   }
@@ -566,29 +570,29 @@ export function renderReceiptBodyHtml(
   // T-19 (Option A): Date & Timestamp is mandatory; rendered whenever data.date is available
   if (data.date) {
     const dateTimeStr = `${escapeHtml(data.date)}${data.time ? ` &middot; ${escapeHtml(data.time)}` : ''}`;
-    infoRows.push(`<div style="display:flex;justify-content:space-between">
-      <span style="color:#555">${escapeHtml(invoiceInfo.dateLabel?.trim() || 'Date:')}</span>
+    infoRows.push(`<div style="display:flex;justify-content:space-between;color:#000">
+      <span>${escapeHtml(invoiceInfo.dateLabel?.trim() || 'Date:')}</span>
       <span>${dateTimeStr}</span>
     </div>`);
   }
 
   if (invoiceInfo.showCustomer) {
-    infoRows.push(`<div style="display:flex;justify-content:space-between">
-      <span style="color:#555">${escapeHtml(invoiceInfo.customerLabel?.trim() || 'Customer:')}</span>
+    infoRows.push(`<div style="display:flex;justify-content:space-between;color:#000">
+      <span>${escapeHtml(invoiceInfo.customerLabel?.trim() || 'Customer:')}</span>
       <span style="font-weight:700">${escapeHtml(data.clientName || 'Walk-in')}</span>
     </div>`);
   }
 
   if (invoiceInfo.showCashier && data.staffName) {
-    infoRows.push(`<div style="display:flex;justify-content:space-between">
-      <span style="color:#555">${escapeHtml(invoiceInfo.cashierLabel?.trim() || 'Staff:')}</span>
+    infoRows.push(`<div style="display:flex;justify-content:space-between;color:#000">
+      <span>${escapeHtml(invoiceInfo.cashierLabel?.trim() || 'Staff:')}</span>
       <span style="font-weight:700">${escapeHtml(data.staffName)}</span>
     </div>`);
   }
 
   if (invoiceInfo.showPaymentMethod && data.paymentMethod) {
-    infoRows.push(`<div style="display:flex;justify-content:space-between">
-      <span style="color:#555">${escapeHtml(invoiceInfo.paymentLabel?.trim() || 'Payment:')}</span>
+    infoRows.push(`<div style="display:flex;justify-content:space-between;color:#000">
+      <span>${escapeHtml(invoiceInfo.paymentLabel?.trim() || 'Payment:')}</span>
       <span>${escapeHtml(data.paymentMethod)}</span>
     </div>`);
   }
@@ -603,7 +607,8 @@ export function renderReceiptBodyHtml(
   // 3. Items Table Block
   const activeCols = itemsTable.columns.length > 0 ? itemsTable.columns : ['name', 'qty', 'rate', 'amount'];
   const hasCol = (id: string) => activeCols.includes(id as any);
-  const rowBorder = itemsTable.showBorders ? 'border-bottom:1px dotted #ccc;' : '';
+  const rowBorder = itemsTable.showBorders ? 'border-bottom:1px dotted #000;' : '';
+  const useTabularLayout = !itemsTable.compact || hasCol('code') || hasCol('discount');
 
   const itemRowsHtml = (data.items || []).map((it, idx) => {
     const isLast = idx === (data.items.length - 1);
@@ -615,7 +620,7 @@ export function renderReceiptBodyHtml(
     const subLine = `${codePart}${shadePart}${it.qty} x ${escapeHtml(cur)} ${fmt(it.rate)}`;
 
     const tokenNoteHtml = it.tokenNote
-      ? `<div style="font-size:9px;color:#555;font-style:italic;margin-top:1px">${escapeHtml(it.tokenNote)}</div>`
+      ? `<div style="font-size:9px;color:#000;font-style:italic;margin-top:1px">${escapeHtml(it.tokenNote)}</div>`
       : '';
 
     // Reconcile item-table column percentages for all four supported combinations (Workstream G):
@@ -663,30 +668,30 @@ export function renderReceiptBodyHtml(
       amountWidth = 19;
     }
 
-    // If using separate tabular columns
-    if (hasCol('code') || hasCol('discount')) {
+    // If using tabular columns
+    if (useTabularLayout) {
       return `
       <tr style="${borderStyle}">
-        ${hasCol('code') ? `<td style="${paddingStyle}width:${codeWidth}%;font-size:0.85em;color:#555;vertical-align:top;word-break:break-all">${escapeHtml(it.code || '—')}</td>` : ''}
-        ${hasCol('name') ? `<td style="${paddingStyle}width:${nameWidth}%;vertical-align:top;white-space:normal;word-break:break-word;overflow-wrap:break-word">
+        ${hasCol('code') ? `<td style="${paddingStyle}width:${codeWidth}%;font-size:0.85em;color:#000;vertical-align:top;word-break:break-all">${escapeHtml(it.code || '—')}</td>` : ''}
+        ${hasCol('name') ? `<td style="${paddingStyle}width:${nameWidth}%;vertical-align:top;white-space:normal;word-break:break-word;overflow-wrap:break-word;color:#000">
           <div style="font-weight:700;line-height:1.25">${escapeHtml(it.name)}</div>
-          ${it.shadeCode ? `<div style="font-size:0.85em;color:#555">Shade: ${escapeHtml(it.shadeCode)}</div>` : ''}
+          ${it.shadeCode ? `<div style="font-size:0.85em;color:#000">Shade: ${escapeHtml(it.shadeCode)}</div>` : ''}
           ${tokenNoteHtml}
         </td>` : ''}
-        ${hasCol('qty') ? `<td style="${paddingStyle}width:${qtyWidth}%;text-align:center;vertical-align:top;font-weight:700">${it.qty}</td>` : ''}
-        ${hasCol('rate') ? `<td style="${paddingStyle}width:${rateWidth}%;text-align:right;vertical-align:top">${fmt(it.rate)}</td>` : ''}
-        ${hasCol('discount') ? `<td style="${paddingStyle}width:${discountWidth}%;text-align:right;vertical-align:top">${it.discount ? `-${fmt(it.discount)}` : '—'}</td>` : ''}
-        ${hasCol('amount') ? `<td style="${paddingStyle}width:${amountWidth}%;text-align:right;vertical-align:top;font-weight:700">${fmt(it.total)}</td>` : ''}
+        ${hasCol('qty') ? `<td style="${paddingStyle}width:${qtyWidth}%;text-align:center;vertical-align:top;font-weight:700;color:#000">${it.qty}</td>` : ''}
+        ${hasCol('rate') ? `<td style="${paddingStyle}width:${rateWidth}%;text-align:right;vertical-align:top;color:#000">${fmt(it.rate)}</td>` : ''}
+        ${hasCol('discount') ? `<td style="${paddingStyle}width:${discountWidth}%;text-align:right;vertical-align:top;color:#000">${it.discount ? `-${fmt(it.discount)}` : '—'}</td>` : ''}
+        ${hasCol('amount') ? `<td style="${paddingStyle}width:${amountWidth}%;text-align:right;vertical-align:top;font-weight:700;color:#000">${fmt(it.total)}</td>` : ''}
       </tr>`;
     }
 
     // Default compact 2-line layout
     return `
     <div style="${paddingStyle}${borderStyle}">
-      <div style="display:flex;justify-content:space-between">
+      <div style="display:flex;justify-content:space-between;color:#000">
         <div style="white-space:normal;word-break:break-word;overflow-wrap:break-word;flex:1;padding-right:4px">
           <div style="font-weight:700;line-height:1.25">${escapeHtml(it.name)}</div>
-          <div style="font-size:9.5px;color:#444">${subLine}</div>
+          <div style="font-size:9.5px;color:#000">${subLine}</div>
         </div>
         <div style="font-weight:700;white-space:nowrap">${escapeHtml(cur)} ${fmt(it.total)}</div>
       </div>
@@ -723,11 +728,11 @@ export function renderReceiptBodyHtml(
     headAmountWidth = 18;
   }
 
-  const itemsTableSection = (hasCol('code') || hasCol('discount'))
+  const itemsTableSection = useTabularLayout
     ? `<div style="padding-bottom:6px;margin-bottom:6px;${headerSeparatorCss}">
-        <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:${itemsTable.fontSize}px">
+        <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:${itemsTable.fontSize}px;color:#000">
           <thead>
-            <tr style="border-bottom:1px solid #000;text-align:left">
+            <tr style="border-bottom:1px solid #000;text-align:left;color:#000">
               ${hasCol('code') ? `<th style="padding:${itemsTable.rowPadding}px 0;width:${headCodeWidth}%">${escapeHtml(itemsTable.colLabelCode || 'Code')}</th>` : ''}
               ${hasCol('name') ? `<th style="padding:${itemsTable.rowPadding}px 0;width:${headNameWidth}%">${escapeHtml(itemsTable.colLabelName || 'Item')}</th>` : ''}
               ${hasCol('qty') ? `<th style="padding:${itemsTable.rowPadding}px 0;text-align:center;width:${headQtyWidth}%">${escapeHtml(itemsTable.colLabelQty || 'Qty')}</th>` : ''}
@@ -741,7 +746,7 @@ export function renderReceiptBodyHtml(
           </tbody>
         </table>
        </div>`
-    : `<div style="padding-bottom:6px;margin-bottom:6px;font-size:${itemsTable.fontSize}px;${headerSeparatorCss}">
+    : `<div style="padding-bottom:6px;margin-bottom:6px;font-size:${itemsTable.fontSize}px;color:#000;${headerSeparatorCss}">
         ${itemRowsHtml}
        </div>`;
 
@@ -749,22 +754,22 @@ export function renderReceiptBodyHtml(
   const totalRows: string[] = [];
 
   if (totals.showSubtotal) {
-    totalRows.push(`<div style="display:flex;justify-content:space-between">
-      <span style="color:#555">${escapeHtml(totals.subtotalLabel || 'Subtotal:')}</span>
+    totalRows.push(`<div style="display:flex;justify-content:space-between;color:#000">
+      <span>${escapeHtml(totals.subtotalLabel || 'Subtotal:')}</span>
       <span>${escapeHtml(cur)} ${fmt(data.subTotal)}</span>
     </div>`);
   }
 
   if (totals.showDiscount && (data.discount || 0) > 0) {
-    totalRows.push(`<div style="display:flex;justify-content:space-between">
-      <span style="color:#555">${escapeHtml(totals.discountLabel || 'Discount:')}</span>
+    totalRows.push(`<div style="display:flex;justify-content:space-between;color:#000">
+      <span>${escapeHtml(totals.discountLabel || 'Discount:')}</span>
       <span>- ${escapeHtml(cur)} ${fmt(data.discount || 0)}</span>
     </div>`);
   }
 
   if ((data.deliveryCharge || 0) > 0) {
-    totalRows.push(`<div style="display:flex;justify-content:space-between">
-      <span style="color:#555">${escapeHtml(totals.deliveryLabel || 'Delivery:')}</span>
+    totalRows.push(`<div style="display:flex;justify-content:space-between;color:#000">
+      <span>${escapeHtml(totals.deliveryLabel || 'Delivery:')}</span>
       <span>+ ${escapeHtml(cur)} ${fmt(data.deliveryCharge || 0)}</span>
     </div>`);
   }
@@ -772,8 +777,8 @@ export function renderReceiptBodyHtml(
   const gstRate = Number(totals.gstRate || 0);
   if (totals.showGst && gstRate > 0) {
     const calculatedGst = Math.round((data.subTotal * gstRate) / 100);
-    totalRows.push(`<div style="display:flex;justify-content:space-between">
-      <span style="color:#555">GST (${gstRate}%):</span>
+    totalRows.push(`<div style="display:flex;justify-content:space-between;color:#000">
+      <span>GST (${gstRate}%):</span>
       <span>+ ${escapeHtml(cur)} ${fmt(calculatedGst)}</span>
     </div>`);
   }
@@ -781,13 +786,13 @@ export function renderReceiptBodyHtml(
   // T-19 (Option A): Grand Total is mandatory; always rendered
   const grandTotalFontSize = totals.grandTotalFontSize ? `${totals.grandTotalFontSize}px` : (totals.boldTotal ? '13px' : '11px');
   const grandTotalFontWeight = totals.boldTotal ? '900' : '700';
-  totalRows.push(`<div style="display:flex;justify-content:space-between;font-size:${grandTotalFontSize};font-weight:${grandTotalFontWeight};padding-top:3px;border-top:1px solid #000;margin-top:2px">
+  totalRows.push(`<div style="display:flex;justify-content:space-between;font-size:${grandTotalFontSize};font-weight:${grandTotalFontWeight};padding-top:3px;border-top:1px solid #000;margin-top:2px;color:#000">
     <span>${escapeHtml(totals.netTotalLabel || 'NET TOTAL:')}</span>
     <span>${escapeHtml(cur)} ${fmt(data.grandTotal)}</span>
   </div>`);
 
   if (totals.showPaid) {
-    totalRows.push(`<div style="display:flex;justify-content:space-between;font-weight:700;padding-top:2px">
+    totalRows.push(`<div style="display:flex;justify-content:space-between;font-weight:700;padding-top:2px;color:#000">
       <span>${escapeHtml(totals.paidLabel || 'Paid:')} (${escapeHtml(data.paymentMethod || 'CASH')})</span>
       <span>${escapeHtml(cur)} ${fmt(data.paidAmount)}</span>
     </div>`);
@@ -803,22 +808,21 @@ export function renderReceiptBodyHtml(
     if ((s.others || 0) > 0) splitLines.push(`<div style="display:flex;justify-content:space-between"><span>&bull; Other:</span><span>${escapeHtml(cur)} ${fmt(s.others || 0)}</span></div>`);
 
     if (splitLines.length > 0) {
-      totalRows.push(`<div style="padding-left:8px;font-size:9.5px;color:#444">
+      totalRows.push(`<div style="padding-left:8px;font-size:9.5px;color:#000">
         ${splitLines.join('\n')}
       </div>`);
     }
   }
 
   if ((data.changeReturned || 0) > 0) {
-    totalRows.push(`<div style="display:flex;justify-content:space-between;font-size:10px;color:#15803d;font-weight:700">
+    totalRows.push(`<div style="display:flex;justify-content:space-between;font-size:10px;color:#000;font-weight:700">
       <span>${escapeHtml(totals.changeLabel || 'Change Returned:')}</span>
       <span>${escapeHtml(cur)} ${fmt(data.changeReturned || 0)}</span>
     </div>`);
   }
 
   if (totals.showBalance && (data.dueAmount || 0) > 0) {
-    const dueColor = totals.highlightBalanceDue ? '#b91c1c' : '#000';
-    totalRows.push(`<div style="display:flex;justify-content:space-between;font-size:10.5px;font-weight:700;color:${dueColor}">
+    totalRows.push(`<div style="display:flex;justify-content:space-between;font-size:10.5px;font-weight:700;color:#000">
       <span>${escapeHtml(totals.balanceDueLabel || 'Balance Due:')}</span>
       <span>${escapeHtml(cur)} ${fmt(data.dueAmount || 0)}</span>
     </div>`);
@@ -826,7 +830,7 @@ export function renderReceiptBodyHtml(
 
   const totalsFontSize = totals.fontSize ?? 11;
   const totalsSection = `
-<div style="display:flex;flex-direction:column;gap:3px;font-size:${totalsFontSize}px;padding-bottom:8px;margin-bottom:8px;break-inside:avoid;page-break-inside:avoid;${headerSeparatorCss}">
+<div style="display:flex;flex-direction:column;gap:3px;font-size:${totalsFontSize}px;padding-bottom:8px;margin-bottom:8px;break-inside:avoid;page-break-inside:avoid;color:#000;${headerSeparatorCss}">
   ${totalRows.join('\n')}
 </div>`.trim();
 
@@ -838,28 +842,28 @@ export function renderReceiptBodyHtml(
   const whatsappSize = footer.whatsappSize ?? 9;
 
   if (footer.line1) {
-    footerLines.push(`<div style="text-align:${footerAlign};font-size:${footerLine1Size}px;color:#555">${escapeHtml(footer.line1)}</div>`);
+    footerLines.push(`<div style="text-align:${footerAlign};font-size:${footerLine1Size}px;color:#000">${escapeHtml(footer.line1)}</div>`);
   }
 
   if (footer.line2) {
-    footerLines.push(`<div style="text-align:${footerAlign};font-size:${footerLine2Size}px;color:#777;margin-top:2px">${escapeHtml(footer.line2)}</div>`);
+    footerLines.push(`<div style="text-align:${footerAlign};font-size:${footerLine2Size}px;color:#000;margin-top:2px">${escapeHtml(footer.line2)}</div>`);
   }
 
   if (footer.showWhatsapp && footer.whatsappNumber) {
-    footerLines.push(`<div style="text-align:${footerAlign};font-size:${whatsappSize}px;color:#555;margin-top:2px">${escapeHtml(footer.whatsappLabel?.trim() || 'WhatsApp:')} ${escapeHtml(footer.whatsappNumber)}</div>`);
+    footerLines.push(`<div style="text-align:${footerAlign};font-size:${whatsappSize}px;color:#000;margin-top:2px">${escapeHtml(footer.whatsappLabel?.trim() || 'WhatsApp:')} ${escapeHtml(footer.whatsappNumber)}</div>`);
   }
 
   if (footer.showPoweredBy) {
-    footerLines.push(`<div style="text-align:${footerAlign};font-size:8px;color:#aaa;margin-top:2px">${escapeHtml(footer.poweredByText || 'Powered by Pyntflow')}</div>`);
+    footerLines.push(`<div style="text-align:${footerAlign};font-size:8px;color:#000;margin-top:2px">${escapeHtml(footer.poweredByText || 'Powered by Pyntflow')}</div>`);
   }
 
   if (footer.showQrCode) {
     footerLines.push(`
       <div style="text-align:${footerAlign};margin-top:6px">
-        <div style="width:60px;height:60px;border:1px dashed #999;display:inline-flex;align-items:center;justify-content:center;font-size:8px;color:#777">
+        <div style="width:60px;height:60px;border:1px dashed #000;display:inline-flex;align-items:center;justify-content:center;font-size:8px;color:#000">
           [QR Code]
         </div>
-        ${footer.qrCodeText ? `<div style="font-size:8px;color:#777;margin-top:2px">${escapeHtml(footer.qrCodeText)}</div>` : ''}
+        ${footer.qrCodeText ? `<div style="font-size:8px;color:#000;margin-top:2px">${escapeHtml(footer.qrCodeText)}</div>` : ''}
       </div>
     `);
   }
@@ -874,12 +878,12 @@ export function renderReceiptBodyHtml(
   const showTokenClaimSlip = hasValidClaimCode && isSlipEnabled;
 
   const tokenClaimSlipSection = showTokenClaimSlip
-    ? `<div style="border:1px dashed #000;padding:8px;margin-top:10px;text-align:center;break-inside:avoid;page-break-inside:avoid">
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px">&#127915; ${escapeHtml(tokenClaimSlip.title || 'Token Claim Slip')}</div>
-        <div style="font-size:9px;color:#555;margin-bottom:6px">${escapeHtml(tokenClaimSlip.instructions || 'Present this code on your next visit to redeem your token')}</div>
-        <div style="font-size:14px;font-weight:900;letter-spacing:0.1em;border:1px solid #000;padding:4px 8px;display:inline-block;margin:4px 0">${escapeHtml(data.tokenClaimCode)}</div>
-        ${tokenClaimSlip.showDetails && data.tokenClaimDetails ? `<div style="font-size:9px;color:#444;margin-top:4px">${escapeHtml(data.tokenClaimDetails)}</div>` : ''}
-        <div style="font-size:8px;color:#777;margin-top:4px">${escapeHtml(tokenClaimSlip.footerNotice || 'Keep this receipt — code cannot be reissued')}</div>
+    ? `<div style="border:1px dashed #000;padding:8px;margin-top:10px;text-align:center;break-inside:avoid;page-break-inside:avoid;color:#000">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;color:#000">&#127915; ${escapeHtml(tokenClaimSlip.title || 'Token Claim Slip')}</div>
+        <div style="font-size:9px;color:#000;margin-bottom:6px">${escapeHtml(tokenClaimSlip.instructions || 'Present this code on your next visit to redeem your token')}</div>
+        <div style="font-size:14px;font-weight:900;letter-spacing:0.1em;border:1px solid #000;padding:4px 8px;display:inline-block;margin:4px 0;color:#000">${escapeHtml(data.tokenClaimCode)}</div>
+        ${tokenClaimSlip.showDetails && data.tokenClaimDetails ? `<div style="font-size:9px;color:#000;margin-top:4px">${escapeHtml(data.tokenClaimDetails)}</div>` : ''}
+        <div style="font-size:8px;color:#000;margin-top:4px">${escapeHtml(tokenClaimSlip.footerNotice || 'Keep this receipt — code cannot be reissued')}</div>
        </div>`
     : '';
 

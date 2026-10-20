@@ -20,10 +20,12 @@ export interface ReceiptInvoiceData {
   items?: ReceiptItemData[];
   subtotal?: number;
   discount?: number;
+  delivery_charge?: number;
   tax?: number;
   net_total?: number;
   paid_amount?: number;
   due_amount?: number;
+  change_returned?: number;
   shop_name?: string;
   shop_address?: string;
   shop_phone?: string;
@@ -48,10 +50,12 @@ export const MOCK_INVOICE_DATA: ReceiptInvoiceData = {
   ],
   subtotal: 14310,
   discount: 150,
+  delivery_charge: 0,
   tax: 0,
   net_total: 14160,
   paid_amount: 14000,
   due_amount: 160,
+  change_returned: 0,
   token_claim_code: 'CLM-DEMO99',
   token_claim_details: 'Super Gloss Enamel 1L (x4) - Rs. 200 token value',
 };
@@ -97,8 +101,8 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
 
   const separatorStyle = (style: string): React.CSSProperties => {
     if (style === 'none') return {};
-    if (style === 'double') return { borderBottom: '3px double #1e293b' };
-    return { borderBottom: `1px ${style} #1e293b` };
+    if (style === 'double') return { borderBottom: '3px double #000000' };
+    return { borderBottom: `1px ${style} #000000` };
   };
 
   const shopTitle = header.customShopName || invoiceData.shop_name || 'PYNTFLOW PAINTS';
@@ -107,6 +111,21 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
 
   const items = invoiceData.items || [];
   const cur = totals.currencySymbol || 'Rs.';
+
+  // Calculate synchronized column widths matching receiptRenderCore
+  const hasCol = (colId: string) => itemsTable.columns.includes(colId as any);
+  const withCode = hasCol('code');
+  const withDisc = hasCol('discount');
+  let colWidths: Record<string, string> = { name: '56%', qty: '12%', rate: '16%', amount: '16%' };
+  if (withCode && withDisc) {
+    colWidths = { code: '15%', name: '32%', qty: '10%', rate: '15%', discount: '12%', amount: '16%' };
+  } else if (withCode && !withDisc) {
+    colWidths = { code: '15%', name: '42%', qty: '11%', rate: '16%', amount: '16%' };
+  } else if (!withCode && withDisc) {
+    colWidths = { name: '45%', qty: '11%', rate: '16%', discount: '12%', amount: '16%' };
+  } else {
+    colWidths = { name: '56%', qty: '12%', rate: '16%', amount: '16%' };
+  }
 
   return (
     <div
@@ -117,7 +136,7 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
         maxWidth: isThermal ? `${sizeConfig.defaultWidthPx}px` : `${sizeConfig.defaultWidthPx}px`,
         margin: '0 auto',
         backgroundColor: '#ffffff',
-        color: '#0f172a',
+        color: '#000000',
         fontFamily: fontStack,
         fontSize: `${layout.fontSize}px`,
         lineHeight: 1.35,
@@ -170,6 +189,7 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
               fontWeight: 800,
               letterSpacing: typeof header.shopNameLetterSpacing === 'number' ? `${header.shopNameLetterSpacing}em` : '0.5px',
               textTransform: header.shopNameUppercase !== false ? 'uppercase' : 'none',
+              color: '#000000',
             }}
           >
             {shopTitle}
@@ -177,14 +197,14 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
         )}
 
         {header.showAddress && (
-          <div style={{ fontSize: `${header.addressSize ?? Math.max(9, layout.fontSize - 2)}px`, color: '#475569', marginTop: '2px' }}>
+          <div style={{ fontSize: `${header.addressSize ?? Math.max(9, layout.fontSize - 2)}px`, color: '#000000', marginTop: '2px' }}>
             {shopAddress}
           </div>
         )}
 
         {header.showPhone && (
-          <div style={{ fontSize: `${header.phoneSize ?? Math.max(9, layout.fontSize - 2)}px`, color: '#475569', marginTop: '1px' }}>
-            Tel: {shopPhone}
+          <div style={{ fontSize: `${header.phoneSize ?? Math.max(9, layout.fontSize - 2)}px`, color: '#000000', marginTop: '1px' }}>
+            {header.phonePrefix?.trim() || 'Tel:'} {shopPhone}
           </div>
         )}
       </div>
@@ -196,36 +216,37 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
           paddingBottom: '8px',
           marginBottom: '8px',
           ...separatorStyle('dashed'),
+          color: '#000000',
         }}
       >
         {/* T-19 Strict Compliance Lock: Invoice Number is mandatory and always visible */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, marginBottom: '2px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, marginBottom: '2px', color: '#000000' }}>
           <span>{invoiceInfo.invoiceLabel || 'Invoice #'}:</span>
           <span>{invoiceData.invoice_no || 'INV-0000'}</span>
         </div>
 
         {/* T-19 Strict Compliance Lock: Date is mandatory and always visible */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569', marginBottom: '2px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#000000', marginBottom: '2px' }}>
           <span>{invoiceInfo.dateLabel || 'Date:'}</span>
           <span>{invoiceData.date || new Date().toLocaleString()}</span>
         </div>
 
         {invoiceInfo.showCashier && invoiceData.cashier_name && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569', marginBottom: '2px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#000000', marginBottom: '2px' }}>
             <span>{invoiceInfo.cashierLabel || 'Cashier:'}</span>
             <span>{invoiceData.cashier_name}</span>
           </div>
         )}
 
         {invoiceInfo.showCustomer && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569', marginBottom: '2px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#000000', marginBottom: '2px' }}>
             <span>{invoiceInfo.customerLabel || 'Customer:'}</span>
             <span style={{ fontWeight: 600 }}>{invoiceData.client_name || 'Walk-in Customer'}</span>
           </div>
         )}
 
         {invoiceInfo.showPaymentMethod && invoiceData.payment_method && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#000000' }}>
             <span>{invoiceInfo.paymentLabel || 'Payment:'}</span>
             <span>{invoiceData.payment_method}</span>
           </div>
@@ -238,6 +259,7 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
           paddingBottom: '8px',
           marginBottom: '8px',
           ...separatorStyle(header.separator === 'none' ? 'dashed' : header.separator),
+          color: '#000000',
         }}
       >
         <table
@@ -245,42 +267,45 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
             width: '100%',
             borderCollapse: 'collapse',
             fontSize: `${itemsTable.fontSize || layout.fontSize}px`,
+            tableLayout: 'fixed',
+            color: '#000000',
           }}
         >
           <thead>
             <tr
               style={{
-                borderBottom: itemsTable.showBorders ? '1px solid #0f172a' : 'none',
+                borderBottom: itemsTable.showBorders ? '1px solid #000000' : 'none',
                 textAlign: 'left',
+                color: '#000000',
               }}
             >
               {itemsTable.columns.includes('code') && (
-                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, width: '15%' }}>
+                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, width: colWidths.code || '15%' }}>
                   {itemsTable.colLabelCode || 'Code'}
                 </th>
               )}
               {itemsTable.columns.includes('name') && (
-                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700 }}>
+                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, width: colWidths.name || '50%' }}>
                   {itemsTable.colLabelName || 'Item'}
                 </th>
               )}
               {itemsTable.columns.includes('qty') && (
-                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, textAlign: 'center', width: '12%' }}>
+                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, textAlign: 'center', width: colWidths.qty || '12%' }}>
                   {itemsTable.colLabelQty || 'Qty'}
                 </th>
               )}
               {itemsTable.columns.includes('rate') && (
-                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, textAlign: 'right', width: '22%' }}>
+                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, textAlign: 'right', width: colWidths.rate || '18%' }}>
                   {itemsTable.colLabelRate || 'Rate'}
                 </th>
               )}
               {itemsTable.columns.includes('discount') && (
-                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, textAlign: 'right', width: '16%' }}>
+                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, textAlign: 'right', width: colWidths.discount || '12%' }}>
                   {itemsTable.colLabelDiscount || 'Disc'}
                 </th>
               )}
               {itemsTable.columns.includes('amount') && (
-                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, textAlign: 'right', width: '24%' }}>
+                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, textAlign: 'right', width: colWidths.amount || '18%' }}>
                   {itemsTable.colLabelAmount || 'Total'}
                 </th>
               )}
@@ -291,41 +316,42 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
               <tr
                 key={idx}
                 style={{
-                  borderBottom: itemsTable.showBorders && !itemsTable.compact ? '1px dashed #e2e8f0' : 'none',
+                  borderBottom: itemsTable.showBorders && !itemsTable.compact ? '1px dashed #000000' : 'none',
+                  color: '#000000',
                 }}
               >
                 {itemsTable.columns.includes('code') && (
-                  <td style={{ padding: `${itemsTable.rowPadding}px 2px`, verticalAlign: 'top', fontSize: '0.85em', color: '#64748b' }}>
+                  <td style={{ padding: `${itemsTable.rowPadding}px 2px`, verticalAlign: 'top', fontSize: '0.85em', color: '#000000', width: colWidths.code, wordBreak: 'break-all' }}>
                     {item.code || '-'}
                   </td>
                 )}
                 {itemsTable.columns.includes('name') && (
-                  <td style={{ padding: `${itemsTable.rowPadding}px 2px`, verticalAlign: 'top' }}>
+                  <td style={{ padding: `${itemsTable.rowPadding}px 2px`, verticalAlign: 'top', width: colWidths.name, wordBreak: 'break-word', color: '#000000' }}>
                     <div style={{ fontWeight: 600 }}>{item.item_name}</div>
                     {item.shade_code && (
-                      <div style={{ fontSize: '0.85em', color: '#64748b' }}>
+                      <div style={{ fontSize: '0.85em', color: '#000000' }}>
                         Shade: {item.shade_code}
                       </div>
                     )}
                   </td>
                 )}
                 {itemsTable.columns.includes('qty') && (
-                  <td style={{ padding: `${itemsTable.rowPadding}px 2px`, textAlign: 'center', verticalAlign: 'top', fontWeight: 600 }}>
+                  <td style={{ padding: `${itemsTable.rowPadding}px 2px`, textAlign: 'center', verticalAlign: 'top', fontWeight: 600, width: colWidths.qty, color: '#000000' }}>
                     {item.qty}
                   </td>
                 )}
                 {itemsTable.columns.includes('rate') && (
-                  <td style={{ padding: `${itemsTable.rowPadding}px 2px`, textAlign: 'right', verticalAlign: 'top' }}>
+                  <td style={{ padding: `${itemsTable.rowPadding}px 2px`, textAlign: 'right', verticalAlign: 'top', width: colWidths.rate, color: '#000000' }}>
                     {item.unit_price.toLocaleString()}
                   </td>
                 )}
                 {itemsTable.columns.includes('discount') && (
-                  <td style={{ padding: `${itemsTable.rowPadding}px 2px`, textAlign: 'right', verticalAlign: 'top', color: '#dc2626' }}>
+                  <td style={{ padding: `${itemsTable.rowPadding}px 2px`, textAlign: 'right', verticalAlign: 'top', color: '#000000', width: colWidths.discount }}>
                     {item.discount ? `-${item.discount}` : '0'}
                   </td>
                 )}
                 {itemsTable.columns.includes('amount') && (
-                  <td style={{ padding: `${itemsTable.rowPadding}px 2px`, textAlign: 'right', verticalAlign: 'top', fontWeight: 700 }}>
+                  <td style={{ padding: `${itemsTable.rowPadding}px 2px`, textAlign: 'right', verticalAlign: 'top', fontWeight: 700, width: colWidths.amount, color: '#000000' }}>
                     {item.total_price.toLocaleString()}
                   </td>
                 )}
@@ -345,26 +371,34 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
           paddingBottom: '8px',
           marginBottom: '8px',
           ...separatorStyle('dashed'),
+          color: '#000000',
         }}
       >
         {totals.showSubtotal && (
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#000000' }}>
             <span>{totals.subtotalLabel || 'Subtotal:'}</span>
             <span>{cur} {(invoiceData.subtotal || 0).toLocaleString()}</span>
           </div>
         )}
 
         {totals.showDiscount && (invoiceData.discount || 0) > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#dc2626' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#000000' }}>
             <span>{totals.discountLabel || 'Discount:'}</span>
             <span>-{cur} {(invoiceData.discount || 0).toLocaleString()}</span>
           </div>
         )}
 
+        {(invoiceData.delivery_charge || 0) > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#000000' }}>
+            <span>{totals.deliveryLabel || 'Delivery:'}</span>
+            <span>+{cur} {(invoiceData.delivery_charge || 0).toLocaleString()}</span>
+          </div>
+        )}
+
         {totals.showGst && (totals.gstRate || 0) > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#000000' }}>
             <span>GST ({totals.gstRate}%):</span>
-            <span>{cur} {Math.round(((invoiceData.subtotal || 0) * (totals.gstRate || 0)) / 100).toLocaleString()}</span>
+            <span>+{cur} {Math.round(((invoiceData.subtotal || 0) * (totals.gstRate || 0)) / 100).toLocaleString()}</span>
           </div>
         )}
 
@@ -376,8 +410,9 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
             fontSize: totals.grandTotalFontSize ? `${totals.grandTotalFontSize}px` : (totals.boldTotal ? `${Math.round(layout.fontSize * 1.2)}px` : `${totals.fontSize ?? layout.fontSize}px`),
             fontWeight: totals.boldTotal ? 900 : 700,
             paddingTop: '4px',
-            borderTop: '1px solid #0f172a',
+            borderTop: '1px solid #000000',
             marginTop: '3px',
+            color: '#000000',
           }}
         >
           <span>{totals.netTotalLabel || 'NET TOTAL:'}</span>
@@ -385,9 +420,16 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
         </div>
 
         {totals.showPaid && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, color: '#000000' }}>
             <span>{totals.paidLabel || 'Paid Amount:'}</span>
             <span>{cur} {(invoiceData.paid_amount || 0).toLocaleString()}</span>
+          </div>
+        )}
+
+        {(invoiceData.change_returned || 0) > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#000000', fontWeight: 700 }}>
+            <span>{totals.changeLabel || 'Change Returned:'}</span>
+            <span>{cur} {(invoiceData.change_returned || 0).toLocaleString()}</span>
           </div>
         )}
 
@@ -397,10 +439,8 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
               display: 'flex',
               justifyContent: 'space-between',
               fontWeight: 700,
-              color: totals.highlightBalanceDue && (invoiceData.due_amount || 0) > 0 ? '#b91c1c' : '#0f172a',
-              background: totals.highlightBalanceDue && (invoiceData.due_amount || 0) > 0 ? '#fef2f2' : 'transparent',
-              padding: totals.highlightBalanceDue && (invoiceData.due_amount || 0) > 0 ? '2px 4px' : '0',
-              borderRadius: '2px',
+              color: '#000000',
+              padding: '0',
             }}
           >
             <span>{totals.balanceDueLabel || 'Balance Due:'}</span>
@@ -414,19 +454,19 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
         style={{
           textAlign: footer.align || 'center',
           fontSize: `${Math.max(9, layout.fontSize - 2)}px`,
-          color: '#475569',
+          color: '#000000',
           display: 'flex',
           flexDirection: 'column',
           gap: '4px',
         }}
       >
         {footer.line1 && (
-          <div style={{ fontWeight: 600, fontSize: `${footer.line1Size ?? Math.max(9, layout.fontSize - 2)}px` }}>
+          <div style={{ fontWeight: 600, fontSize: `${footer.line1Size ?? Math.max(9, layout.fontSize - 2)}px`, color: '#000000' }}>
             {footer.line1}
           </div>
         )}
         {footer.line2 && (
-          <div style={{ fontSize: `${footer.line2Size ?? Math.max(9, layout.fontSize - 2)}px` }}>
+          <div style={{ fontSize: `${footer.line2Size ?? Math.max(9, layout.fontSize - 2)}px`, color: '#000000' }}>
             {footer.line2}
           </div>
         )}
@@ -440,7 +480,7 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
               gap: '4px',
               marginTop: '2px',
               fontWeight: 600,
-              color: '#047857',
+              color: '#000000',
               fontSize: `${footer.whatsappSize ?? Math.max(9, layout.fontSize - 2)}px`,
             }}
           >
@@ -462,20 +502,20 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
               style={{
                 width: '64px',
                 height: '64px',
-                border: '1px dashed #cbd5e1',
+                border: '1px dashed #000000',
                 borderRadius: '4px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontSize: '9px',
-                color: '#94a3b8',
-                background: '#f8fafc',
+                color: '#000000',
+                background: 'transparent',
               }}
             >
               [QR Code]
             </div>
             {footer.qrCodeText && (
-              <span style={{ fontSize: '8px', color: '#94a3b8', marginTop: '2px' }}>{footer.qrCodeText}</span>
+              <span style={{ fontSize: '8px', color: '#000000', marginTop: '2px' }}>{footer.qrCodeText}</span>
             )}
           </div>
         )}
@@ -486,7 +526,7 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
               fontSize: '8px',
               textTransform: 'uppercase',
               letterSpacing: '1px',
-              color: '#94a3b8',
+              color: '#000000',
               marginTop: '4px',
               fontWeight: 700,
             }}
@@ -500,12 +540,13 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
       {isSlipEnabled && (
         <div
           style={{
-            border: '1px dashed #0f172a',
+            border: '1px dashed #000000',
             padding: '8px',
             marginTop: '12px',
             textAlign: 'center',
-            backgroundColor: '#fafaf9',
+            backgroundColor: '#ffffff',
             borderRadius: '2px',
+            color: '#000000',
           }}
         >
           <div
@@ -515,7 +556,7 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
               textTransform: 'uppercase',
               letterSpacing: '0.05em',
               marginBottom: '3px',
-              color: '#0f172a',
+              color: '#000000',
             }}
           >
             &#127915; {tokenClaimSlip?.title || 'Token Claim Slip'}
@@ -523,7 +564,7 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
           <div
             style={{
               fontSize: '8.5px',
-              color: '#475569',
+              color: '#000000',
               marginBottom: '5px',
             }}
           >
@@ -534,12 +575,13 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
               fontSize: '13px',
               fontWeight: 900,
               letterSpacing: '0.12em',
-              border: '1px solid #0f172a',
+              border: '1px solid #000000',
               padding: '3px 8px',
               display: 'inline-block',
               margin: '3px 0',
               fontFamily: 'monospace',
               backgroundColor: '#ffffff',
+              color: '#000000',
             }}
           >
             {invoiceData.token_claim_code || 'CLM-DEMO99'}
@@ -548,7 +590,7 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
             style={{
               fontSize: '8px',
               fontWeight: 800,
-              color: '#b91c1c',
+              color: '#000000',
               letterSpacing: '0.04em',
               margin: '3px 0',
               textTransform: 'uppercase',
@@ -560,7 +602,7 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
             <div
               style={{
                 fontSize: '8.5px',
-                color: '#475569',
+                color: '#000000',
                 marginTop: '3px',
                 fontStyle: 'italic',
               }}
@@ -571,7 +613,7 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
           <div
             style={{
               fontSize: '7.5px',
-              color: '#64748b',
+              color: '#000000',
               marginTop: '4px',
             }}
           >

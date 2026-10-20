@@ -11,7 +11,9 @@ export function buildPosThermalHtml(
   data: any,
   tenantName: string = 'PyntFlow Store',
   staffName: string = 'Counter Staff',
-  tmpl?: ReceiptTemplate | null
+  tmpl?: ReceiptTemplate | null,
+  tenantAddress?: string,
+  tenantPhone?: string
 ): string {
   const effectiveTenantName = (tenantName && tenantName.trim() && tenantName !== 'Main Godown & Retail Counter #1')
     ? tenantName
@@ -45,6 +47,8 @@ export function buildPosThermalHtml(
 
   const receiptData: RenderReceiptData = {
     tenantName: effectiveTenantName,
+    tenantAddress: tenantAddress || data.tenantAddress || data.shop_address,
+    tenantPhone: tenantPhone || data.tenantPhone || data.shop_phone,
     invoiceNo: data.invoice_no,
     date: data.date,
     time: data.time,
@@ -81,7 +85,9 @@ export function buildPosThermalHtml(
 export function buildSalesHistoryThermalHtml(
   inv: any,
   tenantName: string,
-  tmpl?: ReceiptTemplate | null
+  tmpl?: ReceiptTemplate | null,
+  tenantAddress?: string,
+  tenantPhone?: string
 ): string {
   const effectiveTenantName = (tenantName && tenantName.trim()) ? tenantName : 'PyntFlow Store';
   const isSplit = inv.payment_type === 'split' ||
@@ -106,6 +112,8 @@ export function buildSalesHistoryThermalHtml(
 
   const receiptData: RenderReceiptData = {
     tenantName: effectiveTenantName,
+    tenantAddress: tenantAddress || inv.tenantAddress || inv.shop_address,
+    tenantPhone: tenantPhone || inv.tenantPhone || inv.shop_phone,
     invoiceNo: inv.invoice_no,
     date: inv.date,
     clientName: inv.client_name,
