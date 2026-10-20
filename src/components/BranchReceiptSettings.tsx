@@ -48,7 +48,7 @@ interface BranchReceiptSettingsProps {
   onTemplateSaved?: (savedTemplate: ReceiptTemplate) => void;
 }
 
-type TabKey = 'paper' | 'header' | 'meta' | 'table' | 'totals' | 'footer';
+type TabKey = 'paper' | 'header' | 'meta' | 'table' | 'totals' | 'footer' | 'labels';
 
 const ALL_TABLE_COLUMNS: { id: TableColumnId; label: string; desc: string }[] = [
   { id: 'name', label: 'Product Name', desc: 'Item description and title' },
@@ -640,6 +640,7 @@ export default function BranchReceiptSettings({
               { id: 'table', label: 'Table Columns', icon: Layers },
               { id: 'totals', label: 'Totals & Tax', icon: DollarSign },
               { id: 'footer', label: 'Footer & Notes', icon: Type },
+              { id: 'labels', label: 'Custom Labels', icon: AlignLeft },
             ].map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -700,14 +701,56 @@ export default function BranchReceiptSettings({
                     />
                   </div>
                   {templateJson.header.showShopName && (
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={templateJson.header.customShopName ?? tenantName}
-                      onChange={(e) => updateHeader({ customShopName: e.target.value })}
-                      placeholder={tenantName}
-                      style={{ fontSize: '13px' }}
-                    />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={templateJson.header.customShopName ?? tenantName}
+                        onChange={(e) => updateHeader({ customShopName: e.target.value })}
+                        placeholder={tenantName}
+                        style={{ fontSize: '13px' }}
+                      />
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+                        <div>
+                          <label style={{ fontSize: '11px', color: '#64748B', display: 'block', marginBottom: '2px' }}>Font Size</label>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <input
+                              type="number"
+                              className="form-input"
+                              min="9"
+                              max="32"
+                              value={templateJson.header.shopNameSize ?? 15}
+                              onChange={(e) => updateHeader({ shopNameSize: Number(e.target.value) })}
+                              style={{ fontSize: '12px' }}
+                            />
+                            <span style={{ fontSize: '11px', color: '#64748B' }}>px</span>
+                          </div>
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '11px', color: '#64748B', display: 'block', marginBottom: '2px' }}>Letter Spacing</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            max="0.5"
+                            className="form-input"
+                            value={templateJson.header.shopNameLetterSpacing ?? 0.05}
+                            onChange={(e) => updateHeader({ shopNameLetterSpacing: Number(e.target.value) })}
+                            style={{ fontSize: '12px' }}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingTop: '16px' }}>
+                          <input
+                            type="checkbox"
+                            id="uppercaseShopName"
+                            checked={templateJson.header.shopNameUppercase !== false}
+                            onChange={(e) => updateHeader({ shopNameUppercase: e.target.checked })}
+                            style={{ accentColor: '#0F172A', cursor: 'pointer' }}
+                          />
+                          <label htmlFor="uppercaseShopName" style={{ fontSize: '12px', color: '#334155', cursor: 'pointer' }}>UPPERCASE</label>
+                        </div>
+                      </div>
+                    </div>
                   )}
                 </div>
 
@@ -725,14 +768,29 @@ export default function BranchReceiptSettings({
                     />
                   </div>
                   {templateJson.header.showAddress && (
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={templateJson.header.customAddress ?? tenantAddress}
-                      onChange={(e) => updateHeader({ customAddress: e.target.value })}
-                      placeholder={tenantAddress || 'Enter branch address...'}
-                      style={{ fontSize: '13px' }}
-                    />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={templateJson.header.customAddress ?? tenantAddress}
+                        onChange={(e) => updateHeader({ customAddress: e.target.value })}
+                        placeholder={tenantAddress || 'Enter branch address...'}
+                        style={{ fontSize: '13px' }}
+                      />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '11px', color: '#64748B' }}>Address Font Size:</span>
+                        <input
+                          type="number"
+                          className="form-input"
+                          min="8"
+                          max="18"
+                          value={templateJson.header.addressSize ?? 10}
+                          onChange={(e) => updateHeader({ addressSize: Number(e.target.value) })}
+                          style={{ width: '70px', fontSize: '12px' }}
+                        />
+                        <span style={{ fontSize: '11px', color: '#64748B' }}>px</span>
+                      </div>
+                    </div>
                   )}
                 </div>
 
@@ -750,14 +808,29 @@ export default function BranchReceiptSettings({
                     />
                   </div>
                   {templateJson.header.showPhone && (
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={templateJson.header.customPhone ?? tenantPhone}
-                      onChange={(e) => updateHeader({ customPhone: e.target.value })}
-                      placeholder={tenantPhone || 'e.g. +92 300 1234567'}
-                      style={{ fontSize: '13px' }}
-                    />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={templateJson.header.customPhone ?? tenantPhone}
+                        onChange={(e) => updateHeader({ customPhone: e.target.value })}
+                        placeholder={tenantPhone || 'e.g. +92 300 1234567'}
+                        style={{ fontSize: '13px' }}
+                      />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '11px', color: '#64748B' }}>Phone Font Size:</span>
+                        <input
+                          type="number"
+                          className="form-input"
+                          min="8"
+                          max="18"
+                          value={templateJson.header.phoneSize ?? 10}
+                          onChange={(e) => updateHeader({ phoneSize: Number(e.target.value) })}
+                          style={{ width: '70px', fontSize: '12px' }}
+                        />
+                        <span style={{ fontSize: '11px', color: '#64748B' }}>px</span>
+                      </div>
+                    </div>
                   )}
                 </div>
 
@@ -1020,6 +1093,27 @@ export default function BranchReceiptSettings({
                   />
                 </div>
 
+                {/* Meta Font Size */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                  <div>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#334155', display: 'block' }}>Meta Rows Font Size</span>
+                    <span style={{ fontSize: '11px', color: '#64748B' }}>Size for date, cashier, customer, and payment method</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <input
+                      type="number"
+                      className="form-input"
+                      min="8"
+                      max="18"
+                      step="0.5"
+                      value={templateJson.invoiceInfo.fontSize ?? 10.5}
+                      onChange={(e) => updateInvoiceInfo({ fontSize: Number(e.target.value) })}
+                      style={{ width: '80px', fontSize: '12px', textAlign: 'center' }}
+                    />
+                    <span style={{ fontSize: '12px', color: '#64748B' }}>px</span>
+                  </div>
+                </div>
+
                 {/* Toggles */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   {[
@@ -1176,6 +1270,46 @@ export default function BranchReceiptSettings({
                   />
                 </div>
 
+                {/* Totals Section Typography */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', padding: '12px', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                      Totals Base Font Size
+                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <input
+                        type="number"
+                        className="form-input"
+                        min="8"
+                        max="18"
+                        step="0.5"
+                        value={templateJson.totals.fontSize ?? 11}
+                        onChange={(e) => updateTotals({ fontSize: Number(e.target.value) })}
+                        style={{ width: '90px', fontSize: '12px' }}
+                      />
+                      <span style={{ fontSize: '12px', color: '#64748B' }}>px</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                      Grand Total Font Size
+                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <input
+                        type="number"
+                        className="form-input"
+                        min="10"
+                        max="26"
+                        step="0.5"
+                        value={templateJson.totals.grandTotalFontSize ?? 13}
+                        onChange={(e) => updateTotals({ grandTotalFontSize: Number(e.target.value) })}
+                        style={{ width: '90px', fontSize: '12px' }}
+                      />
+                      <span style={{ fontSize: '12px', color: '#64748B' }}>px</span>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Tax / GST Toggle */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: '#F8FAFC', padding: '12px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1252,11 +1386,57 @@ export default function BranchReceiptSettings({
                   </p>
                 </div>
 
+                {/* Footer Alignment */}
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 600, color: '#64748B', display: 'block', marginBottom: '6px' }}>
+                    Footer Alignment
+                  </label>
+                  <div style={{ display: 'flex', gap: '6px', maxWidth: '240px' }}>
+                    {(['left', 'center', 'right'] as const).map((align) => (
+                      <button
+                        key={align}
+                        type="button"
+                        onClick={() => updateFooter({ align })}
+                        style={{
+                          flex: 1,
+                          padding: '6px',
+                          borderRadius: '6px',
+                          border: `1px solid ${(templateJson.footer.align || 'center') === align ? '#0F172A' : '#CBD5E1'}`,
+                          background: (templateJson.footer.align || 'center') === align ? '#0F172A' : '#FFFFFF',
+                          color: (templateJson.footer.align || 'center') === align ? '#FFFFFF' : '#475569',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          textTransform: 'capitalize',
+                        }}
+                      >
+                        {align}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Line 1 (Greeting) */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: '#334155' }}>
-                    Thank You Message (Line 1)
-                  </label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label style={{ fontSize: '13px', fontWeight: 600, color: '#334155' }}>
+                      Thank You Message (Line 1)
+                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ fontSize: '11px', color: '#64748B' }}>Size:</span>
+                      <input
+                        type="number"
+                        className="form-input"
+                        min="7"
+                        max="18"
+                        step="0.5"
+                        value={templateJson.footer.line1Size ?? 9.5}
+                        onChange={(e) => updateFooter({ line1Size: Number(e.target.value) })}
+                        style={{ width: '65px', fontSize: '11px', padding: '3px 6px' }}
+                      />
+                      <span style={{ fontSize: '11px', color: '#64748B' }}>px</span>
+                    </div>
+                  </div>
                   <input
                     type="text"
                     className="form-input"
@@ -1269,9 +1449,25 @@ export default function BranchReceiptSettings({
 
                 {/* Line 2 (Policy) */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontSize: '13px', fontWeight: 600, color: '#334155' }}>
-                    Return / Exchange Policy (Line 2)
-                  </label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label style={{ fontSize: '13px', fontWeight: 600, color: '#334155' }}>
+                      Return / Exchange Policy (Line 2)
+                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ fontSize: '11px', color: '#64748B' }}>Size:</span>
+                      <input
+                        type="number"
+                        className="form-input"
+                        min="7"
+                        max="18"
+                        step="0.5"
+                        value={templateJson.footer.line2Size ?? 9}
+                        onChange={(e) => updateFooter({ line2Size: Number(e.target.value) })}
+                        style={{ width: '65px', fontSize: '11px', padding: '3px 6px' }}
+                      />
+                      <span style={{ fontSize: '11px', color: '#64748B' }}>px</span>
+                    </div>
+                  </div>
                   <textarea
                     className="form-input"
                     rows={2}
@@ -1296,14 +1492,30 @@ export default function BranchReceiptSettings({
                     />
                   </div>
                   {templateJson.footer.showWhatsapp && (
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={templateJson.footer.whatsappNumber || ''}
-                      onChange={(e) => updateFooter({ whatsappNumber: e.target.value })}
-                      placeholder="e.g. +92 300 1234567"
-                      style={{ fontSize: '13px' }}
-                    />
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={templateJson.footer.whatsappNumber || ''}
+                        onChange={(e) => updateFooter({ whatsappNumber: e.target.value })}
+                        placeholder="e.g. +92 300 1234567"
+                        style={{ fontSize: '13px', flex: 1 }}
+                      />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ fontSize: '11px', color: '#64748B' }}>Size:</span>
+                        <input
+                          type="number"
+                          className="form-input"
+                          min="7"
+                          max="18"
+                          step="0.5"
+                          value={templateJson.footer.whatsappSize ?? 9}
+                          onChange={(e) => updateFooter({ whatsappSize: Number(e.target.value) })}
+                          style={{ width: '65px', fontSize: '11px', padding: '3px 6px' }}
+                        />
+                        <span style={{ fontSize: '11px', color: '#64748B' }}>px</span>
+                      </div>
+                    </div>
                   )}
                 </div>
 
@@ -1321,6 +1533,137 @@ export default function BranchReceiptSettings({
                     onChange={(e) => updateFooter({ showPoweredBy: e.target.checked })}
                     style={{ width: '16px', height: '16px', accentColor: '#0F172A', cursor: 'pointer' }}
                   />
+                </div>
+              </div>
+            )}
+
+            {/* ── TAB 7: CUSTOM LABELS ── */}
+            {activeTab === 'labels' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <div style={{ borderBottom: '1px solid #F1F5F9', paddingBottom: '14px' }}>
+                  <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
+                    Custom Receipt Labels
+                  </h3>
+                  <p style={{ fontSize: '12px', color: '#64748B', margin: '4px 0 0' }}>
+                    Change any word or sentence printed on the receipt — invoice rows, totals labels, table headers, and more.
+                  </p>
+                </div>
+
+                {/* Header Phone Prefix */}
+                <div>
+                  <p style={{ fontSize: '12px', fontWeight: 700, color: '#334155', margin: '0 0 10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Header</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'space-between' }}>
+                      <label style={{ fontSize: '13px', color: '#475569', flexShrink: 0, minWidth: '160px' }}>Phone / Contact Prefix</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={templateJson.header.phonePrefix ?? 'Tel:'}
+                        onChange={(e) => updateHeader({ phonePrefix: e.target.value })}
+                        placeholder="Tel:"
+                        style={{ fontSize: '13px', maxWidth: '220px' }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Invoice Meta Labels */}
+                <div>
+                  <p style={{ fontSize: '12px', fontWeight: 700, color: '#334155', margin: '0 0 10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Invoice Info Rows</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {[
+                      { key: 'invoiceLabel', label: 'Invoice Number Label', placeholder: 'Invoice #', section: 'invoiceInfo' as const },
+                      { key: 'dateLabel', label: 'Date Row Label', placeholder: 'Date:', section: 'invoiceInfo' as const },
+                      { key: 'customerLabel', label: 'Customer Row Label', placeholder: 'Customer:', section: 'invoiceInfo' as const },
+                      { key: 'cashierLabel', label: 'Cashier / Staff Label', placeholder: 'Staff:', section: 'invoiceInfo' as const },
+                      { key: 'paymentLabel', label: 'Payment Method Label', placeholder: 'Payment:', section: 'invoiceInfo' as const },
+                    ].map((f) => (
+                      <div key={f.key} style={{ display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'space-between' }}>
+                        <label style={{ fontSize: '13px', color: '#475569', flexShrink: 0, minWidth: '180px' }}>{f.label}</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          value={(templateJson.invoiceInfo as any)[f.key] ?? f.placeholder}
+                          onChange={(e) => updateInvoiceInfo({ [f.key]: e.target.value })}
+                          placeholder={f.placeholder}
+                          style={{ fontSize: '13px', maxWidth: '220px' }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Table Column Header Labels */}
+                <div>
+                  <p style={{ fontSize: '12px', fontWeight: 700, color: '#334155', margin: '0 0 10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Table Column Headers</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {[
+                      { key: 'colLabelCode', label: 'Code / SKU Column', placeholder: 'Code' },
+                      { key: 'colLabelName', label: 'Item Name Column', placeholder: 'Item' },
+                      { key: 'colLabelQty', label: 'Quantity Column', placeholder: 'Qty' },
+                      { key: 'colLabelRate', label: 'Rate / Price Column', placeholder: 'Rate' },
+                      { key: 'colLabelDiscount', label: 'Discount Column', placeholder: 'Disc' },
+                      { key: 'colLabelAmount', label: 'Amount / Total Column', placeholder: 'Total' },
+                    ].map((f) => (
+                      <div key={f.key} style={{ display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'space-between' }}>
+                        <label style={{ fontSize: '13px', color: '#475569', flexShrink: 0, minWidth: '180px' }}>{f.label}</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          value={(templateJson.itemsTable as any)[f.key] ?? f.placeholder}
+                          onChange={(e) => updateItemsTable({ [f.key]: e.target.value })}
+                          placeholder={f.placeholder}
+                          style={{ fontSize: '13px', maxWidth: '220px' }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Totals Row Labels */}
+                <div>
+                  <p style={{ fontSize: '12px', fontWeight: 700, color: '#334155', margin: '0 0 10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Totals Section Labels</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {[
+                      { key: 'subtotalLabel', label: 'Subtotal Row', placeholder: 'Subtotal:' },
+                      { key: 'discountLabel', label: 'Discount Row', placeholder: 'Discount:' },
+                      { key: 'deliveryLabel', label: 'Delivery Charge Row', placeholder: 'Delivery:' },
+                      { key: 'netTotalLabel', label: 'Grand / Net Total Row', placeholder: 'NET TOTAL:' },
+                      { key: 'paidLabel', label: 'Amount Paid Row', placeholder: 'Paid:' },
+                      { key: 'changeLabel', label: 'Change Returned Row', placeholder: 'Change Returned:' },
+                      { key: 'balanceDueLabel', label: 'Balance Due Row', placeholder: 'Balance Due:' },
+                    ].map((f) => (
+                      <div key={f.key} style={{ display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'space-between' }}>
+                        <label style={{ fontSize: '13px', color: '#475569', flexShrink: 0, minWidth: '180px' }}>{f.label}</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          value={(templateJson.totals as any)[f.key] ?? f.placeholder}
+                          onChange={(e) => updateTotals({ [f.key]: e.target.value })}
+                          placeholder={f.placeholder}
+                          style={{ fontSize: '13px', maxWidth: '220px' }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Footer Section Labels */}
+                <div>
+                  <p style={{ fontSize: '12px', fontWeight: 700, color: '#334155', margin: '0 0 10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Footer Section Labels</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'space-between' }}>
+                      <label style={{ fontSize: '13px', color: '#475569', flexShrink: 0, minWidth: '180px' }}>WhatsApp Prefix / Label</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={templateJson.footer.whatsappLabel ?? 'WhatsApp:'}
+                        onChange={(e) => updateFooter({ whatsappLabel: e.target.value })}
+                        placeholder="WhatsApp:"
+                        style={{ fontSize: '13px', maxWidth: '220px' }}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

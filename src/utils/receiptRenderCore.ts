@@ -237,10 +237,16 @@ export function normalizeTemplate(
     align: (['left', 'center', 'right'].includes(rawHeader.align)) ? rawHeader.align : d.header.align,
     showShopName: parseBoolean(rawHeader.showShopName, d.header.showShopName),
     customShopName: typeof rawHeader.customShopName === 'string' ? rawHeader.customShopName.trim() : '',
+    shopNameSize: clampNumber(rawHeader.shopNameSize, 8, 36, d.header.shopNameSize ?? 15),
+    shopNameUppercase: parseBoolean(rawHeader.shopNameUppercase, d.header.shopNameUppercase ?? true),
+    shopNameLetterSpacing: clampNumber(rawHeader.shopNameLetterSpacing, 0, 5, d.header.shopNameLetterSpacing ?? 0.05),
     showAddress: parseBoolean(rawHeader.showAddress, d.header.showAddress),
     customAddress: typeof rawHeader.customAddress === 'string' ? rawHeader.customAddress.trim() : '',
+    addressSize: clampNumber(rawHeader.addressSize, 7, 24, d.header.addressSize ?? 10),
     showPhone: parseBoolean(rawHeader.showPhone, d.header.showPhone),
     customPhone: typeof rawHeader.customPhone === 'string' ? rawHeader.customPhone.trim() : '',
+    phonePrefix: typeof rawHeader.phonePrefix === 'string' ? rawHeader.phonePrefix : (d.header.phonePrefix ?? 'Tel:'),
+    phoneSize: clampNumber(rawHeader.phoneSize, 7, 24, d.header.phoneSize ?? 10),
     separator: (['none', 'solid', 'dashed', 'double'].includes(rawHeader.separator)) ? rawHeader.separator : d.header.separator,
   };
 
@@ -252,9 +258,14 @@ export function normalizeTemplate(
     invoiceLabel: parseString(rawInfo.invoiceLabel, d.invoiceInfo.invoiceLabel),
     // T-19 (Option A): Date & Timestamp is mandatory for transaction validity; cannot be hidden
     showDate: true,
+    dateLabel: typeof rawInfo.dateLabel === 'string' ? rawInfo.dateLabel : d.invoiceInfo.dateLabel,
     showCashier: parseBoolean(rawInfo.showCashier, d.invoiceInfo.showCashier),
+    cashierLabel: typeof rawInfo.cashierLabel === 'string' ? rawInfo.cashierLabel : d.invoiceInfo.cashierLabel,
     showCustomer: parseBoolean(rawInfo.showCustomer, d.invoiceInfo.showCustomer),
+    customerLabel: typeof rawInfo.customerLabel === 'string' ? rawInfo.customerLabel : d.invoiceInfo.customerLabel,
     showPaymentMethod: parseBoolean(rawInfo.showPaymentMethod, d.invoiceInfo.showPaymentMethod),
+    paymentLabel: typeof rawInfo.paymentLabel === 'string' ? rawInfo.paymentLabel : d.invoiceInfo.paymentLabel,
+    fontSize: clampNumber(rawInfo.fontSize, 7, 24, d.invoiceInfo.fontSize ?? 10.5),
   };
 
   // 4. Items Table Section
@@ -275,6 +286,12 @@ export function normalizeTemplate(
     rowPadding: clampNumber(rawTable.rowPadding, 0, 20, d.itemsTable.rowPadding),
     compact: parseBoolean(rawTable.compact, d.itemsTable.compact),
     showBorders: parseBoolean(rawTable.showBorders, d.itemsTable.showBorders),
+    colLabelCode: typeof rawTable.colLabelCode === 'string' ? rawTable.colLabelCode : d.itemsTable.colLabelCode,
+    colLabelName: typeof rawTable.colLabelName === 'string' ? rawTable.colLabelName : d.itemsTable.colLabelName,
+    colLabelQty: typeof rawTable.colLabelQty === 'string' ? rawTable.colLabelQty : d.itemsTable.colLabelQty,
+    colLabelRate: typeof rawTable.colLabelRate === 'string' ? rawTable.colLabelRate : d.itemsTable.colLabelRate,
+    colLabelDiscount: typeof rawTable.colLabelDiscount === 'string' ? rawTable.colLabelDiscount : d.itemsTable.colLabelDiscount,
+    colLabelAmount: typeof rawTable.colLabelAmount === 'string' ? rawTable.colLabelAmount : d.itemsTable.colLabelAmount,
   };
 
   // 5. Totals Section
@@ -291,15 +308,29 @@ export function normalizeTemplate(
     boldTotal: parseBoolean(rawTotals.boldTotal, d.totals.boldTotal),
     highlightBalanceDue: parseBoolean(rawTotals.highlightBalanceDue, d.totals.highlightBalanceDue),
     currencySymbol: parseString(rawTotals.currencySymbol, d.totals.currencySymbol),
+    fontSize: clampNumber(rawTotals.fontSize, 7, 24, d.totals.fontSize ?? 11),
+    grandTotalFontSize: clampNumber(rawTotals.grandTotalFontSize, 8, 30, d.totals.grandTotalFontSize ?? 13),
+    subtotalLabel: typeof rawTotals.subtotalLabel === 'string' ? rawTotals.subtotalLabel : d.totals.subtotalLabel,
+    discountLabel: typeof rawTotals.discountLabel === 'string' ? rawTotals.discountLabel : d.totals.discountLabel,
+    deliveryLabel: typeof rawTotals.deliveryLabel === 'string' ? rawTotals.deliveryLabel : d.totals.deliveryLabel,
+    netTotalLabel: typeof rawTotals.netTotalLabel === 'string' ? rawTotals.netTotalLabel : d.totals.netTotalLabel,
+    paidLabel: typeof rawTotals.paidLabel === 'string' ? rawTotals.paidLabel : d.totals.paidLabel,
+    changeLabel: typeof rawTotals.changeLabel === 'string' ? rawTotals.changeLabel : d.totals.changeLabel,
+    balanceDueLabel: typeof rawTotals.balanceDueLabel === 'string' ? rawTotals.balanceDueLabel : d.totals.balanceDueLabel,
   };
 
   // 6. Footer Section
   const rawFooter = (typeof rawObj.footer === 'object' && rawObj.footer !== null) ? rawObj.footer : {};
   const footer: FooterConfig = {
     line1: typeof rawFooter.line1 === 'string' ? rawFooter.line1.trim() : d.footer.line1,
+    line1Size: clampNumber(rawFooter.line1Size, 6, 24, d.footer.line1Size ?? 9.5),
     line2: typeof rawFooter.line2 === 'string' ? rawFooter.line2.trim() : d.footer.line2,
+    line2Size: clampNumber(rawFooter.line2Size, 6, 24, d.footer.line2Size ?? 9),
+    align: (['left', 'center', 'right'].includes(rawFooter.align)) ? rawFooter.align : (d.footer.align ?? 'center'),
     showWhatsapp: parseBoolean(rawFooter.showWhatsapp, d.footer.showWhatsapp),
     whatsappNumber: typeof rawFooter.whatsappNumber === 'string' ? rawFooter.whatsappNumber.trim() : '',
+    whatsappLabel: typeof rawFooter.whatsappLabel === 'string' ? rawFooter.whatsappLabel : (d.footer.whatsappLabel ?? 'WhatsApp:'),
+    whatsappSize: clampNumber(rawFooter.whatsappSize, 6, 24, d.footer.whatsappSize ?? 9),
     showPoweredBy: parseBoolean(rawFooter.showPoweredBy, d.footer.showPoweredBy),
     poweredByText: typeof rawFooter.poweredByText === 'string' ? rawFooter.poweredByText.trim() : d.footer.poweredByText,
     showQrCode: parseBoolean(rawFooter.showQrCode, d.footer.showQrCode),
@@ -488,16 +519,22 @@ export function renderReceiptBodyHtml(
        </div>`
     : '';
 
+  const shopNameTransform = header.shopNameUppercase !== false ? 'text-transform:uppercase;' : '';
+  const shopNameSpacing = typeof header.shopNameLetterSpacing === 'number' ? `${header.shopNameLetterSpacing}em` : '0.05em';
+  const shopNameSize = header.shopNameSize ?? 15;
+  const addressSize = header.addressSize ?? 10;
+  const phoneSize = header.phoneSize ?? 10;
+
   const shopNameHtml = header.showShopName
-    ? `<h2 style="font-size:15px;font-weight:900;text-transform:uppercase;letter-spacing:0.05em;margin:0 0 2px 0">${escapeHtml(header.customShopName || data.tenantName || 'PyntFlow Store')}</h2>`
+    ? `<h2 style="font-size:${shopNameSize}px;font-weight:900;${shopNameTransform}letter-spacing:${shopNameSpacing};margin:0 0 2px 0">${escapeHtml(header.customShopName || data.tenantName || 'PyntFlow Store')}</h2>`
     : '';
 
   const addressHtml = (header.showAddress && (header.customAddress || !header.customShopName))
-    ? `<p style="font-size:10px;color:#333;margin:0">${escapeHtml(header.customAddress || 'Retail & Industrial Paint Hub')}</p>`
+    ? `<p style="font-size:${addressSize}px;color:#333;margin:0">${escapeHtml(header.customAddress || 'Retail & Industrial Paint Hub')}</p>`
     : '';
 
   const phoneHtml = (header.showPhone && header.customPhone)
-    ? `<p style="font-size:10px;color:#333;margin:2px 0 0 0">Tel: ${escapeHtml(header.customPhone)}</p>`
+    ? `<p style="font-size:${phoneSize}px;color:#333;margin:2px 0 0 0">${escapeHtml(header.phonePrefix?.trim() || 'Tel:')} ${escapeHtml(header.customPhone)}</p>`
     : '';
 
   const reprintNoticeHtml = data.isReprint
@@ -530,34 +567,35 @@ export function renderReceiptBodyHtml(
   if (data.date) {
     const dateTimeStr = `${escapeHtml(data.date)}${data.time ? ` &middot; ${escapeHtml(data.time)}` : ''}`;
     infoRows.push(`<div style="display:flex;justify-content:space-between">
-      <span style="color:#555">Date:</span>
+      <span style="color:#555">${escapeHtml(invoiceInfo.dateLabel?.trim() || 'Date:')}</span>
       <span>${dateTimeStr}</span>
     </div>`);
   }
 
   if (invoiceInfo.showCustomer) {
     infoRows.push(`<div style="display:flex;justify-content:space-between">
-      <span style="color:#555">Customer:</span>
+      <span style="color:#555">${escapeHtml(invoiceInfo.customerLabel?.trim() || 'Customer:')}</span>
       <span style="font-weight:700">${escapeHtml(data.clientName || 'Walk-in')}</span>
     </div>`);
   }
 
   if (invoiceInfo.showCashier && data.staffName) {
     infoRows.push(`<div style="display:flex;justify-content:space-between">
-      <span style="color:#555">Staff:</span>
+      <span style="color:#555">${escapeHtml(invoiceInfo.cashierLabel?.trim() || 'Staff:')}</span>
       <span style="font-weight:700">${escapeHtml(data.staffName)}</span>
     </div>`);
   }
 
   if (invoiceInfo.showPaymentMethod && data.paymentMethod) {
     infoRows.push(`<div style="display:flex;justify-content:space-between">
-      <span style="color:#555">Payment:</span>
+      <span style="color:#555">${escapeHtml(invoiceInfo.paymentLabel?.trim() || 'Payment:')}</span>
       <span>${escapeHtml(data.paymentMethod)}</span>
     </div>`);
   }
 
+  const invoiceInfoFontSize = invoiceInfo.fontSize ?? 10.5;
   const invoiceInfoSection = infoRows.length > 0
-    ? `<div style="font-size:10.5px;padding-bottom:6px;margin-bottom:6px;${headerSeparatorCss}">
+    ? `<div style="font-size:${invoiceInfoFontSize}px;padding-bottom:6px;margin-bottom:6px;${headerSeparatorCss}">
         ${infoRows.join('\n')}
        </div>`
     : '';
@@ -690,12 +728,12 @@ export function renderReceiptBodyHtml(
         <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:${itemsTable.fontSize}px">
           <thead>
             <tr style="border-bottom:1px solid #000;text-align:left">
-              ${hasCol('code') ? `<th style="padding:${itemsTable.rowPadding}px 0;width:${headCodeWidth}%">Code</th>` : ''}
-              ${hasCol('name') ? `<th style="padding:${itemsTable.rowPadding}px 0;width:${headNameWidth}%">Item</th>` : ''}
-              ${hasCol('qty') ? `<th style="padding:${itemsTable.rowPadding}px 0;text-align:center;width:${headQtyWidth}%">Qty</th>` : ''}
-              ${hasCol('rate') ? `<th style="padding:${itemsTable.rowPadding}px 0;text-align:right;width:${headRateWidth}%">Rate</th>` : ''}
-              ${hasCol('discount') ? `<th style="padding:${itemsTable.rowPadding}px 0;text-align:right;width:${headDiscWidth}%">Disc</th>` : ''}
-              ${hasCol('amount') ? `<th style="padding:${itemsTable.rowPadding}px 0;text-align:right;width:${headAmountWidth}%">Total</th>` : ''}
+              ${hasCol('code') ? `<th style="padding:${itemsTable.rowPadding}px 0;width:${headCodeWidth}%">${escapeHtml(itemsTable.colLabelCode || 'Code')}</th>` : ''}
+              ${hasCol('name') ? `<th style="padding:${itemsTable.rowPadding}px 0;width:${headNameWidth}%">${escapeHtml(itemsTable.colLabelName || 'Item')}</th>` : ''}
+              ${hasCol('qty') ? `<th style="padding:${itemsTable.rowPadding}px 0;text-align:center;width:${headQtyWidth}%">${escapeHtml(itemsTable.colLabelQty || 'Qty')}</th>` : ''}
+              ${hasCol('rate') ? `<th style="padding:${itemsTable.rowPadding}px 0;text-align:right;width:${headRateWidth}%">${escapeHtml(itemsTable.colLabelRate || 'Rate')}</th>` : ''}
+              ${hasCol('discount') ? `<th style="padding:${itemsTable.rowPadding}px 0;text-align:right;width:${headDiscWidth}%">${escapeHtml(itemsTable.colLabelDiscount || 'Disc')}</th>` : ''}
+              ${hasCol('amount') ? `<th style="padding:${itemsTable.rowPadding}px 0;text-align:right;width:${headAmountWidth}%">${escapeHtml(itemsTable.colLabelAmount || 'Total')}</th>` : ''}
             </tr>
           </thead>
           <tbody>
@@ -712,21 +750,21 @@ export function renderReceiptBodyHtml(
 
   if (totals.showSubtotal) {
     totalRows.push(`<div style="display:flex;justify-content:space-between">
-      <span style="color:#555">Subtotal:</span>
+      <span style="color:#555">${escapeHtml(totals.subtotalLabel || 'Subtotal:')}</span>
       <span>${escapeHtml(cur)} ${fmt(data.subTotal)}</span>
     </div>`);
   }
 
   if (totals.showDiscount && (data.discount || 0) > 0) {
     totalRows.push(`<div style="display:flex;justify-content:space-between">
-      <span style="color:#555">Discount:</span>
+      <span style="color:#555">${escapeHtml(totals.discountLabel || 'Discount:')}</span>
       <span>- ${escapeHtml(cur)} ${fmt(data.discount || 0)}</span>
     </div>`);
   }
 
   if ((data.deliveryCharge || 0) > 0) {
     totalRows.push(`<div style="display:flex;justify-content:space-between">
-      <span style="color:#555">Delivery:</span>
+      <span style="color:#555">${escapeHtml(totals.deliveryLabel || 'Delivery:')}</span>
       <span>+ ${escapeHtml(cur)} ${fmt(data.deliveryCharge || 0)}</span>
     </div>`);
   }
@@ -741,16 +779,16 @@ export function renderReceiptBodyHtml(
   }
 
   // T-19 (Option A): Grand Total is mandatory; always rendered
-  const grandTotalFontSize = totals.boldTotal ? '13px' : '11px';
+  const grandTotalFontSize = totals.grandTotalFontSize ? `${totals.grandTotalFontSize}px` : (totals.boldTotal ? '13px' : '11px');
   const grandTotalFontWeight = totals.boldTotal ? '900' : '700';
   totalRows.push(`<div style="display:flex;justify-content:space-between;font-size:${grandTotalFontSize};font-weight:${grandTotalFontWeight};padding-top:3px;border-top:1px solid #000;margin-top:2px">
-    <span>NET TOTAL:</span>
+    <span>${escapeHtml(totals.netTotalLabel || 'NET TOTAL:')}</span>
     <span>${escapeHtml(cur)} ${fmt(data.grandTotal)}</span>
   </div>`);
 
   if (totals.showPaid) {
     totalRows.push(`<div style="display:flex;justify-content:space-between;font-weight:700;padding-top:2px">
-      <span>Paid (${escapeHtml(data.paymentMethod || 'CASH')}):</span>
+      <span>${escapeHtml(totals.paidLabel || 'Paid:')} (${escapeHtml(data.paymentMethod || 'CASH')})</span>
       <span>${escapeHtml(cur)} ${fmt(data.paidAmount)}</span>
     </div>`);
   }
@@ -773,7 +811,7 @@ export function renderReceiptBodyHtml(
 
   if ((data.changeReturned || 0) > 0) {
     totalRows.push(`<div style="display:flex;justify-content:space-between;font-size:10px;color:#15803d;font-weight:700">
-      <span>Change Returned:</span>
+      <span>${escapeHtml(totals.changeLabel || 'Change Returned:')}</span>
       <span>${escapeHtml(cur)} ${fmt(data.changeReturned || 0)}</span>
     </div>`);
   }
@@ -781,38 +819,43 @@ export function renderReceiptBodyHtml(
   if (totals.showBalance && (data.dueAmount || 0) > 0) {
     const dueColor = totals.highlightBalanceDue ? '#b91c1c' : '#000';
     totalRows.push(`<div style="display:flex;justify-content:space-between;font-size:10.5px;font-weight:700;color:${dueColor}">
-      <span>Balance Due:</span>
+      <span>${escapeHtml(totals.balanceDueLabel || 'Balance Due:')}</span>
       <span>${escapeHtml(cur)} ${fmt(data.dueAmount || 0)}</span>
     </div>`);
   }
 
+  const totalsFontSize = totals.fontSize ?? 11;
   const totalsSection = `
-<div style="display:flex;flex-direction:column;gap:3px;font-size:11px;padding-bottom:8px;margin-bottom:8px;break-inside:avoid;page-break-inside:avoid;${headerSeparatorCss}">
+<div style="display:flex;flex-direction:column;gap:3px;font-size:${totalsFontSize}px;padding-bottom:8px;margin-bottom:8px;break-inside:avoid;page-break-inside:avoid;${headerSeparatorCss}">
   ${totalRows.join('\n')}
 </div>`.trim();
 
   // 5. Footer Block
   const footerLines: string[] = [];
+  const footerAlign = footer.align || 'center';
+  const footerLine1Size = footer.line1Size ?? 9.5;
+  const footerLine2Size = footer.line2Size ?? 9;
+  const whatsappSize = footer.whatsappSize ?? 9;
 
   if (footer.line1) {
-    footerLines.push(`<div style="text-align:center;font-size:9.5px;color:#555">${escapeHtml(footer.line1)}</div>`);
+    footerLines.push(`<div style="text-align:${footerAlign};font-size:${footerLine1Size}px;color:#555">${escapeHtml(footer.line1)}</div>`);
   }
 
   if (footer.line2) {
-    footerLines.push(`<div style="text-align:center;font-size:9px;color:#777;margin-top:2px">${escapeHtml(footer.line2)}</div>`);
+    footerLines.push(`<div style="text-align:${footerAlign};font-size:${footerLine2Size}px;color:#777;margin-top:2px">${escapeHtml(footer.line2)}</div>`);
   }
 
   if (footer.showWhatsapp && footer.whatsappNumber) {
-    footerLines.push(`<div style="text-align:center;font-size:9px;color:#555;margin-top:2px">WhatsApp: ${escapeHtml(footer.whatsappNumber)}</div>`);
+    footerLines.push(`<div style="text-align:${footerAlign};font-size:${whatsappSize}px;color:#555;margin-top:2px">${escapeHtml(footer.whatsappLabel?.trim() || 'WhatsApp:')} ${escapeHtml(footer.whatsappNumber)}</div>`);
   }
 
   if (footer.showPoweredBy) {
-    footerLines.push(`<div style="text-align:center;font-size:8px;color:#aaa;margin-top:2px">${escapeHtml(footer.poweredByText || 'Powered by Pyntflow')}</div>`);
+    footerLines.push(`<div style="text-align:${footerAlign};font-size:8px;color:#aaa;margin-top:2px">${escapeHtml(footer.poweredByText || 'Powered by Pyntflow')}</div>`);
   }
 
   if (footer.showQrCode) {
     footerLines.push(`
-      <div style="text-align:center;margin-top:6px">
+      <div style="text-align:${footerAlign};margin-top:6px">
         <div style="width:60px;height:60px;border:1px dashed #999;display:inline-flex;align-items:center;justify-content:center;font-size:8px;color:#777">
           [QR Code]
         </div>

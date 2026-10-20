@@ -41,7 +41,7 @@ interface DevReceiptTemplatesViewProps {
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
 }
 
-type DesignerTab = 'layout' | 'header' | 'meta' | 'table' | 'totals' | 'footer' | 'token' | 'locks';
+type DesignerTab = 'layout' | 'header' | 'meta' | 'table' | 'totals' | 'footer' | 'token' | 'locks' | 'labels';
 
 export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = ({ onShowToast }) => {
   const [activeMainTab, setActiveMainTab] = useState<'templates' | 'branches'>('templates');
@@ -947,6 +947,7 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
                     { id: 'footer', label: 'Footer & Notes' },
                     { id: 'token', label: '🎟️ Token Slip' },
                     { id: 'locks', label: '🔒 Field Locks' },
+                    { id: 'labels', label: '✏️ Custom Labels' },
                   ] as { id: DesignerTab; label: string }[]
                 ).map((tab) => (
                   <button
@@ -1166,50 +1167,146 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
                     )}
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      <label style={{ fontSize: '13px', fontWeight: 600, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <input
-                          type="checkbox"
-                          checked={templateJson.header.showShopName}
-                          onChange={(e) =>
-                            setTemplateJson({
-                              ...templateJson,
-                              header: { ...templateJson.header, showShopName: e.target.checked },
-                            })
-                          }
-                          style={{ accentColor: '#D4AF37' }}
-                        />
-                        Display Shop / Business Name
-                      </label>
+                      <div>
+                        <label style={{ fontSize: '13px', fontWeight: 600, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <input
+                            type="checkbox"
+                            checked={templateJson.header.showShopName}
+                            onChange={(e) =>
+                              setTemplateJson({
+                                ...templateJson,
+                                header: { ...templateJson.header, showShopName: e.target.checked },
+                              })
+                            }
+                            style={{ accentColor: '#D4AF37' }}
+                          />
+                          Display Shop / Business Name
+                        </label>
+                        {templateJson.header.showShopName && (
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '10px', marginTop: '6px', marginLeft: '22px' }}>
+                            <div>
+                              <span style={{ fontSize: '11px', color: '#94A3B8', display: 'block', marginBottom: '2px' }}>Font Size (px)</span>
+                              <input
+                                type="number"
+                                min="9"
+                                max="32"
+                                value={templateJson.header.shopNameSize ?? 15}
+                                onChange={(e) =>
+                                  setTemplateJson({
+                                    ...templateJson,
+                                    header: { ...templateJson.header, shopNameSize: Number(e.target.value) },
+                                  })
+                                }
+                                style={{ width: '80px', background: '#1A1A1A', color: '#FFF', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '4px 6px', fontSize: '12px' }}
+                              />
+                            </div>
+                            <div>
+                              <span style={{ fontSize: '11px', color: '#94A3B8', display: 'block', marginBottom: '2px' }}>Letter Spacing</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                max="0.5"
+                                value={templateJson.header.shopNameLetterSpacing ?? 0.05}
+                                onChange={(e) =>
+                                  setTemplateJson({
+                                    ...templateJson,
+                                    header: { ...templateJson.header, shopNameLetterSpacing: Number(e.target.value) },
+                                  })
+                                }
+                                style={{ width: '80px', background: '#1A1A1A', color: '#FFF', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '4px 6px', fontSize: '12px' }}
+                              />
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingTop: '14px' }}>
+                              <input
+                                type="checkbox"
+                                id="devUppercaseShop"
+                                checked={templateJson.header.shopNameUppercase !== false}
+                                onChange={(e) =>
+                                  setTemplateJson({
+                                    ...templateJson,
+                                    header: { ...templateJson.header, shopNameUppercase: e.target.checked },
+                                  })
+                                }
+                                style={{ accentColor: '#D4AF37' }}
+                              />
+                              <label htmlFor="devUppercaseShop" style={{ fontSize: '12px', color: '#E2E8F0', cursor: 'pointer' }}>UPPERCASE</label>
+                            </div>
+                          </div>
+                        )}
+                      </div>
 
-                      <label style={{ fontSize: '13px', fontWeight: 600, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <input
-                          type="checkbox"
-                          checked={templateJson.header.showAddress}
-                          onChange={(e) =>
-                            setTemplateJson({
-                              ...templateJson,
-                              header: { ...templateJson.header, showAddress: e.target.checked },
-                            })
-                          }
-                          style={{ accentColor: '#D4AF37' }}
-                        />
-                        Display Physical Address
-                      </label>
+                      <div>
+                        <label style={{ fontSize: '13px', fontWeight: 600, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <input
+                            type="checkbox"
+                            checked={templateJson.header.showAddress}
+                            onChange={(e) =>
+                              setTemplateJson({
+                                ...templateJson,
+                                header: { ...templateJson.header, showAddress: e.target.checked },
+                              })
+                            }
+                            style={{ accentColor: '#D4AF37' }}
+                          />
+                          Display Physical Address
+                        </label>
+                        {templateJson.header.showAddress && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px', marginLeft: '22px' }}>
+                            <span style={{ fontSize: '11px', color: '#94A3B8' }}>Address Font Size:</span>
+                            <input
+                              type="number"
+                              min="8"
+                              max="18"
+                              value={templateJson.header.addressSize ?? 10}
+                              onChange={(e) =>
+                                setTemplateJson({
+                                  ...templateJson,
+                                  header: { ...templateJson.header, addressSize: Number(e.target.value) },
+                                })
+                              }
+                              style={{ width: '70px', background: '#1A1A1A', color: '#FFF', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '4px 6px', fontSize: '12px' }}
+                            />
+                            <span style={{ fontSize: '11px', color: '#94A3B8' }}>px</span>
+                          </div>
+                        )}
+                      </div>
 
-                      <label style={{ fontSize: '13px', fontWeight: 600, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <input
-                          type="checkbox"
-                          checked={templateJson.header.showPhone}
-                          onChange={(e) =>
-                            setTemplateJson({
-                              ...templateJson,
-                              header: { ...templateJson.header, showPhone: e.target.checked },
-                            })
-                          }
-                          style={{ accentColor: '#D4AF37' }}
-                        />
-                        Display Phone Number
-                      </label>
+                      <div>
+                        <label style={{ fontSize: '13px', fontWeight: 600, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <input
+                            type="checkbox"
+                            checked={templateJson.header.showPhone}
+                            onChange={(e) =>
+                              setTemplateJson({
+                                ...templateJson,
+                                header: { ...templateJson.header, showPhone: e.target.checked },
+                              })
+                            }
+                            style={{ accentColor: '#D4AF37' }}
+                          />
+                          Display Phone Number
+                        </label>
+                        {templateJson.header.showPhone && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px', marginLeft: '22px' }}>
+                            <span style={{ fontSize: '11px', color: '#94A3B8' }}>Phone Font Size:</span>
+                            <input
+                              type="number"
+                              min="8"
+                              max="18"
+                              value={templateJson.header.phoneSize ?? 10}
+                              onChange={(e) =>
+                                setTemplateJson({
+                                  ...templateJson,
+                                  header: { ...templateJson.header, phoneSize: Number(e.target.value) },
+                                })
+                              }
+                              style={{ width: '70px', background: '#1A1A1A', color: '#FFF', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '4px 6px', fontSize: '12px' }}
+                            />
+                            <span style={{ fontSize: '11px', color: '#94A3B8' }}>px</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     <div>
@@ -1339,6 +1436,30 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
                     </label>
                     <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '-8px', marginBottom: '4px' }}>
                       Required for audit and transaction verification. Cannot be disabled.
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                      <div>
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: '#FFFFFF', display: 'block' }}>Meta Rows Font Size</span>
+                        <span style={{ fontSize: '11px', color: '#94A3B8' }}>Font size for date, cashier, customer, and payment</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <input
+                          type="number"
+                          min="8"
+                          max="18"
+                          step="0.5"
+                          value={templateJson.invoiceInfo.fontSize ?? 10.5}
+                          onChange={(e) =>
+                            setTemplateJson({
+                              ...templateJson,
+                              invoiceInfo: { ...templateJson.invoiceInfo, fontSize: Number(e.target.value) },
+                            })
+                          }
+                          style={{ width: '70px', background: '#1A1A1A', color: '#FFF', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '4px 6px', fontSize: '12px', textAlign: 'center' }}
+                        />
+                        <span style={{ fontSize: '11px', color: '#94A3B8' }}>px</span>
+                      </div>
                     </div>
 
                     <label style={{ fontSize: '13px', fontWeight: 600, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1522,6 +1643,43 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
                       />
                     </div>
 
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', padding: '10px 12px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                      <div>
+                        <span style={{ fontSize: '11px', color: '#94A3B8', display: 'block', marginBottom: '4px' }}>Totals Font Size (px)</span>
+                        <input
+                          type="number"
+                          min="8"
+                          max="18"
+                          step="0.5"
+                          value={templateJson.totals.fontSize ?? 11}
+                          onChange={(e) =>
+                            setTemplateJson({
+                              ...templateJson,
+                              totals: { ...templateJson.totals, fontSize: Number(e.target.value) },
+                            })
+                          }
+                          style={{ width: '80px', background: '#1A1A1A', color: '#FFF', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '4px 6px', fontSize: '12px' }}
+                        />
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '11px', color: '#94A3B8', display: 'block', marginBottom: '4px' }}>Grand Total Size (px)</span>
+                        <input
+                          type="number"
+                          min="10"
+                          max="26"
+                          step="0.5"
+                          value={templateJson.totals.grandTotalFontSize ?? 13}
+                          onChange={(e) =>
+                            setTemplateJson({
+                              ...templateJson,
+                              totals: { ...templateJson.totals, grandTotalFontSize: Number(e.target.value) },
+                            })
+                          }
+                          style={{ width: '80px', background: '#1A1A1A', color: '#FFF', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '4px 6px', fontSize: '12px' }}
+                        />
+                      </div>
+                    </div>
+
                     <label style={{ fontSize: '13px', fontWeight: 600, color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <input
                         type="checkbox"
@@ -1701,9 +1859,63 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
                 {activeDesignerTab === 'footer' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                     <div>
-                      <label style={{ fontSize: '12px', color: '#94A3B8', display: 'block', marginBottom: '4px' }}>
-                        Return Policy / Note Line 1
+                      <label style={{ fontSize: '12px', color: '#94A3B8', display: 'block', marginBottom: '6px' }}>
+                        Footer Text Alignment
                       </label>
+                      <div style={{ display: 'flex', gap: '6px', maxWidth: '240px' }}>
+                        {(['left', 'center', 'right'] as const).map((align) => (
+                          <button
+                            key={align}
+                            type="button"
+                            onClick={() =>
+                              setTemplateJson({
+                                ...templateJson,
+                                footer: { ...templateJson.footer, align },
+                              })
+                            }
+                            style={{
+                              flex: 1,
+                              padding: '6px',
+                              borderRadius: '6px',
+                              border: `1px solid ${(templateJson.footer.align || 'center') === align ? '#D4AF37' : 'rgba(255,255,255,0.15)'}`,
+                              background: (templateJson.footer.align || 'center') === align ? 'rgba(212, 175, 55, 0.2)' : 'transparent',
+                              color: (templateJson.footer.align || 'center') === align ? '#F3E5AB' : '#94A3B8',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              textTransform: 'capitalize',
+                            }}
+                          >
+                            {align}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <label style={{ fontSize: '12px', color: '#94A3B8' }}>
+                          Return Policy / Note Line 1
+                        </label>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <span style={{ fontSize: '11px', color: '#94A3B8' }}>Size:</span>
+                          <input
+                            type="number"
+                            min="7"
+                            max="18"
+                            step="0.5"
+                            value={templateJson.footer.line1Size ?? 9.5}
+                            onChange={(e) =>
+                              setTemplateJson({
+                                ...templateJson,
+                                footer: { ...templateJson.footer, line1Size: Number(e.target.value) },
+                              })
+                            }
+                            style={{ width: '60px', background: '#1A1A1A', color: '#FFF', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '3px 6px', fontSize: '11px' }}
+                          />
+                          <span style={{ fontSize: '11px', color: '#94A3B8' }}>px</span>
+                        </div>
+                      </div>
                       <input
                         type="text"
                         value={templateJson.footer.line1}
@@ -1718,9 +1930,29 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
                     </div>
 
                     <div>
-                      <label style={{ fontSize: '12px', color: '#94A3B8', display: 'block', marginBottom: '4px' }}>
-                        Return Policy / Note Line 2
-                      </label>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <label style={{ fontSize: '12px', color: '#94A3B8' }}>
+                          Return Policy / Note Line 2
+                        </label>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <span style={{ fontSize: '11px', color: '#94A3B8' }}>Size:</span>
+                          <input
+                            type="number"
+                            min="7"
+                            max="18"
+                            step="0.5"
+                            value={templateJson.footer.line2Size ?? 9}
+                            onChange={(e) =>
+                              setTemplateJson({
+                                ...templateJson,
+                                footer: { ...templateJson.footer, line2Size: Number(e.target.value) },
+                              })
+                            }
+                            style={{ width: '60px', background: '#1A1A1A', color: '#FFF', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '3px 6px', fontSize: '11px' }}
+                          />
+                          <span style={{ fontSize: '11px', color: '#94A3B8' }}>px</span>
+                        </div>
+                      </div>
                       <input
                         type="text"
                         value={templateJson.footer.line2}
@@ -1750,18 +1982,36 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
                         WhatsApp Support
                       </label>
                       {templateJson.footer.showWhatsapp && (
-                        <input
-                          type="text"
-                          value={templateJson.footer.whatsappNumber}
-                          onChange={(e) =>
-                            setTemplateJson({
-                              ...templateJson,
-                              footer: { ...templateJson.footer, whatsappNumber: e.target.value },
-                            })
-                          }
-                          placeholder="+92 300 0000000"
-                          style={{ width: '150px', background: '#1A1A1A', color: '#FFF', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '5px 8px', fontSize: '12px' }}
-                        />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <input
+                            type="text"
+                            value={templateJson.footer.whatsappNumber}
+                            onChange={(e) =>
+                              setTemplateJson({
+                                ...templateJson,
+                                footer: { ...templateJson.footer, whatsappNumber: e.target.value },
+                              })
+                            }
+                            placeholder="+92 300 0000000"
+                            style={{ width: '140px', background: '#1A1A1A', color: '#FFF', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '5px 8px', fontSize: '12px' }}
+                          />
+                          <span style={{ fontSize: '11px', color: '#94A3B8' }}>Size:</span>
+                          <input
+                            type="number"
+                            min="7"
+                            max="18"
+                            step="0.5"
+                            value={templateJson.footer.whatsappSize ?? 9}
+                            onChange={(e) =>
+                              setTemplateJson({
+                                ...templateJson,
+                                footer: { ...templateJson.footer, whatsappSize: Number(e.target.value) },
+                              })
+                            }
+                            style={{ width: '55px', background: '#1A1A1A', color: '#FFF', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '3px 6px', fontSize: '11px' }}
+                          />
+                          <span style={{ fontSize: '11px', color: '#94A3B8' }}>px</span>
+                        </div>
                       )}
                     </div>
 
@@ -2011,6 +2261,128 @@ export const DevReceiptTemplatesView: React.FC<DevReceiptTemplatesViewProps> = (
                         </div>
                       );
                     })}
+                  </div>
+                )}
+
+                {/* 8. CUSTOM LABELS */}
+                {activeDesignerTab === 'labels' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    <div style={{ padding: '12px', background: 'rgba(212, 175, 55, 0.08)', borderRadius: '8px', border: '1px solid rgba(212, 175, 55, 0.2)' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#F3E5AB' }}>✏️ Custom Receipt Label Editor</div>
+                      <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '3px', lineHeight: 1.4 }}>
+                        Override any word or phrase printed on the receipt. Leave blank to use the system default.
+                      </div>
+                    </div>
+
+                    {/* Header Phone Prefix */}
+                    <div>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>Header</div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                        <span style={{ fontSize: '12px', color: '#94A3B8', flexShrink: 0 }}>Phone Prefix</span>
+                        <input
+                          type="text"
+                          value={templateJson.header.phonePrefix ?? 'Tel:'}
+                          onChange={(e) => setTemplateJson({ ...templateJson, header: { ...templateJson.header, phonePrefix: e.target.value } })}
+                          placeholder="Tel:"
+                          style={{ flex: 1, maxWidth: '200px', background: '#1A1A1A', color: '#FFF', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '6px 10px', fontSize: '12px' }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Invoice Meta Row Labels */}
+                    <div>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>Invoice Info Row Labels</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {[
+                          { key: 'invoiceLabel', label: 'Invoice Number Label', placeholder: 'Invoice #', section: 'invoiceInfo' as const },
+                          { key: 'dateLabel', label: 'Date Row Label', placeholder: 'Date:', section: 'invoiceInfo' as const },
+                          { key: 'customerLabel', label: 'Customer Row', placeholder: 'Customer:', section: 'invoiceInfo' as const },
+                          { key: 'cashierLabel', label: 'Cashier / Staff Row', placeholder: 'Staff:', section: 'invoiceInfo' as const },
+                          { key: 'paymentLabel', label: 'Payment Method Row', placeholder: 'Payment:', section: 'invoiceInfo' as const },
+                        ].map((f) => (
+                          <div key={f.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                            <span style={{ fontSize: '12px', color: '#94A3B8', flexShrink: 0 }}>{f.label}</span>
+                            <input
+                              type="text"
+                              value={(templateJson.invoiceInfo as any)[f.key] ?? f.placeholder}
+                              onChange={(e) => setTemplateJson({ ...templateJson, invoiceInfo: { ...templateJson.invoiceInfo, [f.key]: e.target.value } })}
+                              placeholder={f.placeholder}
+                              style={{ flex: 1, maxWidth: '200px', background: '#1A1A1A', color: '#FFF', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '6px 10px', fontSize: '12px' }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Table Column Header Labels */}
+                    <div>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>Table Column Headers</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {[
+                          { key: 'colLabelCode', placeholder: 'Code', label: 'Code / SKU Column' },
+                          { key: 'colLabelName', placeholder: 'Item', label: 'Item Name Column' },
+                          { key: 'colLabelQty', placeholder: 'Qty', label: 'Quantity Column' },
+                          { key: 'colLabelRate', placeholder: 'Rate', label: 'Rate / Price Column' },
+                          { key: 'colLabelDiscount', placeholder: 'Disc', label: 'Discount Column' },
+                          { key: 'colLabelAmount', placeholder: 'Total', label: 'Amount / Total Column' },
+                        ].map((f) => (
+                          <div key={f.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                            <span style={{ fontSize: '12px', color: '#94A3B8', flexShrink: 0 }}>{f.label}</span>
+                            <input
+                              type="text"
+                              value={(templateJson.itemsTable as any)[f.key] ?? f.placeholder}
+                              onChange={(e) => setTemplateJson({ ...templateJson, itemsTable: { ...templateJson.itemsTable, [f.key]: e.target.value } })}
+                              placeholder={f.placeholder}
+                              style={{ flex: 1, maxWidth: '200px', background: '#1A1A1A', color: '#FFF', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '6px 10px', fontSize: '12px' }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Totals Row Labels */}
+                    <div>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>Totals Section Labels</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {[
+                          { key: 'subtotalLabel', placeholder: 'Subtotal:', label: 'Subtotal Row' },
+                          { key: 'discountLabel', placeholder: 'Discount:', label: 'Discount Row' },
+                          { key: 'deliveryLabel', placeholder: 'Delivery:', label: 'Delivery Charge Row' },
+                          { key: 'netTotalLabel', placeholder: 'NET TOTAL:', label: 'Grand / Net Total Row' },
+                          { key: 'paidLabel', placeholder: 'Paid:', label: 'Amount Paid Row' },
+                          { key: 'changeLabel', placeholder: 'Change Returned:', label: 'Change Returned Row' },
+                          { key: 'balanceDueLabel', placeholder: 'Balance Due:', label: 'Balance Due Row' },
+                        ].map((f) => (
+                          <div key={f.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                            <span style={{ fontSize: '12px', color: '#94A3B8', flexShrink: 0 }}>{f.label}</span>
+                            <input
+                              type="text"
+                              value={(templateJson.totals as any)[f.key] ?? f.placeholder}
+                              onChange={(e) => setTemplateJson({ ...templateJson, totals: { ...templateJson.totals, [f.key]: e.target.value } })}
+                              placeholder={f.placeholder}
+                              style={{ flex: 1, maxWidth: '200px', background: '#1A1A1A', color: '#FFF', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '6px 10px', fontSize: '12px' }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Footer Section Labels */}
+                    <div>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>Footer Section Labels</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                          <span style={{ fontSize: '12px', color: '#94A3B8', flexShrink: 0 }}>WhatsApp Prefix / Label</span>
+                          <input
+                            type="text"
+                            value={templateJson.footer.whatsappLabel ?? 'WhatsApp:'}
+                            onChange={(e) => setTemplateJson({ ...templateJson, footer: { ...templateJson.footer, whatsappLabel: e.target.value } })}
+                            placeholder="WhatsApp:"
+                            style={{ flex: 1, maxWidth: '200px', background: '#1A1A1A', color: '#FFF', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '6px 10px', fontSize: '12px' }}
+                          />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
