@@ -23,8 +23,10 @@ import {
   ArrowRight,
   FileSpreadsheet,
   Printer,
+  ClipboardList,
 } from 'lucide-react';
 import AiInvoiceScan from './AiInvoiceScan';
+import CompanyOrderSheetModal from './inventory/CompanyOrderSheetModal';
 import { exportToXlsx } from '@/utils/excelExporter';
 import { printViaIframe } from '@/utils/iframePrint';
 import {
@@ -86,6 +88,7 @@ export default function StockInventory({
   const [showAddProductModal, setShowAddProductModal] = useState<boolean>(false);
   const [showReceiveModal, setShowReceiveModal] = useState<boolean>(false);
   const [showAiScanModal, setShowAiScanModal] = useState<boolean>(false);
+  const [showOrderSheetModal, setShowOrderSheetModal] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [notification, setNotification] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -1767,6 +1770,17 @@ export default function StockInventory({
               >
                 <DollarSign style={{ width: 14, height: 14, color: '#059669' }} />
                 Bulk Edit Prices
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowOrderSheetModal(true)}
+                className="inv-btn-secondary"
+                title="Create Company Demand Order Sheet and Print Slip"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#F0FDF4', borderColor: '#BBF7D0', color: '#16A34A', fontWeight: 600 }}
+              >
+                <ClipboardList style={{ width: 14, height: 14, color: '#16A34A' }} />
+                Order Sheet
               </button>
 
               <button
@@ -3481,6 +3495,15 @@ export default function StockInventory({
             </div>
           </div>
         </div>
+      )}
+
+      {showOrderSheetModal && (
+        <CompanyOrderSheetModal
+          isOpen={showOrderSheetModal}
+          onClose={() => setShowOrderSheetModal(false)}
+          items={items}
+          tenantName={tenantName}
+        />
       )}
     </section>
   );
