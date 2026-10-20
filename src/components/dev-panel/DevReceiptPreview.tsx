@@ -166,10 +166,10 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
           <h2
             style={{
               margin: '0 0 2px 0',
-              fontSize: `${Math.round(layout.fontSize * 1.25)}px`,
+              fontSize: `${header.shopNameSize ?? Math.round(layout.fontSize * 1.25)}px`,
               fontWeight: 800,
-              letterSpacing: '0.5px',
-              textTransform: 'uppercase',
+              letterSpacing: typeof header.shopNameLetterSpacing === 'number' ? `${header.shopNameLetterSpacing}em` : '0.5px',
+              textTransform: header.shopNameUppercase !== false ? 'uppercase' : 'none',
             }}
           >
             {shopTitle}
@@ -177,13 +177,13 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
         )}
 
         {header.showAddress && (
-          <div style={{ fontSize: `${Math.max(9, layout.fontSize - 2)}px`, color: '#475569', marginTop: '2px' }}>
+          <div style={{ fontSize: `${header.addressSize ?? Math.max(9, layout.fontSize - 2)}px`, color: '#475569', marginTop: '2px' }}>
             {shopAddress}
           </div>
         )}
 
         {header.showPhone && (
-          <div style={{ fontSize: `${Math.max(9, layout.fontSize - 2)}px`, color: '#475569', marginTop: '1px' }}>
+          <div style={{ fontSize: `${header.phoneSize ?? Math.max(9, layout.fontSize - 2)}px`, color: '#475569', marginTop: '1px' }}>
             Tel: {shopPhone}
           </div>
         )}
@@ -192,7 +192,7 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
       {/* ─── INVOICE INFO SECTION ───────────────────────────────────── */}
       <div
         style={{
-          fontSize: `${Math.max(10, layout.fontSize - 1)}px`,
+          fontSize: `${invoiceInfo.fontSize ?? Math.max(10, layout.fontSize - 1)}px`,
           paddingBottom: '8px',
           marginBottom: '8px',
           ...separatorStyle('dashed'),
@@ -206,27 +206,27 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
 
         {/* T-19 Strict Compliance Lock: Date is mandatory and always visible */}
         <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569', marginBottom: '2px' }}>
-          <span>Date:</span>
+          <span>{invoiceInfo.dateLabel || 'Date:'}</span>
           <span>{invoiceData.date || new Date().toLocaleString()}</span>
         </div>
 
         {invoiceInfo.showCashier && invoiceData.cashier_name && (
           <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569', marginBottom: '2px' }}>
-            <span>Cashier:</span>
+            <span>{invoiceInfo.cashierLabel || 'Cashier:'}</span>
             <span>{invoiceData.cashier_name}</span>
           </div>
         )}
 
         {invoiceInfo.showCustomer && (
           <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569', marginBottom: '2px' }}>
-            <span>Customer:</span>
+            <span>{invoiceInfo.customerLabel || 'Customer:'}</span>
             <span style={{ fontWeight: 600 }}>{invoiceData.client_name || 'Walk-in Customer'}</span>
           </div>
         )}
 
         {invoiceInfo.showPaymentMethod && invoiceData.payment_method && (
           <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569' }}>
-            <span>Payment:</span>
+            <span>{invoiceInfo.paymentLabel || 'Payment:'}</span>
             <span>{invoiceData.payment_method}</span>
           </div>
         )}
@@ -255,22 +255,34 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
               }}
             >
               {itemsTable.columns.includes('code') && (
-                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, width: '15%' }}>Code</th>
+                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, width: '15%' }}>
+                  {itemsTable.colLabelCode || 'Code'}
+                </th>
               )}
               {itemsTable.columns.includes('name') && (
-                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700 }}>Item</th>
+                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700 }}>
+                  {itemsTable.colLabelName || 'Item'}
+                </th>
               )}
               {itemsTable.columns.includes('qty') && (
-                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, textAlign: 'center', width: '12%' }}>Qty</th>
+                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, textAlign: 'center', width: '12%' }}>
+                  {itemsTable.colLabelQty || 'Qty'}
+                </th>
               )}
               {itemsTable.columns.includes('rate') && (
-                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, textAlign: 'right', width: '22%' }}>Rate</th>
+                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, textAlign: 'right', width: '22%' }}>
+                  {itemsTable.colLabelRate || 'Rate'}
+                </th>
               )}
               {itemsTable.columns.includes('discount') && (
-                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, textAlign: 'right', width: '16%' }}>Disc</th>
+                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, textAlign: 'right', width: '16%' }}>
+                  {itemsTable.colLabelDiscount || 'Disc'}
+                </th>
               )}
               {itemsTable.columns.includes('amount') && (
-                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, textAlign: 'right', width: '24%' }}>Total</th>
+                <th style={{ padding: `${itemsTable.rowPadding}px 2px`, fontWeight: 700, textAlign: 'right', width: '24%' }}>
+                  {itemsTable.colLabelAmount || 'Total'}
+                </th>
               )}
             </tr>
           </thead>
@@ -329,7 +341,7 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
           display: 'flex',
           flexDirection: 'column',
           gap: '3px',
-          fontSize: `${layout.fontSize}px`,
+          fontSize: `${totals.fontSize ?? layout.fontSize}px`,
           paddingBottom: '8px',
           marginBottom: '8px',
           ...separatorStyle('dashed'),
@@ -337,14 +349,14 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
       >
         {totals.showSubtotal && (
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span>Subtotal:</span>
+            <span>{totals.subtotalLabel || 'Subtotal:'}</span>
             <span>{cur} {(invoiceData.subtotal || 0).toLocaleString()}</span>
           </div>
         )}
 
         {totals.showDiscount && (invoiceData.discount || 0) > 0 && (
           <div style={{ display: 'flex', justifyContent: 'space-between', color: '#dc2626' }}>
-            <span>Discount:</span>
+            <span>{totals.discountLabel || 'Discount:'}</span>
             <span>-{cur} {(invoiceData.discount || 0).toLocaleString()}</span>
           </div>
         )}
@@ -361,20 +373,20 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
           style={{
             display: 'flex',
             justifyContent: 'space-between',
-            fontSize: totals.boldTotal ? `${Math.round(layout.fontSize * 1.2)}px` : `${layout.fontSize}px`,
+            fontSize: totals.grandTotalFontSize ? `${totals.grandTotalFontSize}px` : (totals.boldTotal ? `${Math.round(layout.fontSize * 1.2)}px` : `${totals.fontSize ?? layout.fontSize}px`),
             fontWeight: totals.boldTotal ? 900 : 700,
             paddingTop: '4px',
             borderTop: '1px solid #0f172a',
             marginTop: '3px',
           }}
         >
-          <span>NET TOTAL:</span>
+          <span>{totals.netTotalLabel || 'NET TOTAL:'}</span>
           <span>{cur} {(invoiceData.net_total || 0).toLocaleString()}</span>
         </div>
 
         {totals.showPaid && (
           <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
-            <span>Paid Amount:</span>
+            <span>{totals.paidLabel || 'Paid Amount:'}</span>
             <span>{cur} {(invoiceData.paid_amount || 0).toLocaleString()}</span>
           </div>
         )}
@@ -391,7 +403,7 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
               borderRadius: '2px',
             }}
           >
-            <span>Balance Due:</span>
+            <span>{totals.balanceDueLabel || 'Balance Due:'}</span>
             <span>{cur} {(invoiceData.due_amount || 0).toLocaleString()}</span>
           </div>
         )}
@@ -400,7 +412,7 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
       {/* ─── FOOTER SECTION ─────────────────────────────────────────── */}
       <div
         style={{
-          textAlign: 'center',
+          textAlign: footer.align || 'center',
           fontSize: `${Math.max(9, layout.fontSize - 2)}px`,
           color: '#475569',
           display: 'flex',
@@ -408,18 +420,44 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
           gap: '4px',
         }}
       >
-        {footer.line1 && <div style={{ fontWeight: 600 }}>{footer.line1}</div>}
-        {footer.line2 && <div>{footer.line2}</div>}
+        {footer.line1 && (
+          <div style={{ fontWeight: 600, fontSize: `${footer.line1Size ?? Math.max(9, layout.fontSize - 2)}px` }}>
+            {footer.line1}
+          </div>
+        )}
+        {footer.line2 && (
+          <div style={{ fontSize: `${footer.line2Size ?? Math.max(9, layout.fontSize - 2)}px` }}>
+            {footer.line2}
+          </div>
+        )}
 
         {footer.showWhatsapp && footer.whatsappNumber && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', marginTop: '2px', fontWeight: 600, color: '#047857' }}>
-            <span>WhatsApp Support:</span>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: footer.align === 'left' ? 'flex-start' : footer.align === 'right' ? 'flex-end' : 'center',
+              gap: '4px',
+              marginTop: '2px',
+              fontWeight: 600,
+              color: '#047857',
+              fontSize: `${footer.whatsappSize ?? Math.max(9, layout.fontSize - 2)}px`,
+            }}
+          >
+            <span>{footer.whatsappLabel || 'WhatsApp Support:'}</span>
             <span>{footer.whatsappNumber}</span>
           </div>
         )}
 
         {footer.showQrCode && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '4px 0' }}>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: footer.align === 'left' ? 'flex-start' : footer.align === 'right' ? 'flex-end' : 'center',
+              margin: '4px 0',
+            }}
+          >
             <div
               style={{
                 width: '64px',
