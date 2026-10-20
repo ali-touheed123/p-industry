@@ -511,9 +511,13 @@ export function renderReceiptBodyHtml(
   data: RenderReceiptData,
   template: NormalizedReceiptTemplate
 ): string {
-  const { header, invoiceInfo, itemsTable, totals, footer, tokenClaimSlip } = template.template_json;
+  const { header, invoiceInfo, itemsTable, totals, footer, tokenClaimSlip, layout } = template.template_json;
   const fmt = (n: number) => Number(n || 0).toLocaleString();
   const cur = totals.currencySymbol || 'Rs.';
+
+  // Base font size — all section fallbacks scale relative to this so the
+  // "Base Font Size" slider in BranchReceiptSettings actually affects the output.
+  const basePx = clampNumber(layout?.fontSize, 8, 24, 12);
 
   // 1. Header Block
   const logoHtml = (header.showLogo && header.logoUrl)
@@ -607,7 +611,7 @@ ${returnBannerHtml}`.trim();
     </div>`);
   }
 
-  const invoiceInfoFontSize = invoiceInfo.fontSize ?? 10.5;
+  const invoiceInfoFontSize = invoiceInfo.fontSize ?? Math.max(8, basePx - 1.5);
   const invoiceInfoSection = infoRows.length > 0
     ? `<div style="font-size:${invoiceInfoFontSize}px;padding-bottom:6px;margin-bottom:6px;${headerSeparatorCss}">
         ${infoRows.join('\n')}
@@ -794,7 +798,9 @@ ${returnBannerHtml}`.trim();
   }
 
   // T-19 (Option A): Grand Total is mandatory; always rendered
-  const grandTotalFontSize = totals.grandTotalFontSize ? `${totals.grandTotalFontSize}px` : (totals.boldTotal ? '13px' : '11px');
+  const grandTotalFontSize = totals.grandTotalFontSize
+    ? `${totals.grandTotalFontSize}px`
+    : totals.boldTotal ? `${Math.round(basePx + 1)}px` : `${totals.fontSize ?? basePx}px`;
   const grandTotalFontWeight = totals.boldTotal ? '900' : '700';
   totalRows.push(`<div style="display:flex;justify-content:space-between;font-size:${grandTotalFontSize};font-weight:${grandTotalFontWeight};padding-top:3px;border-top:1px solid #000;margin-top:2px;color:#000">
     <span>${escapeHtml(totals.netTotalLabel || 'NET TOTAL:')}</span>
@@ -825,20 +831,20 @@ ${returnBannerHtml}`.trim();
   }
 
   if ((data.changeReturned || 0) > 0) {
-    totalRows.push(`<div style="display:flex;justify-content:space-between;font-size:10px;color:#000;font-weight:700">
+    totalRows.push(`<div style="display:flex;justify-content:space-between;font-size:${Math.max(8, basePx - 2)}px;color:#000;font-weight:700">
       <span>${escapeHtml(totals.changeLabel || 'Change Returned:')}</span>
       <span>${escapeHtml(cur)} ${fmt(data.changeReturned || 0)}</span>
     </div>`);
   }
 
   if (totals.showBalance && (data.dueAmount || 0) > 0) {
-    totalRows.push(`<div style="display:flex;justify-content:space-between;font-size:10.5px;font-weight:700;color:#000">
+    totalRows.push(`<div style="display:flex;justify-content:space-between;font-size:${Math.max(8, basePx - 1.5)}px;font-weight:700;color:#000">
       <span>${escapeHtml(totals.balanceDueLabel || 'Balance Due:')}</span>
       <span>${escapeHtml(cur)} ${fmt(data.dueAmount || 0)}</span>
     </div>`);
   }
 
-  const totalsFontSize = totals.fontSize ?? 11;
+  const totalsFontSize = totals.fontSize ?? basePx;
   const totalsSection = `
 <div style="display:flex;flex-direction:column;gap:3px;font-size:${totalsFontSize}px;padding-bottom:8px;margin-bottom:8px;break-inside:avoid;page-break-inside:avoid;color:#000;${headerSeparatorCss}">
   ${totalRows.join('\n')}
@@ -847,9 +853,9 @@ ${returnBannerHtml}`.trim();
   // 5. Footer Block
   const footerLines: string[] = [];
   const footerAlign = footer.align || 'center';
-  const footerLine1Size = footer.line1Size ?? 9.5;
-  const footerLine2Size = footer.line2Size ?? 9;
-  const whatsappSize = footer.whatsappSize ?? 9;
+  const footerLine1Size = footer.line1Size ?? Math.max(7, basePx - 2.5);
+  const footerLine2Size = footer.line2Size ?? Math.max(7, basePx - 3);
+  const whatsappSize = footer.whatsappSize ?? Math.max(7, basePx - 3);
 
   if (footer.line1) {
     footerLines.push(`<div style="text-align:${footerAlign};font-size:${footerLine1Size}px;color:#000">${escapeHtml(footer.line1)}</div>`);
