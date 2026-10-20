@@ -545,7 +545,7 @@ export default function PurchasesView({
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Purchase Voucher - #${escapeHtml(recordNo)} (${escapeHtml(purchaseInvNo)})</title>
+  <title>${purchaseType === 'return' ? 'Purchase Return Voucher' : 'Purchase Voucher'} - #${escapeHtml(recordNo)} (${escapeHtml(purchaseInvNo)})</title>
   <style>
     @page { size: A4 portrait; margin: 15mm; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -570,7 +570,7 @@ export default function PurchasesView({
     <div style="display: flex; justify-content: space-between; align-items: flex-end;">
       <div>
         <div class="tenant">${escapeHtml(tenantName)}</div>
-        <div class="title">Goods Receipt / Purchase Voucher</div>
+        <div class="title">${purchaseType === 'return' ? 'Purchase Return Voucher' : 'Goods Receipt / Purchase Voucher'}</div>
       </div>
       <div style="text-align: right; font-size: 10px; color: #64748b;">
         <div>Officer: <strong>${escapeHtml(staffName)}</strong></div>
@@ -578,6 +578,7 @@ export default function PurchasesView({
       </div>
     </div>
   </div>
+  ${purchaseType === 'return' ? `<div style="text-align:center;border:2px solid #000;border-radius:4px;padding:6px 10px;margin:8px 0 14px 0;font-size:13px;font-weight:900;letter-spacing:0.08em;color:#000;font-family:monospace">&#8635; PURCHASE RETURN</div>` : ''}
 
   <div class="meta-box">
     <div class="meta-row">
@@ -614,7 +615,7 @@ export default function PurchasesView({
   </div>
 
   <div class="footer">
-    <div>PyntFlow Industrial ERP • Goods Receipt / Purchase Voucher</div>
+    <div>PyntFlow Industrial ERP • ${purchaseType === 'return' ? 'Purchase Return Voucher' : 'Goods Receipt / Purchase Voucher'}</div>
     <div>Total Items: ${items.length}</div>
   </div>
 </body>

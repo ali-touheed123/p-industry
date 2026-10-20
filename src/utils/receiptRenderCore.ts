@@ -482,6 +482,7 @@ export interface RenderReceiptData {
   tenantName: string;
   tenantAddress?: string;
   tenantPhone?: string;
+  invoiceType?: string; // 'sales' | 'return' | 'purchase' | 'purchase_return' — drives return banner
   invoiceNo?: string;
   date?: string;
   time?: string;
@@ -547,6 +548,14 @@ export function renderReceiptBodyHtml(
 
   const headerSeparatorCss = getSeparatorCss(header.separator);
 
+  // Return invoice banner — shown for any invoice_type containing 'return'
+  const invTypeLower = (data.invoiceType || '').toLowerCase();
+  const isReturnInvoice = invTypeLower === 'return' || invTypeLower.includes('return');
+  const returnBannerLabel = invTypeLower === 'purchase_return' ? 'PURCHASE RETURN' : 'SALES RETURN';
+  const returnBannerHtml = isReturnInvoice
+    ? `<div style="text-align:center;border:2px solid #000;padding:4px 8px;margin:6px 0;font-size:11px;font-weight:900;letter-spacing:0.08em;color:#000">&#8635; ${returnBannerLabel}</div>`
+    : '';
+
   const headerSection = `
 <div style="text-align:${header.align};padding-bottom:8px;margin-bottom:8px;${headerSeparatorCss}">
   ${logoHtml}
@@ -554,7 +563,8 @@ export function renderReceiptBodyHtml(
   ${addressHtml}
   ${phoneHtml}
   ${reprintNoticeHtml}
-</div>`.trim();
+</div>
+${returnBannerHtml}`.trim();
 
   // 2. Invoice Info Block
   const infoRows: string[] = [];
