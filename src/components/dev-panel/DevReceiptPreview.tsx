@@ -127,6 +127,9 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
     colWidths = { name: '56%', qty: '12%', rate: '16%', amount: '16%' };
   }
 
+  const effectiveScale = (typeof scale === 'number' && scale !== 1) ? scale : (layout.scale || 1);
+  const fontRatio = (layout.fontSize || 12) / 12;
+
   return (
     <div
       id={id}
@@ -144,8 +147,9 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
         boxShadow: '0 4px 20px -2px rgba(0, 0, 0, 0.1)',
         borderRadius: isThermal ? '4px' : '6px',
         boxSizing: 'border-box',
-        transform: scale !== 1 ? `scale(${scale})` : undefined,
+        transform: effectiveScale !== 1 ? `scale(${effectiveScale})` : undefined,
         transformOrigin: 'top center',
+        transition: 'transform 0.15s ease',
       }}
     >
       {/* ─── HEADER SECTION ─────────────────────────────────────────── */}
@@ -185,7 +189,7 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
           <h2
             style={{
               margin: '0 0 2px 0',
-              fontSize: `${header.shopNameSize ?? Math.round(layout.fontSize * 1.25)}px`,
+              fontSize: `${header.shopNameSize ? Math.round(header.shopNameSize * fontRatio) : Math.round(layout.fontSize * 1.25)}px`,
               fontWeight: 800,
               letterSpacing: typeof header.shopNameLetterSpacing === 'number' ? `${header.shopNameLetterSpacing}em` : '0.5px',
               textTransform: header.shopNameUppercase !== false ? 'uppercase' : 'none',
@@ -197,13 +201,13 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
         )}
 
         {header.showAddress && (
-          <div style={{ fontSize: `${header.addressSize ?? Math.max(9, layout.fontSize - 2)}px`, color: '#000000', marginTop: '2px' }}>
+          <div style={{ fontSize: `${header.addressSize ? Math.round(header.addressSize * fontRatio) : Math.max(9, layout.fontSize - 2)}px`, color: '#000000', marginTop: '2px' }}>
             {shopAddress}
           </div>
         )}
 
         {header.showPhone && (
-          <div style={{ fontSize: `${header.phoneSize ?? Math.max(9, layout.fontSize - 2)}px`, color: '#000000', marginTop: '1px' }}>
+          <div style={{ fontSize: `${header.phoneSize ? Math.round(header.phoneSize * fontRatio) : Math.max(9, layout.fontSize - 2)}px`, color: '#000000', marginTop: '1px' }}>
             {header.phonePrefix?.trim() || 'Tel:'} {shopPhone}
           </div>
         )}
@@ -212,7 +216,7 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
       {/* ─── INVOICE INFO SECTION ───────────────────────────────────── */}
       <div
         style={{
-          fontSize: `${invoiceInfo.fontSize ?? Math.max(10, layout.fontSize - 1)}px`,
+          fontSize: `${invoiceInfo.fontSize ? Math.round(invoiceInfo.fontSize * fontRatio) : Math.max(10, layout.fontSize - 1)}px`,
           paddingBottom: '8px',
           marginBottom: '8px',
           ...separatorStyle('dashed'),
@@ -225,11 +229,12 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
           <span>{invoiceData.invoice_no || 'INV-0000'}</span>
         </div>
 
-        {/* T-19 Strict Compliance Lock: Date is mandatory and always visible */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#000000', marginBottom: '2px' }}>
-          <span>{invoiceInfo.dateLabel || 'Date:'}</span>
-          <span>{invoiceData.date || new Date().toLocaleString()}</span>
-        </div>
+        {invoiceInfo.showDate !== false && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#000000', marginBottom: '2px' }}>
+            <span>{invoiceInfo.dateLabel || 'Date:'}</span>
+            <span>{invoiceData.date || new Date().toLocaleString()}</span>
+          </div>
+        )}
 
         {invoiceInfo.showCashier && invoiceData.cashier_name && (
           <div style={{ display: 'flex', justifyContent: 'space-between', color: '#000000', marginBottom: '2px' }}>
@@ -266,7 +271,7 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
           style={{
             width: '100%',
             borderCollapse: 'collapse',
-            fontSize: `${itemsTable.fontSize || layout.fontSize}px`,
+            fontSize: `${itemsTable.fontSize ? Math.round(itemsTable.fontSize * fontRatio) : layout.fontSize}px`,
             tableLayout: 'fixed',
             color: '#000000',
           }}
@@ -367,7 +372,7 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
           display: 'flex',
           flexDirection: 'column',
           gap: '3px',
-          fontSize: `${totals.fontSize ?? layout.fontSize}px`,
+          fontSize: `${totals.fontSize ? Math.round(totals.fontSize * fontRatio) : layout.fontSize}px`,
           paddingBottom: '8px',
           marginBottom: '8px',
           ...separatorStyle('dashed'),
@@ -407,7 +412,7 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
           style={{
             display: 'flex',
             justifyContent: 'space-between',
-            fontSize: totals.grandTotalFontSize ? `${totals.grandTotalFontSize}px` : (totals.boldTotal ? `${Math.round(layout.fontSize * 1.2)}px` : `${totals.fontSize ?? layout.fontSize}px`),
+            fontSize: totals.grandTotalFontSize ? `${Math.round(totals.grandTotalFontSize * fontRatio)}px` : (totals.boldTotal ? `${Math.round(layout.fontSize * 1.2)}px` : `${totals.fontSize ? Math.round(totals.fontSize * fontRatio) : layout.fontSize}px`),
             fontWeight: totals.boldTotal ? 900 : 700,
             paddingTop: '4px',
             borderTop: '1px solid #000000',

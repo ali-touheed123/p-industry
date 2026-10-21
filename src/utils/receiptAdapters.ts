@@ -147,7 +147,7 @@ export function buildSpecialReceiptHtml(
   templateSnapshot?: any,
   isReprint = false
 ): string {
-  const normTemplate = normalizeSpecialTemplate(templateSnapshot);
+  const normTemplate = normalizeSpecialTemplate(templateSnapshot, templateSnapshot?.paper_size);
   const items: RenderReceiptItem[] = (snapshot.items || []).map((it: any) => {
     const qty = Number(it.qty || 0);
     const rate = Number(it.pre_discount_rate ?? it.unit_price ?? it.rate ?? 0);
@@ -183,6 +183,6 @@ export function buildSpecialReceiptHtml(
     isReprint,
   };
 
-  return renderReceiptDocument(receiptData, normTemplate.template_json, normTemplate.paper_size);
+  return renderReceiptDocument(receiptData, normTemplate.template_json, normTemplate.paper_size, normTemplate.template_json);
 }
 

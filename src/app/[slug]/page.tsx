@@ -740,6 +740,8 @@ export default function TenantAppPage({ params }: PageProps) {
               tenantId={tenant.id}
               tenantName={tenant.name}
               staffName={currentUser?.full_name || currentUser?.username || 'Staff'}
+              userRole={currentUser?.role || 'staff'}
+              canUseSpecialReceipt={Boolean(currentUser?.can_use_special_receipt)}
               onNavigateToPos={() => setActiveTab('pos')}
               onEditInvoiceInPos={(inv) => {
                 setEditingInvoice(inv);

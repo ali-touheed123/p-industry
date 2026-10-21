@@ -271,6 +271,31 @@ export default function SpecialPrintModal({
         resolvedPaymentType = 'split';
       }
 
+      let sendCash = 0;
+      let sendCard = 0;
+      let sendBank = 0;
+      let sendOthers = 0;
+
+      const finalPaidAmount = Math.min(totalPaid, chargedTotal);
+
+      if (paymentType === 'cash') {
+        sendCash = finalPaidAmount;
+      } else if (paymentType === 'card') {
+        sendCard = finalPaidAmount;
+      } else if (paymentType === 'bank') {
+        sendBank = finalPaidAmount;
+      } else if (paymentType === 'credit') {
+        sendCash = 0;
+        sendCard = 0;
+        sendBank = 0;
+        sendOthers = 0;
+      } else if (paymentType === 'split') {
+        sendCash = Number(cashPaid || 0);
+        sendCard = Number(cardPaid || 0);
+        sendBank = Number(bankPaid || 0);
+        sendOthers = Number(othersPaid || 0);
+      }
+
       const payload = {
         tenant_id: tenantId,
         invoice_no: invoiceNo,
@@ -283,13 +308,13 @@ export default function SpecialPrintModal({
         delivery_charge: Number(deliveryCharge || 0),
         remarks: remarks || null,
         net_total: chargedTotal,
-        paid_amount: Math.min(totalPaid, chargedTotal),
+        paid_amount: finalPaidAmount,
         due_amount: dueAmount,
         payment_type: resolvedPaymentType,
-        cash_paid: paymentType === 'cash' ? Math.min(cashPaid, chargedTotal) : cashPaid,
-        card_paid: cardPaid,
-        bank_paid: bankPaid,
-        others_paid: othersPaid,
+        cash_paid: sendCash,
+        card_paid: sendCard,
+        bank_paid: sendBank,
+        others_paid: sendOthers,
         items: lines.map((l) => ({
           item_id: l.item_id,
           item_code: l.item_code,
@@ -796,7 +821,30 @@ export default function SpecialPrintModal({
                     <button
                       key={m}
                       type="button"
-                      onClick={() => setPaymentType(m)}
+                      onClick={() => {
+                        setPaymentType(m);
+                        if (m === 'cash') {
+                          setCashPaid(chargedTotal);
+                          setCardPaid(0);
+                          setBankPaid(0);
+                          setOthersPaid(0);
+                        } else if (m === 'card') {
+                          setCardPaid(chargedTotal);
+                          setCashPaid(0);
+                          setBankPaid(0);
+                          setOthersPaid(0);
+                        } else if (m === 'bank') {
+                          setBankPaid(chargedTotal);
+                          setCashPaid(0);
+                          setCardPaid(0);
+                          setOthersPaid(0);
+                        } else if (m === 'credit') {
+                          setCashPaid(0);
+                          setCardPaid(0);
+                          setBankPaid(0);
+                          setOthersPaid(0);
+                        }
+                      }}
                       style={{
                         padding: '4px 8px',
                         borderRadius: '6px',

@@ -201,9 +201,20 @@ export function buildReceiptPageCss(layout: LayoutConfig, paperSize: PaperSize):
       ${scaleRule}
     }
     @media print {
-      body {
-        margin: 0 auto;
-        padding: ${marginTop}mm ${marginRight}mm ${marginBottom}mm ${marginLeft}mm;
+      @page {
+        margin: 0;
+      }
+      html, body {
+        height: auto !important;
+        overflow: visible !important;
+        margin: 0 auto !important;
+        padding: ${marginTop}mm ${marginRight}mm ${marginBottom}mm ${marginLeft}mm !important;
+        page-break-after: avoid !important;
+        break-after: avoid !important;
+      }
+      div, table, tr, p, h2, span {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
       }
     }
   `.trim();
@@ -221,13 +232,17 @@ export function normalizeTemplate(
   fallbackTemplate?: TemplateJson
 ): NormalizedReceiptTemplate {
   const d = fallbackTemplate ?? DEFAULT_TEMPLATE_JSON;
-  const rawObj = (typeof rawTemplate === 'object' && rawTemplate !== null)
+  const rawInput = (typeof rawTemplate === 'object' && rawTemplate !== null)
     ? (rawTemplate as Record<string, any>)
     : {};
+  const rawObj = (rawInput.template_json && typeof rawInput.template_json === 'object')
+    ? rawInput.template_json
+    : rawInput;
 
   // 1. Paper Size
-  const normalizedPaperSize: PaperSize = (typeof paperSize === 'string' && (VALID_PAPER_SIZES as readonly string[]).includes(paperSize))
-    ? (paperSize as PaperSize)
+  const chosenPaperSize = paperSize ?? rawInput.paper_size ?? rawObj.paper_size;
+  const normalizedPaperSize: PaperSize = (typeof chosenPaperSize === 'string' && (VALID_PAPER_SIZES as readonly string[]).includes(chosenPaperSize))
+    ? (chosenPaperSize as PaperSize)
     : 'thermal_80';
 
   // 2. Header Section
@@ -258,8 +273,7 @@ export function normalizeTemplate(
     // T-19 (Option A): Invoice Number is mandatory for legal and audit compliance; cannot be hidden
     showInvoiceNo: true,
     invoiceLabel: parseString(rawInfo.invoiceLabel, d.invoiceInfo.invoiceLabel),
-    // T-19 (Option A): Date & Timestamp is mandatory for transaction validity; cannot be hidden
-    showDate: true,
+    showDate: parseBoolean(rawInfo.showDate, d.invoiceInfo.showDate),
     dateLabel: typeof rawInfo.dateLabel === 'string' ? rawInfo.dateLabel : d.invoiceInfo.dateLabel,
     showCashier: parseBoolean(rawInfo.showCashier, d.invoiceInfo.showCashier),
     cashierLabel: typeof rawInfo.cashierLabel === 'string' ? rawInfo.cashierLabel : d.invoiceInfo.cashierLabel,
@@ -596,8 +610,8 @@ ${returnBannerHtml}`.trim();
     </div>`);
   }
 
-  // T-19 (Option A): Date & Timestamp is mandatory; rendered whenever data.date is available
-  if (data.date) {
+  // Render Date & Timestamp whenever enabled and available
+  if (invoiceInfo.showDate && data.date) {
     const dateTimeStr = `${escapeHtml(data.date)}${data.time ? ` &middot; ${escapeHtml(data.time)}` : ''}`;
     infoRows.push(`<div style="display:flex;justify-content:space-between;color:#000">
       <span>${escapeHtml(invoiceInfo.dateLabel?.trim() || 'Date:')}</span>
@@ -922,9 +936,10 @@ ${tokenClaimSlipSection}
 export function renderReceiptDocument(
   data: RenderReceiptData,
   templateOrRaw: unknown,
-  paperSize?: unknown
+  paperSize?: unknown,
+  fallbackTemplate?: TemplateJson
 ): string {
-  const normalized = normalizeTemplate(templateOrRaw, paperSize);
+  const normalized = normalizeTemplate(templateOrRaw, paperSize, fallbackTemplate);
   const bodyHtml = renderReceiptBodyHtml(data, normalized);
   const title = `Receipt ${data.invoiceNo || ''}`.trim();
   return renderReceiptHtmlDocument(

@@ -1183,6 +1183,7 @@ export default function SpecialReceiptSettings({
                 template={templateJson}
                 paperSize={paperSize}
                 invoiceData={mockInvoiceData}
+                scale={templateJson.layout.scale}
               />
             </div>
           </div>

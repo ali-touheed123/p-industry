@@ -18,15 +18,16 @@ export function printViaIframe(htmlContent: string, onError?: (err: Error) => vo
   const iframe = document.createElement('iframe');
   iframe.id = '__thermal_print_iframe__';
 
-  // Hide iframe completely — it must not affect the page layout
+  // Position offscreen with realistic thermal width so media queries and scrollHeight evaluate accurately
   Object.assign(iframe.style, {
     position: 'fixed',
     top: '-10000px',
     left: '-10000px',
-    width: '0',
-    height: '0',
+    width: '80mm',
+    height: '1000px',
     border: 'none',
-    visibility: 'hidden',
+    opacity: '0',
+    pointerEvents: 'none',
   });
 
   document.body.appendChild(iframe);
@@ -69,9 +70,17 @@ export function printViaIframe(htmlContent: string, onError?: (err: Error) => vo
     }
   }, 30000);
 
-  // Trigger print — synchronous call inside iframe's window context
-  iframe.contentWindow?.focus();
-  iframe.contentWindow?.print();
+  // Allow DOM layout and inline scripts (thermalFitScript) to calculate dimensions before launching print dialog
+  setTimeout(() => {
+    try {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    } catch (err: any) {
+      console.error('[iframePrint] Execution error:', err);
+      if (onError) onError(err);
+    }
+  }, 120);
+
   return true;
 }
 
