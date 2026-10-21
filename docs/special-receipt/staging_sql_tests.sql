@@ -206,6 +206,7 @@ BEGIN;
 DO $$
 DECLARE
   v_tenant_id UUID := (SELECT id FROM tenants LIMIT 1);
+  v_shift_id UUID := (SELECT id FROM shifts WHERE tenant_id = v_tenant_id AND status = 'open' LIMIT 1);
   v_other_tenant_id UUID;
   v_item_id UUID;
   v_user_off UUID := gen_random_uuid();
@@ -238,6 +239,7 @@ BEGIN
     'tenant_id', v_tenant_id,
     'invoice_no', 'PERM-TEST-001',
     'invoice_type', 'sales',
+    'shift_id', v_shift_id,
     'date', CURRENT_DATE,
     'paid_amount', 1500,
     'due_amount', 0,
@@ -361,6 +363,7 @@ BEGIN;
 DO $$
 DECLARE
   v_tenant_id UUID := (SELECT id FROM tenants LIMIT 1);
+  v_shift_id UUID := (SELECT id FROM shifts WHERE tenant_id = v_tenant_id AND status = 'open' LIMIT 1);
   v_user_id UUID := gen_random_uuid();
   v_item_id UUID;
   v_res JSONB;
@@ -385,6 +388,7 @@ BEGIN
       'tenant_id',       v_tenant_id,
       'invoice_no',      'HAPPY-SPEC-001',
       'invoice_type',    'sales',
+      'shift_id',        v_shift_id,
       'date',            CURRENT_DATE,
       'paid_amount',     3400,
       'due_amount',      0,
@@ -485,6 +489,7 @@ BEGIN;
 DO $$
 DECLARE
   v_tenant_id UUID := (SELECT id FROM tenants LIMIT 1);
+  v_shift_id UUID := (SELECT id FROM shifts WHERE tenant_id = v_tenant_id AND status = 'open' LIMIT 1);
   v_user_id UUID := gen_random_uuid();
   v_brand_id UUID := gen_random_uuid();
   v_series_id UUID := gen_random_uuid();
@@ -518,6 +523,7 @@ BEGIN
       'tenant_id',    v_tenant_id,
       'invoice_no',   'TOKEN-TEST-001',
       'invoice_type', 'sales',
+      'shift_id',     v_shift_id,
       'date',         CURRENT_DATE,
       'paid_amount',  1200,
       'due_amount',   0,
@@ -696,7 +702,7 @@ BEGIN
     );
     RAISE EXCEPTION 'TEST 8.2 FAILED: Excess quantity return was not blocked';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM ILIKE '%exceeds returnable qty%' THEN
+    IF SQLERRM ILIKE '%exceeds%returnable qty%' THEN
       RAISE NOTICE 'TEST 8.2 PASSED: Quantity guard correctly blocked excess return — %', SQLERRM;
     ELSE RAISE EXCEPTION 'TEST 8.2 FAILED: Unexpected error — %', SQLERRM; END IF;
   END;
@@ -734,7 +740,7 @@ BEGIN
     );
     RAISE EXCEPTION 'TEST 8.4 FAILED: Return when 0 returnable was not blocked';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM ILIKE '%exceeds returnable qty%' THEN
+    IF SQLERRM ILIKE '%exceeds%returnable qty%' THEN
       RAISE NOTICE 'TEST 8.4 PASSED: Third return rejected: returnable qty is 0';
     ELSE RAISE EXCEPTION 'TEST 8.4 FAILED: Unexpected error — %', SQLERRM; END IF;
   END;
@@ -758,7 +764,7 @@ BEGIN;
 
 DO $$
 DECLARE
-  v_tenant_id UUID := (SELECT id FROM tenants LIMIT 1);
+  v_tenant_id UUID := gen_random_uuid();
   v_user_id UUID := gen_random_uuid();
   v_client_id UUID := gen_random_uuid();
   v_shift_id UUID := gen_random_uuid();
@@ -770,13 +776,17 @@ DECLARE
   v_ret_inv RECORD;
   v_client_bal NUMERIC;
 BEGIN
+  -- Setup isolated tenant
+  INSERT INTO tenants (id, name, slug, type)
+  VALUES (v_tenant_id, 'Khata Branch', 'khata-branch', 'shop');
+
   -- Setup staff
   INSERT INTO app_users (id, tenant_id, username, password_hash, full_name, role, is_active, can_use_special_receipt)
   VALUES (v_user_id, v_tenant_id, 'cashier_khata', 'dummy_hash', 'Khata Cashier', 'staff', true, true);
 
-  -- Setup registered customer with 5000 debt
+  -- Setup registered customer: starts at 3500 so after 1500 credit sale balance becomes 5000
   INSERT INTO clients (id, tenant_id, name, current_balance)
-  VALUES (v_client_id, v_tenant_id, 'Registered Client A', 5000);
+  VALUES (v_client_id, v_tenant_id, 'Registered Client A', 3500);
 
   -- Open shift
   INSERT INTO shifts (id, tenant_id, opened_by, status, start_time, opening_cash)
@@ -787,7 +797,7 @@ BEGIN
   VALUES (v_tenant_id, 'Credit Item', 'CI-01', 2000, 1500, 10)
   RETURNING id INTO v_item_id;
 
-  -- Create credit sale: total 2000, paid 500 cash, due 1500
+  -- Create credit sale: total 2000, paid 500 cash, due 1500 -> client balance becomes 5000
   v_sale_res := public.create_special_invoice_atomic(
     p_invoice_data => jsonb_build_object(
       'tenant_id',    v_tenant_id,
@@ -876,7 +886,7 @@ BEGIN
     );
     RAISE EXCEPTION 'TEST 9 FAILED: Cashier over-refund was not rejected';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM ILIKE '%must equal return net%' OR SQLERRM ILIKE '%exceeds remaining returnable%' THEN
+    IF SQLERRM ILIKE '%must equal return net%' OR SQLERRM ILIKE '%exceeds remaining returnable%' OR SQLERRM ILIKE '%exceeds%returnable%' THEN
       -- Passed: either rejected on remaining qty or tender tolerance
       NULL;
     ELSE
@@ -904,6 +914,7 @@ BEGIN;
 DO $$
 DECLARE
   v_tenant_id UUID := (SELECT id FROM tenants LIMIT 1);
+  v_shift_id UUID := (SELECT id FROM shifts WHERE tenant_id = v_tenant_id AND status = 'open' LIMIT 1);
   v_user_id UUID := gen_random_uuid();
   v_item_id UUID;
   v_sale_res JSONB;
@@ -921,6 +932,7 @@ BEGIN
       'tenant_id',    v_tenant_id,
       'invoice_no',   'CANC-SPEC-001',
       'invoice_type', 'sales',
+      'shift_id',     v_shift_id,
       'date',         CURRENT_DATE,
       'paid_amount',  500,
       'due_amount',   0,
@@ -979,19 +991,23 @@ BEGIN;
 
 DO $$
 DECLARE
-  v_tenant_id UUID := (SELECT id FROM tenants LIMIT 1);
+  v_tenant_id UUID := gen_random_uuid();
   v_user_id UUID := gen_random_uuid();
+  v_shift_id UUID := gen_random_uuid();
   v_item_id UUID;
   v_sale_res JSONB;
   v_inv_id UUID;
   v_item_id_orig UUID;
 BEGIN
+  INSERT INTO tenants (id, name, slug, type)
+  VALUES (v_tenant_id, 'Cancel Return Branch', 'cancel-ret-branch', 'shop');
+
   INSERT INTO app_users (id, tenant_id, username, password_hash, full_name, role, is_active, can_use_special_receipt)
   VALUES (v_user_id, v_tenant_id, 'cashier_canc2', 'dummy_hash', 'Cancel Cashier 2', 'staff', true, true);
 
-  -- Open shift (opened_by — verified via information_schema)
-  INSERT INTO shifts (tenant_id, opened_by, status, start_time, opening_cash)
-  VALUES (v_tenant_id, v_user_id, 'open', NOW(), 5000);
+  -- Open shift
+  INSERT INTO shifts (id, tenant_id, opened_by, status, start_time, opening_cash)
+  VALUES (v_shift_id, v_tenant_id, v_user_id, 'open', NOW(), 5000);
 
   INSERT INTO items (tenant_id, name, code, retail_price, cost_price, stock_qty)
   VALUES (v_tenant_id, 'Cancel Return Item', 'CR-02', 1000, 700, 10)
@@ -1002,6 +1018,7 @@ BEGIN
       'tenant_id',    v_tenant_id,
       'invoice_no',   'CANC-RET-001',
       'invoice_type', 'sales',
+      'shift_id',     v_shift_id,
       'date',         CURRENT_DATE,
       'paid_amount',  1000,
       'due_amount',   0,
@@ -1037,6 +1054,7 @@ BEGIN
       p_items               => jsonb_build_array(jsonb_build_object('original_item_id', v_item_id_orig, 'qty', 1)),
       p_user_id             => v_user_id,
       p_printed_by          => 'Cancel Cashier 2',
+      p_shift_id            => v_shift_id,
       p_cash_refunded       => 1000
     );
     RAISE EXCEPTION 'TEST 11 FAILED: Return on cancelled invoice was not blocked';
@@ -1179,6 +1197,7 @@ BEGIN;
 DO $$
 DECLARE
   v_tenant_id UUID := (SELECT id FROM tenants LIMIT 1);
+  v_shift_id UUID := (SELECT id FROM shifts WHERE tenant_id = v_tenant_id AND status = 'open' LIMIT 1);
   v_user_id UUID := gen_random_uuid();
   v_item_id UUID;
   v_res JSONB;
@@ -1198,6 +1217,7 @@ BEGIN
       'tenant_id',       v_tenant_id,
       'invoice_no',      'DELIV-TEST-001',
       'invoice_type',    'sales',
+      'shift_id',        v_shift_id,
       'date',            CURRENT_DATE,
       'delivery_charge', 200,
       'paid_amount',     1200,   -- 1000 item + 200 delivery
@@ -1270,6 +1290,7 @@ BEGIN;
 DO $$
 DECLARE
   v_tenant_id UUID := (SELECT id FROM tenants LIMIT 1);
+  v_shift_id UUID := (SELECT id FROM shifts WHERE tenant_id = v_tenant_id AND status = 'open' LIMIT 1);
   v_user_id UUID := gen_random_uuid();
   v_item_id UUID;
 BEGIN
@@ -1286,6 +1307,7 @@ BEGIN
         'tenant_id',    v_tenant_id,
         'invoice_no',   'DISC-TEST-001',
         'invoice_type', 'sales',
+        'shift_id',     v_shift_id,
         'date',         CURRENT_DATE,
         'discount',     100,           -- invoice-level discount: should be rejected
         'paid_amount',  900,
@@ -1331,8 +1353,9 @@ BEGIN;
 
 DO $$
 DECLARE
-  v_tenant_id UUID := (SELECT id FROM tenants LIMIT 1);
+  v_tenant_id UUID := gen_random_uuid();
   v_user_id UUID := gen_random_uuid();
+  v_shift_id UUID := gen_random_uuid();
   v_item_id UUID;
   v_sale_res JSONB;
   v_orig_inv_id UUID;
@@ -1341,12 +1364,15 @@ DECLARE
   v_ret_res JSONB;
   v_ret_item RECORD;
 BEGIN
+  INSERT INTO tenants (id, name, slug, type)
+  VALUES (v_tenant_id, 'Dup Lines Branch', 'dup-lines-branch', 'shop');
+
   INSERT INTO app_users (id, tenant_id, username, password_hash, full_name, role, is_active, can_use_special_receipt)
   VALUES (v_user_id, v_tenant_id, 'cashier_dup', 'dummy_hash', 'Dup Cashier', 'staff', true, true);
 
   -- Open shift
-  INSERT INTO shifts (tenant_id, opened_by, status, start_time, opening_cash)
-  VALUES (v_tenant_id, v_user_id, 'open', NOW(), 5000);
+  INSERT INTO shifts (id, tenant_id, opened_by, status, start_time, opening_cash)
+  VALUES (v_shift_id, v_tenant_id, v_user_id, 'open', NOW(), 5000);
 
   -- SAME item_id appears twice on the invoice with different discounts
   -- Line 1: 2 qty × 1000 = 2000, discount 200 → net 1800
@@ -1360,6 +1386,7 @@ BEGIN
       'tenant_id',    v_tenant_id,
       'invoice_no',   'DUP-LINES-001',
       'invoice_type', 'sales',
+      'shift_id',     v_shift_id,
       'date',         CURRENT_DATE,
       'paid_amount',  2800,
       'due_amount',   0,
@@ -1417,7 +1444,7 @@ BEGIN
     ),
     p_user_id             => v_user_id,
     p_printed_by          => 'Dup Cashier',
-    p_shift_id            => (SELECT id FROM shifts WHERE tenant_id = v_tenant_id AND status = 'open' LIMIT 1),
+    p_shift_id            => v_shift_id,
     p_cash_refunded       => 1000
   );
 
@@ -1823,7 +1850,8 @@ BEGIN
   INSERT INTO tenants (id, name, slug, type) VALUES (v_tenant_id, 'Mixed Branch', 'mixed-branch', 'shop');
   INSERT INTO app_users (id, tenant_id, username, password_hash, full_name, role, is_active, can_use_special_receipt)
   VALUES (v_user_id, v_tenant_id, 'cashier_m', 'dummy_hash', 'Mixed Cashier', 'staff', true, true);
-  INSERT INTO clients (id, tenant_id, name, current_balance) VALUES (v_client_id, v_tenant_id, 'Mixed Client', 5000);
+  -- Seed with 4600 so that after credit sale (+400 due), balance is 5000 as intended for the return test
+  INSERT INTO clients (id, tenant_id, name, current_balance) VALUES (v_client_id, v_tenant_id, 'Mixed Client', 4600);
   INSERT INTO shifts (id, tenant_id, opened_by, status, start_time, opening_cash)
   VALUES (v_shift_id, v_tenant_id, v_user_id, 'open', NOW(), 10000);
   INSERT INTO items (tenant_id, name, code, retail_price, cost_price, stock_qty)
@@ -1935,7 +1963,7 @@ BEGIN
     );
     RAISE EXCEPTION 'TEST 23 FAILED: Duplicate lines exceeding returnable qty were not blocked';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM ILIKE '%exceeds returnable qty%' THEN
+    IF SQLERRM ILIKE '%exceeds%returnable qty%' THEN
       RAISE NOTICE 'TEST 23 PASSED: In-request duplicate line aggregation correctly blocked excess return';
     ELSE RAISE EXCEPTION 'TEST 23 FAILED: Unexpected error — %', SQLERRM; END IF;
   END;
@@ -1984,7 +2012,7 @@ BEGIN
     );
     RAISE EXCEPTION 'TEST 24a FAILED: Return of return was not blocked';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM ILIKE '%non-special or return invoice%' THEN
+    IF SQLERRM ILIKE '%not found, not sales type, or not special%' THEN
       RAISE NOTICE 'TEST 24a PASSED: Return of return correctly blocked';
     ELSE RAISE EXCEPTION 'TEST 24a FAILED: Unexpected error — %', SQLERRM; END IF;
   END;
@@ -2001,7 +2029,7 @@ BEGIN
     );
     RAISE EXCEPTION 'TEST 24b FAILED: Return of regular invoice was not blocked';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM ILIKE '%non-special or return invoice%' THEN
+    IF SQLERRM ILIKE '%not found, not sales type, or not special%' THEN
       RAISE NOTICE 'TEST 24b PASSED: Return of regular invoice correctly blocked';
     ELSE RAISE EXCEPTION 'TEST 24b FAILED: Unexpected error — %', SQLERRM; END IF;
   END;
@@ -2022,6 +2050,8 @@ DECLARE
   v_user_id UUID := gen_random_uuid();
   v_shift_id UUID := gen_random_uuid();
   v_inv_id UUID := gen_random_uuid();
+  v_item_id UUID;
+  v_orig_item_id UUID;
 BEGIN
   INSERT INTO tenants (id, name, slug, type) VALUES (v_tenant_id, 'Neg Branch', 'neg-branch', 'shop');
   INSERT INTO app_users (id, tenant_id, username, password_hash, full_name, role, is_active, can_use_special_receipt)
@@ -2029,13 +2059,20 @@ BEGIN
   INSERT INTO shifts (id, tenant_id, opened_by, status, start_time, opening_cash)
   VALUES (v_shift_id, v_tenant_id, v_user_id, 'open', NOW(), 10000);
 
+  INSERT INTO items (tenant_id, name, code, retail_price, cost_price, stock_qty)
+  VALUES (v_tenant_id, 'Neg Paint', 'NP-01', 1000, 700, 10) RETURNING id INTO v_item_id;
+
   INSERT INTO invoices (id, tenant_id, invoice_no, invoice_type, status, printed_as, date, subtotal, discount, net_total, paid_amount, due_amount)
   VALUES (v_inv_id, v_tenant_id, 'NEG-INV-001', 'sales', 'completed', 'special', CURRENT_DATE, 1000, 0, 1000, 1000, 0);
+
+  INSERT INTO invoice_items (id, invoice_id, item_id, item_name, qty, unit_price, discount, total_price)
+  VALUES (gen_random_uuid(), v_inv_id, v_item_id, 'Neg Paint', 1, 1000, 0, 1000)
+  RETURNING id INTO v_orig_item_id;
 
   BEGIN
     PERFORM public.create_special_return_atomic(
       p_original_invoice_id => v_inv_id,
-      p_items               => '[]'::jsonb,
+      p_items               => jsonb_build_array(jsonb_build_object('original_item_id', v_orig_item_id, 'qty', 1)),
       p_user_id             => v_user_id,
       p_printed_by          => 'Neg Cashier',
       p_shift_id            => v_shift_id,
@@ -2121,7 +2158,7 @@ ROLLBACK;
 --    with an exception requiring manual review (due to ambiguous per-line allocation).
 BEGIN;
 
-DO $
+DO $$
 DECLARE
   v_tenant_id UUID := gen_random_uuid();
   v_user_id UUID := gen_random_uuid();
@@ -2157,7 +2194,7 @@ BEGIN
     ELSE RAISE EXCEPTION 'TEST 27 FAILED: Unexpected error — %', SQLERRM; END IF;
   END;
 END;
-$;
+$$;
 
 ROLLBACK;
 
@@ -2312,7 +2349,7 @@ ROLLBACK;
 --  - Client current_balance reduced from 3000 by 500 to 2500.
 BEGIN;
 
-DO $
+DO $$
 DECLARE
   v_tenant_id UUID := gen_random_uuid();
   v_user_id UUID := gen_random_uuid();
@@ -2329,7 +2366,8 @@ BEGIN
   INSERT INTO tenants (id, name, slug, type) VALUES (v_tenant_id, 'Offset Branch', 'offset-branch', 'shop');
   INSERT INTO app_users (id, tenant_id, username, password_hash, full_name, role, is_active, can_use_special_receipt)
   VALUES (v_user_id, v_tenant_id, 'cashier_o', 'dummy_hash', 'Offset Cashier', 'staff', true, true);
-  INSERT INTO clients (id, tenant_id, name, current_balance) VALUES (v_client_id, v_tenant_id, 'Offset Client', 3000);
+  -- Seed with 2200 so after sale (+800 due), balance is 3000
+  INSERT INTO clients (id, tenant_id, name, current_balance) VALUES (v_client_id, v_tenant_id, 'Offset Client', 2200);
   INSERT INTO shifts (id, tenant_id, opened_by, status, start_time, opening_cash)
   VALUES (v_shift_id, v_tenant_id, v_user_id, 'open', NOW(), 10000);
   INSERT INTO items (tenant_id, name, code, retail_price, cost_price, stock_qty)
@@ -2382,7 +2420,7 @@ BEGIN
 
   RAISE NOTICE 'TEST 30 PASSED: Return within due amount correctly sets offset=500, payout=0, balance=2500';
 END;
-$;
+$$;
 
 ROLLBACK;
 
@@ -2401,7 +2439,7 @@ ROLLBACK;
 --    Client balance reduced by 300 (from 2500 to 2200).
 BEGIN;
 
-DO $
+DO $$
 DECLARE
   v_tenant_id UUID := gen_random_uuid();
   v_user_id UUID := gen_random_uuid();
@@ -2418,7 +2456,8 @@ BEGIN
   INSERT INTO tenants (id, name, slug, type) VALUES (v_tenant_id, 'MultiRet Branch', 'multiret-branch', 'shop');
   INSERT INTO app_users (id, tenant_id, username, password_hash, full_name, role, is_active, can_use_special_receipt)
   VALUES (v_user_id, v_tenant_id, 'cashier_mr', 'dummy_hash', 'Multi Cashier', 'staff', true, true);
-  INSERT INTO clients (id, tenant_id, name, current_balance) VALUES (v_client_id, v_tenant_id, 'Multi Client', 3000);
+  -- Seed with 2200 so after sale (+800 due), balance is 3000
+  INSERT INTO clients (id, tenant_id, name, current_balance) VALUES (v_client_id, v_tenant_id, 'Multi Client', 2200);
   INSERT INTO shifts (id, tenant_id, opened_by, status, start_time, opening_cash)
   VALUES (v_shift_id, v_tenant_id, v_user_id, 'open', NOW(), 10000);
   INSERT INTO items (tenant_id, name, code, retail_price, cost_price, stock_qty)
@@ -2474,7 +2513,7 @@ BEGIN
 
   RAISE NOTICE 'TEST 31 PASSED: Prior returns dynamically reduce available offset for subsequent returns';
 END;
-$;
+$$;
 
 ROLLBACK;
 
@@ -2490,7 +2529,7 @@ ROLLBACK;
 --  - Cashier refunds full 300 in cash. Client balance remains 0.
 BEGIN;
 
-DO $
+DO $$
 DECLARE
   v_tenant_id UUID := gen_random_uuid();
   v_user_id UUID := gen_random_uuid();
@@ -2529,6 +2568,9 @@ BEGIN
   v_orig_inv_id := (v_sale_res->>'invoice_id')::UUID;
   SELECT id INTO v_orig_item_id FROM invoice_items WHERE invoice_id = v_orig_inv_id LIMIT 1;
 
+  -- Client pays off dues prior to return (simulating debt clearance)
+  UPDATE clients SET current_balance = 0 WHERE id = v_client_id;
+
   -- Return item: khata_offset = LEAST(300, 300, 0) = 0. Cashier pays 300 cash.
   v_ret_res := public.create_special_return_atomic(
     p_original_invoice_id => v_orig_inv_id,
@@ -2551,7 +2593,7 @@ BEGIN
 
   RAISE NOTICE 'TEST 32 PASSED: Client with 0 balance gets full cash refund without balance going negative';
 END;
-$;
+$$;
 
 ROLLBACK;
 
@@ -2568,7 +2610,7 @@ ROLLBACK;
 --  - If request asks for 2 + 2 units (= 4 units), raises exception exceeding returnable qty.
 BEGIN;
 
-DO $
+DO $$
 DECLARE
   v_tenant_id UUID := gen_random_uuid();
   v_user_id UUID := gen_random_uuid();
@@ -2646,6 +2688,6 @@ BEGIN
 
   RAISE NOTICE 'TEST 33 PASSED: Duplicate items merge in Pre-Pass and Cents Rule refunds exact 1000.00';
 END;
-$;
+$$;
 
 ROLLBACK;

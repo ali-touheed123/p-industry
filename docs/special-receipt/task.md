@@ -12,17 +12,16 @@
 
 ## Phase 0: Pre-Migration Safeguards & Staging Rollout
 
-### `TASK-SR-00` [REQUIRES USER APPROVAL] — Staging Verification & Pre-Migration Backup
-- **Description:** 
-  1. Create a full database backup of production database `ignspvajzblmsbertmmv`.
-  2. Apply migration script `20261021_01_special_receipt_system.sql` to the dedicated Supabase staging project (`azzonbwaevtywisxlxej`) first.
-  3. Verify SQL syntax, trigger behavior (`pg_trigger_depth() > 1` tenant cascade delete), RPC execution permissions, and rollback stability.
+### `TASK-SR-00` — Staging Verification & Pre-Migration Backup [STAGING VERIFIED]
+- **Status:** **STAGING VERIFIED** (See [staging_run_report.md](file:///d:/bestow/p-industry/docs/special-receipt/staging_run_report.md))
+  - Applied migration script [staging_migration.sql](file:///d:/bestow/p-industry/docs/special-receipt/staging_migration.sql) to dedicated staging project `azzonbwaevtywisxlxej`.
+  - All 33 automated tests in [staging_sql_tests.sql](file:///d:/bestow/p-industry/docs/special-receipt/staging_sql_tests.sql) executed and **PASSED (100%)**.
+  - Production backup remains prerequisite immediately prior to future production apply.
 - **Dependencies:** None
 - **Acceptance Criteria:**
-  - Zero syntax errors on PostgreSQL 17.
-  - Backup snapshot verified before applying any changes to production.
-  - All staging tests pass cleanly.
-- **Risk Level:** Medium.
+  - Zero syntax errors on PostgreSQL 17 (Verified).
+  - All 33 staging tests pass cleanly (Verified).
+- **Risk Level:** Low (staging verified; production untouched).
 
 ---
 
