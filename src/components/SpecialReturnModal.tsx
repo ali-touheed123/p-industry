@@ -218,13 +218,13 @@ export default function SpecialReturnModal({
         tenant_id: tenantId,
         original_invoice_id: invoice.id,
         items: itemsToReturn.map((it) => ({
-          original_invoice_item_id: it.original_item_id,
+          original_item_id: it.original_item_id,
           item_id: it.item_id,
           qty: it.return_qty,
         })),
         payment_type: refundMode,
-        cash_paid: refundMode === 'card' ? 0 : cashRefund,
-        card_paid: refundMode === 'cash' ? 0 : cardRefund,
+        cash_refunded: refundMode === 'card' ? 0 : cashRefund,
+        card_refunded: refundMode === 'cash' ? 0 : cardRefund,
       };
 
       const res = await fetch('/api/invoices/special-return', {

@@ -170,7 +170,7 @@ export function buildSpecialReceiptHtml(
     date: snapshot.date || new Date().toISOString().split('T')[0],
     time: snapshot.time || undefined,
     clientName: snapshot.client_name || undefined,
-    paymentMethod: 'CASH',
+    paymentMethod: snapshot.payment_type ? (snapshot.payment_type as string).toUpperCase() : 'CASH',
     items,
     subTotal: Number(snapshot.printed_total || snapshot.master_total || 0),
     discount: 0, // Option A: Zero discount disclosure on paper

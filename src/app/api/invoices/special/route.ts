@@ -236,9 +236,15 @@ export async function POST(req: NextRequest) {
     }));
 
     const receiptSnap = {
+      invoice_no,
+      client_name: client_name || 'Walk-in Customer',
+      date,
       header_note: receipt_snapshot?.header_note || '',
       footer_note: receipt_snapshot?.footer_note || '',
       delivery_charge: parsedDelivery,
+      payment_type,
+      paid_amount: parsedPaid,
+      due_amount: parsedDue,
     };
 
     const { data: rpcRes, error: rpcErr } = await supabaseAdmin.rpc('create_special_invoice_atomic', {

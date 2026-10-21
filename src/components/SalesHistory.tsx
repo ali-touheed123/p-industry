@@ -3256,6 +3256,20 @@ export default function SalesHistory({
           </div>
         </div>
       )}
+      {/* TASK-SR-26: Special Return Modal (Option E Zero-Print) */}
+      {specialReturnInvoice && (
+        <SpecialReturnModal
+          isOpen={true}
+          onClose={() => setSpecialReturnInvoice(null)}
+          invoice={specialReturnInvoice}
+          tenantId={tenantId}
+          onSuccess={() => {
+            setSpecialReturnInvoice(null);
+            fetchInvoices();
+          }}
+        />
+      )}
+
       {/* Task 9.6: Cancel Invoice Confirmation Modal */}
       {cancelModal && (
         <div

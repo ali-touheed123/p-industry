@@ -755,6 +755,7 @@ export default function SpecialReceiptSettings({
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     {[
+                      { key: 'showInvoiceNo', label: 'Print Invoice Number', fieldKey: 'invoiceLabel', defaultLabel: 'Invoice #' },
                       { key: 'showDate', label: 'Print Date & Time', fieldKey: 'dateLabel', defaultLabel: 'Date:' },
                       { key: 'showCashier', label: 'Print Cashier / Staff Name', fieldKey: 'cashierLabel', defaultLabel: 'Staff:' },
                       { key: 'showCustomer', label: 'Print Customer Name', fieldKey: 'customerLabel', defaultLabel: 'Customer:' },

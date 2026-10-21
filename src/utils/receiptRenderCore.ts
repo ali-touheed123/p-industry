@@ -602,8 +602,10 @@ ${returnBannerHtml}`.trim();
   // 2. Invoice Info Block
   const infoRows: string[] = [];
 
-  // T-19 (Option A): Invoice Number is mandatory; rendered whenever data.invoiceNo is available
-  if (data.invoiceNo) {
+  // T-19 (Option A): Invoice Number rendered when enabled by template AND data.invoiceNo is available.
+  // invoiceInfo.showInvoiceNo defaults to true for backward-compat with templates that never set it.
+  const showInvoice = invoiceInfo.showInvoiceNo !== false;
+  if (showInvoice && data.invoiceNo) {
     infoRows.push(`<div style="display:flex;justify-content:space-between;color:#000">
       <span>${escapeHtml(invoiceInfo.invoiceLabel || 'Invoice #')}</span>
       <span style="font-weight:700">${escapeHtml(data.invoiceNo)}</span>
