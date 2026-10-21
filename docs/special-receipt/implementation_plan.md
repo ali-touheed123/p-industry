@@ -947,7 +947,7 @@ sequenceDiagram
 
     Cashier->>Modal: Clicks "Confirm & Print Special Receipt" (or F6)
     Note over Modal: Generates invoice_no ONCE; locks submit button (submitting = true)
-    Modal->>API: POST /api/invoices/special (p_invoice_data, p_items, p_receipt_snap, p_template_snap)
+    Modal->>API: POST /api/invoices/special (p_invoice_data, p_items, p_receipt_snap)
     
     rect rgb(240, 248, 255)
     Note over API,DB: Single PostgreSQL Transaction (create_special_invoice_atomic)
@@ -1014,13 +1014,13 @@ sequenceDiagram
 
 ### 7.2 Invoice Cancellation (`cancel_invoice_atomic`)
 - **Real Cancellation Route Verification:**
-  - In `src/app/api/invoices/route.ts`, cancellation is invoked via two endpoints:
+  - In `src/app/api/invoices/route.ts`, cancellation is handled by two endpoints:
     1. **`PATCH /api/invoices`** (lines 371–385): triggered when `body.status === 'cancelled'` or `body.action === 'cancel'`.
     2. **`DELETE /api/invoices`** (lines 535–546): triggered with query parameters `?id=...&tenant_id=...&reason=...`.
-  - There is NO `/api/invoices/cancel` endpoint.
+  - There is NO `/api/invoices/cancel` endpoint in the codebase.
 - **Enforcement on Special Return Invoices (D5):**
-  - Both `PATCH /api/invoices` and `DELETE /api/invoices` must check: if `invoice.invoice_type === 'return' AND invoice.printed_as === 'special'`, reject immediately with `400 Bad Request: Special return invoices cannot be cancelled via standard cancellation. Manual review required.`
-  - Rationale: Live `cancel_invoice_atomic` reverses customer balance with the flawed logic `v_store_credit := GREATEST(0, v_invoice.net_total - v_cash_ref)` (ignoring `card_paid`), which would corrupt customer balances if executed on a card or mixed return.
+  - Both `PATCH /api/invoices` (line 372) and `DELETE /api/invoices` (line 535) must check: if `invoice.invoice_type === 'return' AND invoice.printed_as === 'special'`, reject immediately with `400 Bad Request: Special return invoices cannot be cancelled via standard cancellation. Manual review required.`
+  - Rationale: Special return invoices cannot be cancelled via standard cancellation. Live `cancel_invoice_atomic` reverses customer balance with the flawed logic `v_store_credit := GREATEST(0, v_invoice.net_total - v_cash_ref)` (ignoring `card_paid`), which would corrupt customer balances if executed on a card or mixed return.
 - **Residual Risk of Direct RPC Invocation:**
   - `cancel_invoice_atomic` is a PostgreSQL function created with `SECURITY DEFINER`. If called directly via PostgREST RPC (`/rest/v1/rpc/cancel_invoice_atomic`) using service role keys or direct SQL console, it executes without going through Next.js API route guards. Direct RPC execution remains an open residual risk unless `cancel_invoice_atomic` itself is patched with an explicit guard checking `IF v_invoice.invoice_type = 'return' AND v_invoice.printed_as = 'special' THEN RAISE EXCEPTION ...`.
 - **Sale Invoice Cancellation Behavior:**
@@ -1045,24 +1045,33 @@ sequenceDiagram
        - Call 2: `ROUND(1 * 1000 / 3, 2) = Rs. 333.33` (remaining = 1).
        - Call 3: completes line: `1000.00 - 666.66 = Rs. 333.34` (remaining = 0).
        - Sum: `333.33 + 333.33 + 333.34 = Rs. 1000.00` exact. Zero rounding loss.
-  7. **Tender Validation & Mixed Tender Support (R1c):**
-     - Non-negative tender check: `p_cash_refunded < 0 OR p_card_refunded < 0 OR p_store_credit < 0` raises an exception.
-     - Mixed tender supported: `cash_paid = p_cash_refunded`, `card_paid = p_card_refunded`, `paid_amount = p_cash_refunded + p_card_refunded`.
-     - Store credit reduces `clients.current_balance` by `p_store_credit` ONLY (requires registered `client_id`).
-     - `payment_type` definition:
-       - If more than 1 tender > 0 (e.g. cash + card, cash + store credit, card + store credit, cash + card + credit): `payment_type = 'mixed'`.
-       - If only cash > 0: `payment_type = 'cash'`.
-       - If only card > 0: `payment_type = 'card'`.
-       - If only store credit > 0: `payment_type = 'credit'`.
+  7. **Tender Validation & Server Khata Offset (R1c, Owner Decision):**
+     - **NO Store Credit / No Client Advance:** Special return refunds are strictly cash, card, or cash+card (`mixed`). Parameters and tests for `p_store_credit` or `'credit'` payment type are eliminated.
+     - **Credit-Sale Returns & Server-Computed Khata Offset:**
+       On credit-sale returns (`client_id IS NOT NULL`), the server (never cashier) computes how much of the return reduces the client's outstanding balance:
+       $$\text{khata\_offset} = \max(0, \min(\text{return\_net}, \text{orig\_due\_remaining}, \text{clients.current\_balance}))$$
+       where `orig_due_remaining = GREATEST(0, original.due_amount - SUM(prior offsets))`.
+     - **Dynamic Prior Offsets Derivation (No New Column):**
+       Prior offsets are derived dynamically as `SUM(net_total - paid_amount)` over prior non-cancelled special returns of that original invoice.
+     - **Cashier Payout Split:**
+       `cash_refund + card_refund` must equal `return_net - khata_offset` (within 0.02 tolerance). Cashier only splits the remainder between cash and card.
+     - **Walk-in Customers (`client_id IS NULL`):** `khata_offset = 0`, so `cash_refund + card_refund` must equal `return_net`.
+     - **Client Balance Floor:** Client balance is reduced by `khata_offset` only (`current_balance = current_balance - khata_offset`). Since `khata_offset <= clients.current_balance`, balance never goes negative.
+     - **Return Invoice Header Fields:**
+       `paid_amount = cash_refund + card_refund`, `net_total = return_net`, `due_amount = 0`.
+     - **`payment_type` Definition:**
+       - If `cash_paid > 0 AND card_paid > 0`: `payment_type = 'mixed'`.
+       - Else if `card_paid > 0`: `payment_type = 'card'`.
+       - Else: `payment_type = 'cash'`.
   8. **Payment Type Compatibility Analysis across System:**
-     - **`cancel_invoice_atomic`:** **INCOMPATIBLE** (Evidence: `live_function_definitions.md:907–917`). Computes `v_store_credit := GREATEST(0, v_invoice.net_total - v_cash_ref)`. Because it ignores `card_paid`, cancelling a mixed return with card refund mistakenly adds `card_paid` to `clients.current_balance`, corrupting customer khata. (Mitigated by D5: API blocks cancel).
-     - **`salesMath.ts`:** **COMPATIBLE** (Evidence: `src/utils/salesMath.ts:141–153`). `physicalCash -= cash_paid` and `digitalPaid -= card_paid`. Store credit is not cash/card, so neither drawer cash nor digital paid is deducted.
+     - **`cancel_invoice_atomic`:** **INCOMPATIBLE** (Evidence: `live_function_definitions.md:907–917`). Computes `v_store_credit := GREATEST(0, v_invoice.net_total - v_cash_ref)`. Because it ignores `card_paid`, cancelling a return with card refund mistakenly adds `card_paid` to `clients.current_balance`, corrupting customer khata. (Mitigated by blocking special return cancellation in both `PATCH` and `DELETE` routes).
+     - **`salesMath.ts`:** **COMPATIBLE** (Evidence: `src/utils/salesMath.ts:141–153`). `physicalCash -= cash_paid` and `digitalPaid -= card_paid`. Khata offset is non-cash, so neither drawer cash nor digital paid is deducted.
      - **`ShiftDrawer.tsx`:** **COMPATIBLE** (Evidence: `src/components/ShiftDrawer.tsx:234–241`). `cashReturns` takes `cp > 0 ? cp : 0`. When `payment_type = 'mixed'`, `!payment_type || payment_type === 'cash'` is false, preventing phantom cash deductions.
      - **`shifts/route.ts`:** **COMPATIBLE** (Evidence: `src/app/api/shifts/route.ts:268–274`). `cashAmount = cp > 0 ? cp : (!pt || pt === 'cash' || pt === 'refund' ? fallback : 0)`. Mixed returns correctly report only `cash_paid`.
   9. **Shift Validation (R1g):** Caller passes explicit `p_shift_id uuid`. RPC validates that shift exists, belongs to tenant, and has `status = 'open'`. No guessing queries.
   10. **Audit Log Insertion (R1d):** Inserts exact row into `public.audit_logs` matching live columns: `tenant_id, user_name, action, action_type, entity_type, entity_id, details`.
   11. **Stock Replenishment (R1e):** Line items locked `FOR UPDATE` before updating `items.stock_qty`, scoped by `AND tenant_id = v_user_rec.tenant_id`, with strict `IF v_orig_item.item_id IS NULL THEN RAISE EXCEPTION`.
-  12. **`p_tokens` Parameter (R1i):** Parameter removed entirely from `create_special_return_atomic` signature. Return lines skip token issuance.
+  12. **`p_tokens` Parameter & Lid-Open Policy (R1i, Owner Decision):** `p_tokens` removed from `create_special_return_atomic` signature. Return lines skip token issuance. Buckets with opened lids are rejected; returns refund full original unit charged price with zero token deduction.
 
 #### `create_special_return_atomic` Authoritative Function Definition
 ```sql
@@ -1073,8 +1082,7 @@ CREATE OR REPLACE FUNCTION public.create_special_return_atomic(
   p_printed_by           text,
   p_shift_id             uuid,
   p_cash_refunded        numeric DEFAULT 0,
-  p_card_refunded        numeric DEFAULT 0,
-  p_store_credit         numeric DEFAULT 0
+  p_card_refunded        numeric DEFAULT 0
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -1085,7 +1093,7 @@ DECLARE
   v_user_rec               RECORD;
   v_orig_invoice           RECORD;
   v_orig_item              RECORD;
-  v_item                   JSONB;
+  v_item                   RECORD;
   v_orig_item_id           UUID;
   v_item_qty               NUMERIC;
   v_line_unit_price        NUMERIC;
@@ -1097,17 +1105,19 @@ DECLARE
   v_return_net             NUMERIC := 0;
   v_return_inv_id          UUID    := gen_random_uuid();
   v_new_invoice_no         TEXT;
-  v_total_refund           NUMERIC;
+  v_cashier_refund         NUMERIC := 0;
+  v_expected_payout        NUMERIC := 0;
   v_payment_type           TEXT;
   v_shift_id               UUID;
   v_cash_paid              NUMERIC := 0;
   v_card_paid              NUMERIC := 0;
-  v_store_credit           NUMERIC := 0;
   v_paid_amount            NUMERIC := 0;
-  v_tender_count           INTEGER := 0;
   v_snap_items             JSONB   := '[]'::jsonb;
   v_curr_stock             NUMERIC;
-  v_req_item               RECORD;
+  v_prior_offsets          NUMERIC := 0;
+  v_orig_due_remaining     NUMERIC := 0;
+  v_client_bal             NUMERIC := 0;
+  v_khata_offset           NUMERIC := 0;
 BEGIN
   -- Verify user: staff with fresh can_use_special_receipt in same branch
   SELECT id, is_active, can_use_special_receipt, role, tenant_id
@@ -1165,57 +1175,31 @@ BEGIN
     RAISE EXCEPTION 'At least one return line item is required';
   END IF;
 
-  -- R1c: Non-negative tender guards
-  v_cash_paid    := COALESCE(p_cash_refunded, 0);
-  v_card_paid    := COALESCE(p_card_refunded, 0);
-  v_store_credit := COALESCE(p_store_credit, 0);
+  -- Non-negative tender guards
+  v_cash_paid := COALESCE(p_cash_refunded, 0);
+  v_card_paid := COALESCE(p_card_refunded, 0);
 
-  IF v_cash_paid < 0 OR v_card_paid < 0 OR v_store_credit < 0 THEN
-    RAISE EXCEPTION 'Refund amounts cannot be negative (cash: %, card: %, credit: %)',
-      v_cash_paid, v_card_paid, v_store_credit;
+  IF v_cash_paid < 0 OR v_card_paid < 0 THEN
+    RAISE EXCEPTION 'Refund amounts cannot be negative (cash: %, card: %)', v_cash_paid, v_card_paid;
   END IF;
 
-  -- R1a: In-request duplicate detection and accumulation
-  FOR v_req_item IN
+  -- ── PRE-PASS & PASS 1: Aggregate duplicate lines by original_item_id, validate lines, apply Cents Rule ──
+  FOR v_item IN
     SELECT (elem->>'original_item_id')::UUID AS orig_id,
            SUM((elem->>'qty')::NUMERIC) AS total_req_qty
       FROM jsonb_array_elements(p_items) elem
      GROUP BY (elem->>'original_item_id')::UUID
   LOOP
-    IF v_req_item.orig_id IS NULL OR v_req_item.total_req_qty <= 0 THEN
+    IF v_item.orig_id IS NULL OR v_item.total_req_qty <= 0 THEN
       RAISE EXCEPTION 'Each return item must have a valid original_item_id and positive qty';
     END IF;
 
     SELECT * INTO v_orig_item
       FROM invoice_items
-     WHERE id = v_req_item.orig_id AND invoice_id = p_original_invoice_id;
+     WHERE id = v_item.orig_id AND invoice_id = p_original_invoice_id;
     IF NOT FOUND THEN
-      RAISE EXCEPTION 'Original line item % not found in invoice %', v_req_item.orig_id, v_orig_invoice.invoice_no;
+      RAISE EXCEPTION 'Original line item % not found in invoice %', v_item.orig_id, v_orig_invoice.invoice_no;
     END IF;
-
-    SELECT COALESCE(SUM(ii.qty), 0) INTO v_prior_returned_qty
-      FROM invoices i
-      JOIN invoice_items ii ON ii.invoice_id = i.id
-     WHERE i.original_invoice_id = p_original_invoice_id
-       AND i.invoice_type = 'return'
-       AND i.status <> 'cancelled'
-       AND ii.original_invoice_item_id = v_req_item.orig_id;
-
-    IF (v_prior_returned_qty + v_req_item.total_req_qty) > v_orig_item.qty THEN
-      RAISE EXCEPTION 'Duplicate return lines for item "%": combined request qty (%) would exceed returnable qty (%)',
-        v_orig_item.item_name, v_req_item.total_req_qty, (v_orig_item.qty - v_prior_returned_qty);
-    END IF;
-  END LOOP;
-
-  -- ── PASS 1: Validate lines, apply R1f Cents Rule, accumulate totals ─────
-  FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
-  LOOP
-    v_orig_item_id := (v_item->>'original_item_id')::UUID;
-    v_item_qty     := (v_item->>'qty')::NUMERIC;
-
-    SELECT * INTO v_orig_item
-      FROM invoice_items
-     WHERE id = v_orig_item_id AND invoice_id = p_original_invoice_id;
 
     -- Query prior returns for this specific original line
     SELECT COALESCE(SUM(ii.qty), 0), COALESCE(SUM(ii.total_price), 0)
@@ -1225,65 +1209,80 @@ BEGIN
      WHERE i.original_invoice_id = p_original_invoice_id
        AND i.invoice_type = 'return'
        AND i.status <> 'cancelled'
-       AND ii.original_invoice_item_id = v_orig_item_id;
+       AND ii.original_invoice_item_id = v_item.orig_id;
 
     v_remaining_qty := v_orig_item.qty - v_prior_returned_qty;
 
-    IF v_item_qty > v_remaining_qty THEN
+    IF v_item.total_req_qty > v_remaining_qty THEN
       RAISE EXCEPTION 'Return qty (%) exceeds remaining returnable qty (%) for item "%"',
-        v_item_qty, v_remaining_qty, v_orig_item.item_name;
+        v_item.total_req_qty, v_remaining_qty, v_orig_item.item_name;
     END IF;
 
     -- R1f Cents Rule: If this return completes the line's remaining qty, refund = line.total_price - already_refunded
-    IF v_item_qty = v_remaining_qty THEN
+    IF v_item.total_req_qty = v_remaining_qty THEN
       v_line_net := v_orig_item.total_price - v_prior_refunded_amount;
     ELSE
-      v_line_net := ROUND(v_item_qty * (v_orig_item.total_price / v_orig_item.qty), 2);
+      v_line_net := ROUND(v_item.total_req_qty * (v_orig_item.total_price / v_orig_item.qty), 2);
     END IF;
 
-    v_line_unit_price := ROUND(v_line_net / v_item_qty, 2);
+    v_line_unit_price := ROUND(v_line_net / v_item.total_req_qty, 2);
     v_return_subtotal := v_return_subtotal + v_line_net;
     v_return_net      := v_return_net      + v_line_net;
 
     v_snap_items := v_snap_items || jsonb_build_array(
       jsonb_build_object(
-        'original_item_id',  v_orig_item_id,
+        'original_item_id',  v_item.orig_id,
         'item_id',           v_orig_item.item_id,
         'item_name',         v_orig_item.item_name,
         'shade_code',        v_orig_item.shade_code,
-        'qty',               v_item_qty,
+        'qty',               v_item.total_req_qty,
         'unit_price',        v_line_unit_price,
         'line_total',        v_line_net
       )
     );
   END LOOP;
 
-  -- Tender Validation & Mapping
-  v_total_refund := v_cash_paid + v_card_paid + v_store_credit;
-  v_paid_amount  := v_cash_paid + v_card_paid;
+  -- ── SERVER-COMPUTED KHATA OFFSET & CASHIER PAYOUT VALIDATION ───────────────
+  IF v_orig_invoice.client_id IS NOT NULL THEN
+    -- Derive prior offsets dynamically as SUM(net_total - paid_amount) over prior non-cancelled special returns of this invoice
+    SELECT COALESCE(SUM(net_total - paid_amount), 0) INTO v_prior_offsets
+      FROM invoices
+     WHERE original_invoice_id = p_original_invoice_id
+       AND invoice_type = 'return'
+       AND status <> 'cancelled';
 
-  IF ABS(ROUND(v_total_refund - v_return_net, 2)) > 0.02 THEN
-    RAISE EXCEPTION 'Total refund tenders (cash % + card % + credit %) does not match return net total (%) within 0.02 tolerance',
-      v_cash_paid, v_card_paid, v_store_credit, v_return_net;
+    v_orig_due_remaining := GREATEST(0, COALESCE(v_orig_invoice.due_amount, 0) - v_prior_offsets);
+
+    SELECT current_balance INTO v_client_bal
+      FROM clients
+     WHERE id = v_orig_invoice.client_id
+     FOR UPDATE;
+
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Client % not found for invoice %', v_orig_invoice.client_id, v_orig_invoice.invoice_no;
+    END IF;
+
+    -- Formula: khata_offset = LEAST(return_net, original.due_amount - SUM(prior offsets), clients.current_balance), floored at 0
+    v_khata_offset := GREATEST(0, LEAST(v_return_net, v_orig_due_remaining, v_client_bal));
+  ELSE
+    v_khata_offset := 0;
   END IF;
 
-  IF v_store_credit > 0 AND v_orig_invoice.client_id IS NULL THEN
-    RAISE EXCEPTION 'Store credit refund requires a registered customer account';
+  v_cashier_refund  := v_cash_paid + v_card_paid;
+  v_expected_payout := v_return_net - v_khata_offset;
+
+  IF ABS(ROUND(v_cashier_refund - v_expected_payout, 2)) > 0.02 THEN
+    RAISE EXCEPTION 'Cashier refund (cash % + card % = %) must equal return net (%) minus khata offset (%) = % within 0.02 tolerance',
+      v_cash_paid, v_card_paid, v_cashier_refund, v_return_net, v_khata_offset, v_expected_payout;
   END IF;
 
-  -- R1c: Determine payment_type
-  IF v_cash_paid > 0 THEN v_tender_count := v_tender_count + 1; END IF;
-  IF v_card_paid > 0 THEN v_tender_count := v_tender_count + 1; END IF;
-  IF v_store_credit > 0 THEN v_tender_count := v_tender_count + 1; END IF;
+  v_paid_amount := v_cash_paid + v_card_paid;
 
-  IF v_tender_count > 1 THEN
+  -- Payment type determination
+  IF v_cash_paid > 0 AND v_card_paid > 0 THEN
     v_payment_type := 'mixed';
-  ELSIF v_cash_paid > 0 THEN
-    v_payment_type := 'cash';
   ELSIF v_card_paid > 0 THEN
     v_payment_type := 'card';
-  ELSIF v_store_credit > 0 THEN
-    v_payment_type := 'credit';
   ELSE
     v_payment_type := 'cash';
   END IF;
@@ -1329,13 +1328,14 @@ BEGIN
   );
 
   -- ── PASS 2: INSERT invoice_items & replenish stock with FOR UPDATE lock ──
-  FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
+  FOR v_item IN
+    SELECT (elem->>'original_item_id')::UUID AS orig_id,
+           SUM((elem->>'qty')::NUMERIC) AS total_req_qty
+      FROM jsonb_array_elements(p_items) elem
+     GROUP BY (elem->>'original_item_id')::UUID
   LOOP
-    v_orig_item_id := (v_item->>'original_item_id')::UUID;
-    v_item_qty     := (v_item->>'qty')::NUMERIC;
-
     SELECT * INTO v_orig_item FROM invoice_items
-     WHERE id = v_orig_item_id AND invoice_id = p_original_invoice_id;
+     WHERE id = v_item.orig_id AND invoice_id = p_original_invoice_id;
 
     -- Query prior returns for cents rule calculation
     SELECT COALESCE(SUM(ii.qty), 0), COALESCE(SUM(ii.total_price), 0)
@@ -1345,15 +1345,15 @@ BEGIN
      WHERE i.original_invoice_id = p_original_invoice_id
        AND i.invoice_type = 'return'
        AND i.status <> 'cancelled'
-       AND ii.original_invoice_item_id = v_orig_item_id;
+       AND ii.original_invoice_item_id = v_item.orig_id;
 
     v_remaining_qty := v_orig_item.qty - v_prior_returned_qty;
-    IF v_item_qty = v_remaining_qty THEN
+    IF v_item.total_req_qty = v_remaining_qty THEN
       v_line_net := v_orig_item.total_price - v_prior_refunded_amount;
     ELSE
-      v_line_net := ROUND(v_item_qty * (v_orig_item.total_price / v_orig_item.qty), 2);
+      v_line_net := ROUND(v_item.total_req_qty * (v_orig_item.total_price / v_orig_item.qty), 2);
     END IF;
-    v_line_unit_price := ROUND(v_line_net / v_item_qty, 2);
+    v_line_unit_price := ROUND(v_line_net / v_item.total_req_qty, 2);
 
     INSERT INTO invoice_items (
       invoice_id, item_id, item_code, item_name,
@@ -1368,12 +1368,12 @@ BEGIN
       v_orig_item.unit,
       v_orig_item.shade_code,
       v_orig_item.pack_size,
-      v_item_qty,
+      v_item.total_req_qty,
       ROUND(v_line_unit_price, 2),
       0,
       0,
       ROUND(v_line_net, 2),
-      v_orig_item_id
+      v_item.orig_id
     );
 
     -- R1e: Stock replenish with lock, tenant scope, and NULL check
@@ -1390,14 +1390,14 @@ BEGIN
     END IF;
 
     UPDATE items
-       SET stock_qty = v_curr_stock + v_item_qty
+       SET stock_qty = v_curr_stock + v_item.total_req_qty
      WHERE id = v_orig_item.item_id AND tenant_id = v_user_rec.tenant_id;
   END LOOP;
 
-  -- R1c: Update client current_balance strictly by store credit portion only
-  IF v_store_credit > 0 AND v_orig_invoice.client_id IS NOT NULL THEN
+  -- Update client current_balance strictly by khata offset portion
+  IF v_khata_offset > 0 AND v_orig_invoice.client_id IS NOT NULL THEN
     UPDATE clients
-       SET current_balance = current_balance - ROUND(v_store_credit, 2)
+       SET current_balance = current_balance - ROUND(v_khata_offset, 2)
      WHERE id = v_orig_invoice.client_id;
   END IF;
 
@@ -1434,9 +1434,9 @@ BEGIN
       'original_invoice_id', p_original_invoice_id,
       'original_invoice_no', v_orig_invoice.invoice_no,
       'refund_total',        ROUND(v_return_net, 2),
+      'khata_offset',        ROUND(v_khata_offset, 2),
       'cash_paid',           ROUND(v_cash_paid, 2),
       'card_paid',           ROUND(v_card_paid, 2),
-      'store_credit',        ROUND(v_store_credit, 2),
       'payment_type',        v_payment_type
     ),
     '{}'::jsonb,
@@ -1459,9 +1459,9 @@ BEGIN
       'net_total', ROUND(v_return_net, 2),
       'paid_amount', ROUND(v_paid_amount, 2),
       'due_amount', 0,
+      'khata_offset', ROUND(v_khata_offset, 2),
       'cash_paid', ROUND(v_cash_paid, 2),
       'card_paid', ROUND(v_card_paid, 2),
-      'store_credit', ROUND(v_store_credit, 2),
       'payment_type', v_payment_type,
       'items_count', jsonb_array_length(p_items)
     )
@@ -1473,6 +1473,8 @@ BEGIN
     'return_invoice_id', v_return_inv_id,
     'return_invoice_no', v_new_invoice_no,
     'refund_total',      ROUND(v_return_net, 2),
+    'khata_offset',      ROUND(v_khata_offset, 2),
+    'cashier_refund',    ROUND(v_cashier_refund, 2),
     'print_receipt',     false
   );
 END;
@@ -1507,8 +1509,9 @@ GRANT EXECUTE ON FUNCTION public.create_special_return_atomic TO service_role;
   - `create_special_invoice_atomic` passes `p_tokens` through directly to `create_invoice_atomic`.
   - Token ledger records (`token_transactions`) are created and updated exactly as in normal sales.
   - Walk-in customers who keep a token: claim codes (e.g., `CLM-...`) are generated and stored in the database as normal, but nothing is printed on any physical paper slip. This behavior is explicitly accepted.
-- **Special Returns Skip Tokens (R1i):**
-  - Special returns do NOT issue tokens or create stockpile entries. `create_special_return_atomic` does NOT accept or process `p_tokens`. Return lines follow regular return logic (client-side token deduction if bucket missing; zero token ledger records).
+- **Special Returns Skip Tokens & Lid-Open Policy (R1i, Owner Decision):**
+  - Special returns do NOT issue tokens or create stockpile entries. `create_special_return_atomic` does NOT accept or process `p_tokens`.
+  - **Lid-Open Return Policy:** Buckets with opened lids are strictly rejected and not accepted for return. Accepted returns always refund the full original unit charged price with zero token deduction.
 ---
 
 ## 8. Print Layer & Browser Identity Suppression
@@ -1628,8 +1631,8 @@ If database changes must be unwound:
    Execute the pre-migration function definition (captured in `docs/special-receipt/live_function_definitions.md §1.2`) to remove the `printed_as = 'special'` guard.
 2. **Drop Special Functions:**
    ```sql
-   -- Drop create_special_return_atomic (signature: p_original_invoice_id, p_items, p_user_id, p_printed_by, p_shift_id, p_cash_refunded, p_card_refunded, p_store_credit)
-   DROP FUNCTION IF EXISTS public.create_special_return_atomic(uuid, jsonb, uuid, text, uuid, numeric, numeric, numeric);
+   -- Drop create_special_return_atomic (signature: p_original_invoice_id, p_items, p_user_id, p_printed_by, p_shift_id, p_cash_refunded, p_card_refunded)
+   DROP FUNCTION IF EXISTS public.create_special_return_atomic(uuid, jsonb, uuid, text, uuid, numeric, numeric);
    DROP FUNCTION IF EXISTS public.log_special_reprint_atomic(uuid, uuid, text);
    -- Drop create_special_invoice_atomic (signature: p_invoice_data, p_items, p_receipt_snap, p_printed_by, p_user_id, p_tokens)
    DROP FUNCTION IF EXISTS public.create_special_invoice_atomic(jsonb, jsonb, jsonb, text, uuid, jsonb);
@@ -1674,12 +1677,9 @@ The following operational details are surfaced for owner confirmation prior to i
      - `special_print_log.master_total` records `sum(qty * catalog retail_price)`.
      - The CEO audit view will reflect a variance between `printed_total` and `master_total`.
    - *Confirmation Needed:* Confirm this comparison accurately meets the CEO's audit requirements.
-5. **Token-Missing Deduction on Special Returns (F3):**
-   - The regular POS return flow (`PosBilling.tsx`) deducts the token value from the refund unit price when `tokenReturnedWithBucket === false` (client-side).
-   - For special returns, two architectures exist:
-     - **Option A (Server-Side):** Client sends `token_returned_with_bucket: boolean` per line. The server queries `series_token_configs` for the item's `series_id` and matching `unit_name`, authoritatively deducting `token_value` from the refund unit price.
-     - **Option B (Client-Side Parity):** Client applies deduction to `unit_price` before sending; server validates the relationship `line_net = qty * unit_price`.
-     - *Status:* Option B is currently documented for parity with standard POS returns. Server-side authoritative verification is tracked under `TASK-FIX-04` as an open question.
+5. **Token-Missing Deduction on Special Returns (F3) — CLOSED:**
+   - **Owner Decision (Final):** Buckets with opened lids are strictly rejected and not accepted for return. Accepted returns always refund the full original unit charged price. There is zero token deduction on special returns.
+   - *Status:* CLOSED by owner decision. `TASK-FIX-04` is retained as optional future documentation.
 6. **Server-Side Cart Rate Enforcement (R5a):**
    - `create_special_invoice_atomic` accepts the cart's pre-discount `unit_price` without asserting that `unit_price == items.retail_price` (because counter operators sometimes use custom cart prices).
    - The server enforces line totals (`total_price = qty * unit_price - discount`), while `master_total` strictly computes catalog value (`sum(qty * items.retail_price)`), preserving full CEO audit visibility.

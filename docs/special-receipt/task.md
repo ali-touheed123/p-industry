@@ -453,11 +453,15 @@
   - **F9 Original Discount Guard:** Rejects return if `original_invoice.discount > 0` with exception requiring manual review. Original delivery charge is NOT refunded (`delivery_charge = 0`).
   - **In-Request Duplicate Guard (R1a):** Aggregates requested quantities per `original_item_id` to ensure total requested across duplicate lines does not exceed returnable quantity.
   - **Cents Rule across ALL Returns (R1f):** For each line, queries prior non-cancelled returns: if current return completes the line's remaining quantity, `refund = orig_total_price - already_refunded_for_line`, else `ROUND(qty * (orig_total_price / orig_qty), 2)`.
-  - **Tender Validation & Mixed Tender (R1c):**
-    - Non-negative tender check: `p_cash_refunded < 0 OR p_card_refunded < 0 OR p_store_credit < 0` raises exception.
-    - Mixed tender supported: `cash_paid = cash`, `card_paid = card`, `paid_amount = cash + card`.
-    - Store credit reduces `clients.current_balance` by `store_credit` ONLY (requires registered `client_id`).
-    - `payment_type` set to `'mixed'` if multi-tender, or `'cash'`, `'card'`, `'credit'` if single tender.
+  - **Tender Validation & Server Khata Offset (R1c, Owner Decision):**
+    - NO store credit / no client advance. Refunds are cash, card, or cash+card (`mixed`).
+    - Credit-sale returns: Server computes `khata_offset = LEAST(return_net, original.due_amount - SUM(prior offsets), clients.current_balance)` floored at 0. Prior offsets dynamically derived as `SUM(net_total - paid_amount)` over prior non-cancelled returns.
+    - Cashier refund (`cash_paid + card_paid`) must equal `return_net - khata_offset` (0.02 tolerance). Cashier only splits the remainder between cash and card.
+    - Walk-in (`client_id IS NULL`): `khata_offset = 0`, cashier refunds full `return_net`.
+    - Client balance is reduced by `khata_offset` only (`clients.current_balance = current_balance - khata_offset`). Balance never goes negative.
+    - Return invoice header: `paid_amount = cash_paid + card_paid`, `net_total = return_net`, `due_amount = 0`.
+    - `payment_type = 'mixed'` if cash > 0 and card > 0, else `'card'`, else `'cash'`.
+  - **Lid-Open Policy & Zero Token Deduction (Owner Decision):** Buckets with opened lids are strictly rejected; accepted returns refund the full original unit charged price with zero token deduction.
   - **Option (a) Direct Insert:** Inserts `invoices` header and `invoice_items` directly with `original_invoice_item_id` pointing to original line PK.
   - **Stock Replenishment (R1e):** Locks `items` row `FOR UPDATE`, scopes by `AND tenant_id = v_user_rec.tenant_id`, and validates `item_id IS NOT NULL`.
   - **Audit Logging (R1d):** Inserts exact row into `public.audit_logs` matching live columns: `tenant_id, user_name, action, action_type, entity_type, entity_id, details`.
@@ -469,7 +473,7 @@
 - **Risk Level:** High.
 
 ### `TASK-SR-25` — Special Return Backend API
-- **Description:** Deploy `/api/invoices/special-return` route (staff only, fresh `can_use_special_receipt` check, validates tender amounts, looks up active shift and passes `p_shift_id` to RPC).
+- **Description:** Deploy `/api/invoices/special-return` route (staff only, fresh `can_use_special_receipt` check, validates tender amounts, looks up active shift and passes `p_shift_id`, `p_cash_refunded`, `p_card_refunded` to RPC). Returns `{ success, return_invoice_id, return_invoice_no, refund_total, khata_offset, cashier_refund, print_receipt: false }`.
 - **Files Touched:** `src/app/api/invoices/special-return/route.ts`
 - **Dependencies:** `TASK-SR-24`
 - **Risk Level:** Medium.
@@ -479,7 +483,7 @@
   - Visible only to staff with fresh `can_use_special_receipt` in that branch. Hidden for cancelled invoices.
   - Opens modal displaying original lines: sold qty, already returned, returnable qty.
   - Cashier enters return quantity only. Unit rate is locked.
-  - Tender picker: cash, card, store credit, or mixed tender (store credit restricted to registered customers).
+  - Tender picker: cash, card, or cash+card (`mixed`). Displays server-computed khata offset reducing customer debt on credit sales, and prompts cashier to disburse the remaining payout via cash/card.
   - Completes with toast confirmation and drawer update. **NO print dialog is opened (Option E)**.
 - **Files Touched:** `src/components/SalesHistory.tsx`
 - **Dependencies:** `TASK-SR-25`
@@ -508,11 +512,13 @@
 - **Files Touched:** `supabase/migrations/20261021_01_special_receipt_system.sql`, `src/components/ceo-panel/SpecialPrintLogView.tsx`
 - **Risk Level:** Low.
 
-### `TASK-FIX-02` [REQUIRES USER APPROVAL] — Block Cancellation of Special Return Invoices at API Layer (R2, D5)
+### `TASK-FIX-02` [REQUIRES USER APPROVAL] — Block Cancellation of Special Return Invoices at API Layer in BOTH Routes (R2, D5)
 - **Description:**
-  - In `src/app/api/invoices/route.ts` (`PATCH /api/invoices` and `DELETE /api/invoices`), reject cancellation if `invoice.invoice_type === 'return' AND invoice.printed_as === 'special'` with `400 Bad Request`.
+  - In `src/app/api/invoices/route.ts`:
+    - In `PATCH /api/invoices` (lines 371–385: `status === 'cancelled' || body.action === 'cancel'`), reject if `invoice.invoice_type === 'return' AND invoice.printed_as === 'special'` with `400 Bad Request`.
+    - In `DELETE /api/invoices` (lines 535–546), reject if `invoice.invoice_type === 'return' AND invoice.printed_as === 'special'` with `400 Bad Request`.
   - Hide/disable Cancel button in Sales History UI for special return invoices.
-  - Document residual risk of direct RPC calls to `cancel_invoice_atomic`.
+  - Document residual risk that `cancel_invoice_atomic` is `SECURITY DEFINER` and could be called directly via PostgREST RPC if exposed.
 - **Files Touched:** `src/app/api/invoices/route.ts`, `src/components/SalesHistory.tsx`
 - **Risk Level:** Medium.
 
@@ -520,9 +526,9 @@
 - **Description:** Live `create_invoice_atomic` lines 622–632 computes `v_cash_refunded := 0` when `payment_type = 'card'`, causing `v_store_credit := v_net_total` to debit client balance on card returns. Recorded as out-of-scope; special returns bypass this via Option (a) direct insert.
 - **Status:** OUT OF SCOPE — Requires separate owner sign-off.
 
-### `TASK-FIX-04` [REQUIRES USER APPROVAL] — Server-Side Token Deduction on Special Returns (F3 / Open Question 5)
+### `TASK-FIX-04` [OPTIONAL FUTURE] — Server-Side Token Deduction on Special Returns (F3 / Open Question 5)
 - **Description:** Add `token_returned_with_bucket: boolean` per line in special return. Authoritatively query `series_token_configs` on server and deduct `token_value` from refund price.
-- **Status:** DEFERRED / OPEN QUESTION — Current implementation maintains client-side parity with `PosBilling.tsx`.
+- **Status:** OPTIONAL FUTURE — Owner decision established that buckets with opened lids are strictly rejected and not accepted for return; accepted returns refund the full original unit charged price with zero token deduction. Retained as optional future documentation.
 
 ### `TASK-FIX-05` [REQUIRES USER APPROVAL] — Remove `p_template_snap` from `create_special_invoice_atomic` (R5c)
 - **Description:** Remove `p_template_snap` parameter from `create_special_invoice_atomic`. Authoritatively load template from DB or use `BLANK_SPECIAL_TEMPLATE_JSON`.

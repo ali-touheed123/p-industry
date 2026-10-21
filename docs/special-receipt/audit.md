@@ -284,17 +284,21 @@ To fulfill Requirement 1b ("must start fully empty. No shop name, number, addres
    - *Special Returns Architecture (Option a Chosen - F1 & F2):* Dedicated return flow initiated exclusively from Sales History on special invoices, calling `create_special_return_atomic`.
       - **Choice of Option (a) over Option (b):** Live `create_invoice_atomic` does NOT insert `original_invoice_item_id`. An update loop matching by `item_id` is ambiguous if the same item appears on two lines of an invoice (e.g. different tinting or separate packings). Furthermore, live `create_invoice_atomic` has a severe double-refund bug for card refunds (computing `v_cash_refunded := 0` when `payment_type = 'card'`, causing `v_store_credit := v_net_total` to reduce client balance even though funds were returned to the card).
       - **Safety of Option (a):** `create_special_return_atomic` inserts return invoice headers and return `invoice_items` directly with exact `original_invoice_item_id = original_line.id`. When two lines on an original invoice share the same `item_id`, returning from Line 2 links exclusively to Line 2's ID. Line 1's returnable quantity (`original_qty - sum(returned_qty where original_invoice_item_id = line1.id)`) remains 100% unaffected.
-      - **Tender Field Semantics (F2 & R1c):**
-        - Cash refund: `cash_paid = refund_total, card_paid = 0, paid_amount = refund_total, payment_type = 'cash'`. Reduces drawer cash; client balance unchanged.
-        - Card refund: `cash_paid = 0, card_paid = refund_total, paid_amount = refund_total, payment_type = 'card'`. Drawer cash unchanged; client balance unchanged.
-        - Store credit: `cash_paid = 0, card_paid = 0, paid_amount = 0, payment_type = 'credit'`. Reduces `clients.current_balance` (credits customer ledger); drawer cash unchanged.
-        - Mixed tender: `cash_paid = cash, card_paid = card, paid_amount = cash + card, payment_type = 'mixed'`. `clients.current_balance` is reduced by store credit only (`p_store_credit`). Drawer cash reduced by `cash_paid`.
-        - Walk-in cash refund: `client_id = null, cash_paid = refund_total, paid_amount = refund_total, payment_type = 'cash'`. Reduces drawer cash; store credit forbidden for walk-ins.
+      - **Tender Field Semantics & Server Khata Offset (F2 & R1c, Owner Decision):**
+        - NO Store Credit / No Client Advance: Refunds are strictly cash, card, or cash+card (`mixed`).
+        - Credit-Sale Returns & Server-Computed Khata Offset:
+          The server computes `khata_offset = LEAST(return_net, original.due_amount - SUM(prior offsets), clients.current_balance)` floored at 0.
+          Prior offsets are derived dynamically as `SUM(net_total - paid_amount)` over prior non-cancelled special returns of that original invoice.
+        - Cashier Payout Split: `cash_paid + card_paid` must equal `return_net - khata_offset` (0.02 tolerance). Cashier only splits the remainder between cash and card.
+        - Walk-in Customers (`client_id IS NULL`): `khata_offset = 0`, cashier must refund full `return_net`.
+        - Client Ledger: Reduced by `khata_offset` only (`clients.current_balance = current_balance - khata_offset`). Balance never goes negative.
+        - Return Invoice Header: `paid_amount = cash_paid + card_paid`, `net_total = return_net`, `due_amount = 0`.
+        - `payment_type`: `'mixed'` if cash > 0 and card > 0, else `'card'`, else `'cash'`.
       - **Cancel Asymmetry Note & Real Cancel Endpoints:** Live `cancel_invoice_atomic:907–917` computes store credit whenever `v_invoice.net_total - v_cash_ref > 0`. Because it has no awareness of `card_paid`, cancelling a return with card or mixed tender treats `card_paid` as store credit and credits `clients.current_balance`, corrupting the ledger. The real cancellation routes are `PATCH /api/invoices` (`action: 'cancel'`) and `DELETE /api/invoices` (`src/app/api/invoices/route.ts:371–385, 535–546`). Decision D5 enforces blocking cancellation of return invoices at the API layer. Residual risk remains that `cancel_invoice_atomic` is `SECURITY DEFINER` and could be invoked directly via PostgREST RPC if exposed.
       - **Option E Mandate:** **NO receipt of any kind is printed for special returns** (no customer slip, no internal copy).
-6. **Token Behavior on Special Return (Decision 3 & Phase 8):**
-   - *Regular POS Parity:* In `src/components/PosBilling.tsx:1700–1728`, return lines with paint tokens provide a toggle for `tokenReturnedWithBucket`. If unchecked (`tokenReturnedWithBucket === false`), the frontend UI deducts the token value from the refund rate: `effectiveRate = Math.max(0, rate - tokenValue)`.
-   - *Special Return Flow:* The Special Return UI mirrors this client-side rate deduction before submitting to `create_special_return_atomic`.
+6. **Token Behavior & Lid-Open Return Policy (Owner Decision & Phase 8):**
+   - *Lid-Open Policy:* Buckets with opened lids are strictly rejected and not accepted for return at the counter.
+   - *Full Price Refund:* Accepted returns refund the full original unit charged price. Zero token deduction is made.
    - *Token Transactions on Returns:* Live `create_invoice_atomic:643` writes NO token transactions for returns (`-- Returns do not issue tokens or create stockpile entries`). Special returns follow this exact rule; `create_special_return_atomic` has no `p_tokens` parameter and skips token creation entirely.
    - *Receipt Suppression Rule D4:* Tokens are never mentioned on any receipt paper (and special returns print no paper anyway).
 7. **Delivery Charge Consistency (F7):**
@@ -317,7 +321,7 @@ To fulfill Requirement 1b ("must start fully empty. No shop name, number, addres
     - In `src/app/api/shifts/route.ts:271`, `payment_type = 'others'` with `cash_paid = 0` does not affect `cashReturns`.
     - In `src/components/ShiftDrawer.tsx:234–241`, `cashReturns` only adds when `cash_paid > 0` or `payment_type = 'cash'`.
     - In `get_ceo_branches_kpi_summary`, returns are completely excluded (`COALESCE(i.invoice_type, '') <> 'return'`).
-    - *Precautionary Rule:* To prevent `salesMath.ts` from subtracting cash on store credit returns, store credit returns must pass `cash_paid = 0, card_paid = 0, bank_paid = 0, others_paid = 0, paid_amount = 0, payment_type = 'credit'`.
+    - *Precautionary Rule:* To prevent `salesMath.ts` from subtracting cash when a return is fully absorbed by debt reduction (`khata_offset`), such returns pass `cash_paid = 0, card_paid = 0, bank_paid = 0, others_paid = 0, paid_amount = 0, payment_type = 'cash'`. Since `paid_amount = 0`, `salesMath.ts:147–150` evaluates condition false, ensuring drawer cash is untouched.
 12. **Invoice Storage Rule (Owner Decision 1):**
     - `invoices.subtotal` represents the sum of line totals **AFTER** line discounts.
     - `invoices.discount` stores the **invoice-level discount only** (strictly 0 for special sales).

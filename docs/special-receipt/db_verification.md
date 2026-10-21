@@ -1024,8 +1024,16 @@ We audited all API routes, database functions, and frontend components to identi
      AND COALESCE(i.invoice_type, '') <> 'return'
    ```
    **Observation:** Returns are completely excluded from `inv_summary`, and `others_paid` is never inspected.
-6. **Rule Rewrite (Precaution & Precision):**
-   Setting `others_paid > 0` does not break `ShiftDrawer.tsx` or `get_ceo_branches_kpi_summary`, but in `src/utils/salesMath.ts:147-150` any return having `paid_amount > 0` with zero cash/card/bank will trigger fallback `invCash = paid` and corrupt `physicalCash`. To guarantee total safety across all 5 modules, store credit returns must strictly record `cash_paid = 0, card_paid = 0, bank_paid = 0, others_paid = 0, paid_amount = 0, payment_type = 'credit'`.
+6. **Owner Decision & Rule Rewrite (Server Khata Offset & Drawer Safety):**
+   Under the final owner decision, there is NO store credit and no client advance. Refunds are strictly cash, card, or cash+card (`mixed`).
+   On credit-sale returns, the server computes:
+   $\text{khata\_offset} = \max(0, \min(\text{return\_net}, \text{original.due\_amount} - \sum(\text{prior offsets}), \text{clients.current\_balance}))$
+   where prior offsets are dynamically derived as `SUM(net_total - paid_amount)` over prior non-cancelled special returns of that original invoice.
+   The remainder (`return_net - khata_offset`) is disbursed as cash and/or card (`cash_paid`, `card_paid`), with `paid_amount = cash_paid + card_paid`.
+   If a return is 100% absorbed by debt reduction (`khata_offset = return_net`), then `cash_paid = 0, card_paid = 0, paid_amount = 0, payment_type = 'cash'`.
+   Because `paid_amount = 0`, `src/utils/salesMath.ts:147–150` condition `invCash === 0 && invCard === 0 && invBank === 0 && paid > 0` evaluates to **false**, guaranteeing physical drawer cash is completely untouched!
+   When cash is disbursed (`cash_paid > 0`), `physicalCash -= cash_paid` correctly deducts only the physical cash handed to the customer.
+   When card is disbursed (`card_paid > 0`), `digitalPaid -= card_paid` correctly accounts for the card refund.
 
 ---
 

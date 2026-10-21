@@ -42,11 +42,11 @@
 | `TC-SR-D4` | **Token Suppression on All Paper Receipts (Decision 1)** | Verify no token claim slip or token note text appears on any receipt type | Print Engine |
 | `TC-SR-D4b` | **Token Logic Pass-Through in Special RPC (Decision 1)** | Verify tokens are accepted, token_transactions rows created, logic identical | PostgreSQL RPC |
 | `TC-SR-29` | **Phase 8: Special Return at Charged Rate** | Verify return refunds at original special charged rate, not catalog price; populates original_invoice_item_id | Phase 8 Returns |
-| `TC-SR-29b` | **Phase 8: Store Credit Return Tender Guard** | Verify store credit return does NOT set others_paid and protects shift drawer cash in salesMath.ts | Phase 8 Returns |
+| `TC-SR-29b` | **Phase 8: Credit Sale Return Khata Offset** | Verify credit-sale return calculates server khata_offset and protects shift drawer cash in salesMath.ts | Phase 8 Returns |
 | `TC-SR-30` | **Phase 8: Returnable Quantity Guard** | Verify return qty cannot exceed (sold qty − already returned qty) using original_invoice_item_id | Phase 8 Returns |
 | `TC-SR-31` | **Phase 8: Option E Paperless Return (Zero Print)** | Verify return completes in DB and drawer; ZERO paper receipt printed | Phase 8 Returns |
 | `TC-SR-32` | **Phase 8: Cash Refund Reduces Day Close** | Verify cash refund on special return subtracts from expected drawer cash | Phase 8 Returns |
-| `TC-SR-33` | **Phase 8: Token Handling on Return** | Verify return flow skips token issuance and deducts token value only when bucket returned without token | Phase 8 Returns |
+| `TC-SR-33` | **Phase 8: Token Handling & Lid-Open Policy on Return** | Verify special return flow skips token issuance, rejects opened buckets, and refunds full charged price | Phase 8 Returns |
 | `TC-SR-34` | **Phase 8: Return Blocked on Cancelled Invoice** | Verify create_special_return_atomic rejects return if original invoice is cancelled | Phase 8 Returns |
 
 ---
@@ -284,7 +284,7 @@
   4. Attempt direct API POST to `/api/special-print-log/reprint` with User C's session.
   5. Attempt to reprint an invoice belonging to a different branch with User B's session.
   6. Attempt to reprint a non-special invoice (`printed_as = 'regular'`) with User B's session.
-  7. Cancel invoice `INV-9001` via `POST /api/invoices/cancel` (`status = 'cancelled'`). As User B, attempt to reprint `INV-9001` via `POST /api/special-print-log/reprint`.
+  7. Cancel invoice `INV-9001` via `PATCH /api/invoices` (`status = 'cancelled'`). As User B, attempt to reprint `INV-9001` via `POST /api/special-print-log/reprint`.
   8. For a special invoice with a completed partial return, attempt reprint with User B.
 - **Expected Results:**
   - User A: "Reprint" button is disabled/hidden with tooltip *"Reprint restricted to authorized counter staff"*.
@@ -377,7 +377,7 @@
   1. Open Sales History as Cashier. Select `INV-9001`. Inspect "Edit / Add in POS" button.
   2. Attempt `PATCH /api/invoices` on `INV-9001` with modified prices or items.
   3. Attempt direct execution of `update_invoice_atomic` on `INV-9001`.
-  4. Perform cancellation of `INV-9001` via `POST /api/invoices/cancel`.
+  4. Perform cancellation of `INV-9001` via `PATCH /api/invoices` (`{ action: 'cancel' }`).
 - **Expected Results:**
   - Step 1: "Edit / Add in POS" button is completely hidden/disabled with tooltip: *"Special invoices cannot be edited. Cancel and re-issue a new special sale if incorrect."*
   - Step 2: `PATCH /api/invoices` rejects with `400 Bad Request: Special invoices cannot be edited`.
@@ -616,18 +616,17 @@
 
 ---
 
-### TC-SR-33: Return Token Behavior Aligned with Regular Returns (Decision 3 & Phase 8)
+### TC-SR-33: Return Token Behavior & Lid-Open Policy (Owner Decision & Phase 8)
 - **Preconditions:**
   - Special invoice INV-9004 with product from token-eligible series.
 - **Test Steps:**
-  1. Process special return for INV-9004 with `tokenReturnedWithBucket = true`.
-  2. Process special return for another unit with `tokenReturnedWithBucket = false`.
+  1. Customer returns bucket with unopened lid. Cashier accepts return.
+  2. Customer attempts to return bucket with opened lid. Cashier inspects item.
   3. Inspect `token_transactions` in database.
 - **Expected Results:**
-  - `create_invoice_atomic` executes with `is_return = true` and skips creating new token transactions.
-  - Step 1: Full unit rate is refunded.
-  - Step 2: Token value is deducted from refund unit rate in POS UI, matching standard return behavior.
-  - Zero token text appears on any receipt.
+  - Step 1: Accepted. `create_special_return_atomic` refunds full original charged unit price. Zero token deduction is made. Zero new token transactions created.
+  - Step 2: Counter cashier rejects return per owner policy (lid open => return not accepted).
+  - Zero token claim text appears on any document.
 
 ---
 
@@ -657,18 +656,19 @@
 
 ---
 
-### TC-SR-36: Mixed Tender Return with Store Credit (R1c)
+### TC-SR-36: Mixed Tender Return (Cash + Card) with Server Khata Offset (R1c, Owner Decision)
 - **Preconditions:**
-  - Special invoice INV-9011 for registered customer (Client A) with `current_balance = 5,000`.
+  - Special invoice INV-9011 for registered customer (Client A) with `current_balance = 5,000`. Original credit sale was Rs. 1,400 net (paid 1000 cash, due 400).
   - 1 item returned for total refund of Rs. 1,400.
 - **Test Steps:**
-  1. Invoke `create_special_return_atomic` with mixed tender: `p_cash_refunded = 500`, `p_card_refunded = 500`, `p_store_credit = 400`.
+  1. Invoke `create_special_return_atomic` with cash and card: `p_cash_refunded = 500`, `p_card_refunded = 500`.
   2. Inspect return invoice fields in `invoices` table.
   3. Inspect `clients.current_balance`.
 - **Expected Results:**
-  - In `invoices`: `cash_paid = 500`, `card_paid = 500`, `paid_amount = 1000` (`cash_paid + card_paid`), `net_total = 1400`, `payment_type = 'mixed'`.
-  - In `clients`: `current_balance = 5,000 - 400 = 4,600` (reduced by store credit only; client is credited Rs. 400 towards ledger).
-  - Cash paid and card paid do not alter `clients.current_balance`.
+  - Server computes `khata_offset = LEAST(1400, 400, 5000) = 400`.
+  - Cashier refund needed = `1400 - 400 = 1000`. Cashier splits between cash 500 and card 500.
+  - In `invoices`: `cash_paid = 500`, `card_paid = 500`, `paid_amount = 1000`, `net_total = 1400`, `payment_type = 'mixed'`, `due_amount = 0`.
+  - In `clients`: `current_balance = 5,000 - 400 = 4,600` (reduced by khata_offset 400; balance never goes negative).
 
 ---
 
@@ -703,9 +703,8 @@
 - **Test Steps:**
   1. Call `create_special_return_atomic` with `p_cash_refunded = -100`.
   2. Call `create_special_return_atomic` with `p_card_refunded = -50`.
-  3. Call `create_special_return_atomic` with `p_store_credit = -200`.
 - **Expected Results:**
-  - In all 3 steps: Exception raised: `'Refund amounts cannot be negative'`.
+  - In both steps: Exception raised: `'Refund amounts cannot be negative'`.
 
 ---
 

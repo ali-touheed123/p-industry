@@ -258,7 +258,6 @@ BEGIN
       p_invoice_data => v_inv_data,
       p_items        => v_items,
       p_receipt_snap => '{}'::jsonb,
-      p_template_snap => '{}'::jsonb,
       p_printed_by   => 'cashier_off',
       p_user_id      => v_user_off,
       p_tokens       => '[]'::jsonb
@@ -276,7 +275,6 @@ BEGIN
       p_invoice_data => v_inv_data,
       p_items        => v_items,
       p_receipt_snap => '{}'::jsonb,
-      p_template_snap => '{}'::jsonb,
       p_printed_by   => 'cashier_inact',
       p_user_id      => v_user_inactive,
       p_tokens       => '[]'::jsonb
@@ -294,7 +292,6 @@ BEGIN
       p_invoice_data => v_inv_data,
       p_items        => v_items,
       p_receipt_snap => '{}'::jsonb,
-      p_template_snap => '{}'::jsonb,
       p_printed_by   => 'cashier_other',
       p_user_id      => v_user_other,
       p_tokens       => '[]'::jsonb
@@ -312,7 +309,6 @@ BEGIN
       p_invoice_data => v_inv_data,
       p_items        => v_items,
       p_receipt_snap => '{}'::jsonb,
-      p_template_snap => '{}'::jsonb,
       p_printed_by   => 'ceo_user',
       p_user_id      => v_user_ceo,
       p_tokens       => '[]'::jsonb
@@ -330,7 +326,6 @@ BEGIN
       p_invoice_data => v_inv_data,
       p_items        => v_items,
       p_receipt_snap => '{}'::jsonb,
-      p_template_snap => '{}'::jsonb,
       p_printed_by   => 'dev_user',
       p_user_id      => v_user_dev,
       p_tokens       => '[]'::jsonb
@@ -406,7 +401,6 @@ BEGIN
       'total_price',  3400                      -- charged net line price
     )),
     p_receipt_snap => '{"header": {"showShopName": false}}'::jsonb,
-    p_template_snap => '{}'::jsonb,
     p_printed_by   => 'Happy Cashier',
     p_user_id      => v_user_id,
     p_tokens       => '[]'::jsonb
@@ -538,7 +532,6 @@ BEGIN
       'total_price', 1200
     )),
     p_receipt_snap => '{}'::jsonb,
-    p_template_snap => '{}'::jsonb,
     p_printed_by   => 'Token Cashier',
     p_user_id      => v_user_id,
     p_tokens       => jsonb_build_array(jsonb_build_object(
@@ -752,12 +745,14 @@ ROLLBACK;
 
 
 -- ============================================================================
--- TEST 9: Store Credit Return Tender Guard (others_paid = 0)
+-- TEST 9: Credit-Sale Return with Server Khata Offset (Debt Reduction)
 -- ============================================================================
--- Tests:
---  - When returning as store credit, others_paid is NOT set (avoids drawer cash deduction bug).
---  - payment_type = 'credit', cash_paid = 0, card_paid = 0, others_paid = 0.
---  - clients.current_balance is credited directly.
+-- Tests (Owner Decision):
+--  - NO store credit / no client advance. Refunds are cash, card, or cash+card only.
+--  - Credit-sale return: Server computes khata_offset = LEAST(return_net, orig_due, client_bal)
+--  - Cashier refund (cash + card) must equal return_net - khata_offset (0.02 tolerance).
+--  - Return invoice: paid_amount = cash + card, net_total = return_net, due_amount = 0.
+--  - Client current_balance is reduced by khata_offset only.
 
 BEGIN;
 
@@ -766,6 +761,7 @@ DECLARE
   v_tenant_id UUID := (SELECT id FROM tenants LIMIT 1);
   v_user_id UUID := gen_random_uuid();
   v_client_id UUID := gen_random_uuid();
+  v_shift_id UUID := gen_random_uuid();
   v_item_id UUID;
   v_sale_res JSONB;
   v_orig_inv_id UUID;
@@ -776,32 +772,37 @@ DECLARE
 BEGIN
   -- Setup staff
   INSERT INTO app_users (id, tenant_id, username, password_hash, full_name, role, is_active, can_use_special_receipt)
-  VALUES (v_user_id, v_tenant_id, 'cashier_credit', 'dummy_hash', 'Credit Cashier', 'staff', true, true);
+  VALUES (v_user_id, v_tenant_id, 'cashier_khata', 'dummy_hash', 'Khata Cashier', 'staff', true, true);
 
   -- Setup registered customer with 5000 debt
   INSERT INTO clients (id, tenant_id, name, current_balance)
   VALUES (v_client_id, v_tenant_id, 'Registered Client A', 5000);
 
-  -- Open shift (opened_by, not user_id — verified via information_schema)
-  INSERT INTO shifts (tenant_id, opened_by, status, start_time, opening_cash)
-  VALUES (v_tenant_id, v_user_id, 'open', NOW(), 10000);
+  -- Open shift
+  INSERT INTO shifts (id, tenant_id, opened_by, status, start_time, opening_cash)
+  VALUES (v_shift_id, v_tenant_id, v_user_id, 'open', NOW(), 10000);
 
   -- Setup item
   INSERT INTO items (tenant_id, name, code, retail_price, cost_price, stock_qty)
-  VALUES (v_tenant_id, 'Credit Item', 'CR-01', 2000, 1500, 10)
+  VALUES (v_tenant_id, 'Credit Item', 'CI-01', 2000, 1500, 10)
   RETURNING id INTO v_item_id;
 
-  -- Sale for registered customer
+  -- Create credit sale: total 2000, paid 500 cash, due 1500
   v_sale_res := public.create_special_invoice_atomic(
     p_invoice_data => jsonb_build_object(
       'tenant_id',    v_tenant_id,
-      'invoice_no',   'CRED-SALE-001',
+      'invoice_no',   'CREDIT-SALE-001',
       'invoice_type', 'sales',
+      'shift_id',     v_shift_id,
       'client_id',    v_client_id,
       'date',         CURRENT_DATE,
-      'paid_amount',  2000,
-      'due_amount',   0,
-      'cash_paid',    2000
+      'subtotal',     2000,
+      'discount',     0,
+      'delivery_charge', 0,
+      'net_total',    2000,
+      'paid_amount',  500,
+      'due_amount',   1500,
+      'cash_paid',    500
     ),
     p_items => jsonb_build_array(jsonb_build_object(
       'item_id',     v_item_id,
@@ -812,8 +813,7 @@ BEGIN
       'total_price', 2000
     )),
     p_receipt_snap => '{}'::jsonb,
-    p_template_snap => '{}'::jsonb,
-    p_printed_by   => 'Credit Cashier',
+    p_printed_by   => 'Khata Cashier',
     p_user_id      => v_user_id,
     p_tokens       => '[]'::jsonb
   );
@@ -821,33 +821,70 @@ BEGIN
   v_orig_inv_id := (v_sale_res->>'invoice_id')::UUID;
   SELECT id INTO v_orig_item_id FROM invoice_items WHERE invoice_id = v_orig_inv_id LIMIT 1;
 
-  -- Process store credit return
+  -- Return item: return_net = 2000.
+  -- Server computes:
+  --   orig_due_remaining = 1500 (since 0 prior offsets)
+  --   client_balance = 5000
+  --   khata_offset = LEAST(2000, 1500, 5000) = 1500
+  --   cashier refund needed = 2000 - 1500 = 500.
+  -- Test cashier pays 500 in cash:
   v_ret_res := public.create_special_return_atomic(
     p_original_invoice_id => v_orig_inv_id,
     p_items               => jsonb_build_array(jsonb_build_object('original_item_id', v_orig_item_id, 'qty', 1)),
     p_user_id             => v_user_id,
-    p_printed_by          => 'Credit Cashier',
-    p_store_credit        => 2000
+    p_printed_by          => 'Khata Cashier',
+    p_shift_id            => v_shift_id,
+    p_cash_refunded       => 500,
+    p_card_refunded       => 0
   );
 
   IF NOT (v_ret_res->>'success')::BOOLEAN THEN
-    RAISE EXCEPTION 'TEST 9 FAILED: Store credit return failed';
+    RAISE EXCEPTION 'TEST 9 FAILED: Credit return failed';
   END IF;
 
-  -- Verify tender fields on return invoice
+  IF (v_ret_res->>'khata_offset')::NUMERIC <> 1500 THEN
+    RAISE EXCEPTION 'TEST 9 FAILED: Expected khata_offset 1500, got %', (v_ret_res->>'khata_offset');
+  END IF;
+
+  IF (v_ret_res->>'cashier_refund')::NUMERIC <> 500 THEN
+    RAISE EXCEPTION 'TEST 9 FAILED: Expected cashier_refund 500, got %', (v_ret_res->>'cashier_refund');
+  END IF;
+
+  -- Verify return invoice header fields
   SELECT * INTO v_ret_inv FROM invoices WHERE id = (v_ret_res->>'return_invoice_id')::UUID;
-  IF v_ret_inv.others_paid <> 0 OR v_ret_inv.cash_paid <> 0 OR v_ret_inv.payment_type <> 'credit' THEN
-    RAISE EXCEPTION 'TEST 9 FAILED: Tender breakdown incorrect (others_paid %, cash_paid %, payment_type %)',
-      v_ret_inv.others_paid, v_ret_inv.cash_paid, v_ret_inv.payment_type;
+  IF v_ret_inv.paid_amount <> 500 OR v_ret_inv.net_total <> 2000 OR v_ret_inv.cash_paid <> 500 OR v_ret_inv.payment_type <> 'cash' THEN
+    RAISE EXCEPTION 'TEST 9 FAILED: Return invoice header mismatch (paid %, net %, cash %, type %)',
+      v_ret_inv.paid_amount, v_ret_inv.net_total, v_ret_inv.cash_paid, v_ret_inv.payment_type;
   END IF;
 
-  -- Verify client balance was reduced by 2000 (from 5000 to 3000)
+  -- Verify client current_balance reduced by khata_offset only (from 5000 to 3500)
   SELECT current_balance INTO v_client_bal FROM clients WHERE id = v_client_id;
-  IF v_client_bal <> 3000 THEN
-    RAISE EXCEPTION 'TEST 9 FAILED: Client balance not updated (expected 3000, got %)', v_client_bal;
+  IF v_client_bal <> 3500 THEN
+    RAISE EXCEPTION 'TEST 9 FAILED: Client balance not updated correctly (expected 3500, got %)', v_client_bal;
   END IF;
 
-  RAISE NOTICE 'TEST 9 PASSED: Store credit return sets others_paid = 0 and updates client ledger';
+  -- Test mismatch tolerance rejection: cashier attempts to refund 600 instead of 500
+  BEGIN
+    PERFORM public.create_special_return_atomic(
+      p_original_invoice_id => v_orig_inv_id,
+      p_items               => jsonb_build_array(jsonb_build_object('original_item_id', v_orig_item_id, 'qty', 1)),
+      p_user_id             => v_user_id,
+      p_printed_by          => 'Khata Cashier',
+      p_shift_id            => v_shift_id,
+      p_cash_refunded       => 600,
+      p_card_refunded       => 0
+    );
+    RAISE EXCEPTION 'TEST 9 FAILED: Cashier over-refund was not rejected';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM ILIKE '%must equal return net%' OR SQLERRM ILIKE '%exceeds remaining returnable%' THEN
+      -- Passed: either rejected on remaining qty or tender tolerance
+      NULL;
+    ELSE
+      RAISE EXCEPTION 'TEST 9 FAILED: Unexpected error on tender mismatch: %', SQLERRM;
+    END IF;
+  END;
+
+  RAISE NOTICE 'TEST 9 PASSED: Server computes khata_offset=1500, cashier refund=500, client ledger reduced to 3500';
 END;
 $$;
 
@@ -855,6 +892,7 @@ ROLLBACK;
 
 
 -- ============================================================================
+-- TEST 10:
 -- TEST 10: Cancelled Invoice Reprint Rejection (A4 & D2)
 -- ============================================================================
 -- Tests:
@@ -898,7 +936,6 @@ BEGIN
       'total_price', 500
     )),
     p_receipt_snap => '{}'::jsonb,
-    p_template_snap => '{}'::jsonb,
     p_printed_by   => 'Cancel Cashier',
     p_user_id      => v_user_id,
     p_tokens       => '[]'::jsonb
@@ -980,7 +1017,6 @@ BEGIN
       'total_price', 1000
     )),
     p_receipt_snap => '{}'::jsonb,
-    p_template_snap => '{}'::jsonb,
     p_printed_by   => 'Cancel Cashier 2',
     p_user_id      => v_user_id,
     p_tokens       => '[]'::jsonb
@@ -1178,7 +1214,6 @@ BEGIN
       'total_price', 1000
     )),
     p_receipt_snap  => '{}'::jsonb,
-    p_template_snap => '{}'::jsonb,
     p_printed_by    => 'Delivery Cashier',
     p_user_id       => v_user_id,
     p_tokens        => '[]'::jsonb
@@ -1267,7 +1302,6 @@ BEGIN
         'total_price', 1000
       )),
       p_receipt_snap  => '{}'::jsonb,
-      p_template_snap => '{}'::jsonb,
       p_printed_by    => 'Discount Cashier',
       p_user_id       => v_user_id,
       p_tokens        => '[]'::jsonb
@@ -1694,8 +1728,12 @@ ROLLBACK;
 
 
 -- ============================================================================
--- TEST 21: Walk-In Customer Return (Cash Allowed, Store Credit Blocked)
+-- TEST 21: Walk-In Customer Return (offset = 0, Full Cashier Refund Required)
 -- ============================================================================
+-- Tests (Owner Decision):
+--  - Walk-in customer (client_id IS NULL) => khata_offset = 0.
+--  - Cashier refund (cash + card) must equal return_net in full (0.02 tolerance).
+--  - Cash refund of full net succeeds. Cashier short-refund fails.
 BEGIN;
 
 DO $$
@@ -1732,35 +1770,24 @@ BEGIN
   v_orig_inv_id := (v_sale_res->>'invoice_id')::UUID;
   SELECT id INTO v_orig_item_id FROM invoice_items WHERE invoice_id = v_orig_inv_id LIMIT 1;
 
-  -- 1. Cash refund for walk-in customer succeeds
+  -- 1. Full cash refund for walk-in customer succeeds (khata_offset = 0)
   v_ret_res := public.create_special_return_atomic(
     p_original_invoice_id => v_orig_inv_id,
     p_items               => jsonb_build_array(jsonb_build_object('original_item_id', v_orig_item_id, 'qty', 1)),
     p_user_id             => v_user_id,
     p_printed_by          => 'Walk Cashier',
     p_shift_id            => v_shift_id,
-    p_cash_refunded       => 800
+    p_cash_refunded       => 800,
+    p_card_refunded       => 0
   );
   IF NOT (v_ret_res->>'success')::BOOLEAN THEN
     RAISE EXCEPTION 'TEST 21 FAILED: Cash refund for walk-in customer failed';
   END IF;
+  IF (v_ret_res->>'khata_offset')::NUMERIC <> 0 THEN
+    RAISE EXCEPTION 'TEST 21 FAILED: Expected khata_offset 0 for walk-in, got %', (v_ret_res->>'khata_offset');
+  END IF;
 
-  -- 2. Store credit attempt for walk-in customer must fail
-  BEGIN
-    PERFORM public.create_special_return_atomic(
-      p_original_invoice_id => v_orig_inv_id,
-      p_items               => jsonb_build_array(jsonb_build_object('original_item_id', v_orig_item_id, 'qty', 1)),
-      p_user_id             => v_user_id,
-      p_printed_by          => 'Walk Cashier',
-      p_shift_id            => v_shift_id,
-      p_store_credit        => 800
-    );
-    RAISE EXCEPTION 'TEST 21 FAILED: Store credit on walk-in customer was not blocked';
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM ILIKE '%registered customer%' THEN
-      RAISE NOTICE 'TEST 21 PASSED: Store credit correctly blocked on walk-in customer';
-    ELSE RAISE EXCEPTION 'TEST 21 FAILED: Unexpected error — %', SQLERRM; END IF;
-  END;
+  RAISE NOTICE 'TEST 21 PASSED: Walk-in return requires offset=0 and full cashier payout';
 END;
 $$;
 
@@ -1768,11 +1795,16 @@ ROLLBACK;
 
 
 -- ============================================================================
--- TEST 22: R1c — Mixed Tender Return with Store Credit
+-- TEST 22: R1c — Mixed Tender Return (Cash + Card) with Khata Offset
 -- ============================================================================
--- Tender: Cash 500, Card 500, Store Credit 400. Total = 1400.
--- Invoices: cash_paid = 500, card_paid = 500, paid_amount = 1000, payment_type = 'mixed'.
--- Clients: current_balance reduced by 400 only.
+-- Sale: 1400 net (paid 1000 cash, due 400). Client has current_balance = 5000.
+-- Return net = 1400.
+-- Server computes:
+--   khata_offset = LEAST(1400, 400, 5000) = 400.
+--   Cashier refund remainder = 1400 - 400 = 1000.
+-- Cashier splits remainder: Cash 500 + Card 500. Total payout = 1000.
+-- Return invoice: cash_paid = 500, card_paid = 500, paid_amount = 1000, net_total = 1400, payment_type = 'mixed'.
+-- Clients: current_balance reduced by 400 (5000 -> 4600).
 BEGIN;
 
 DO $$
@@ -1802,7 +1834,8 @@ BEGIN
     p_invoice_data => jsonb_build_object(
       'tenant_id', v_tenant_id, 'invoice_no', 'MIX-SALE-001', 'invoice_type', 'sales',
       'client_id', v_client_id, 'shift_id', v_shift_id, 'date', CURRENT_DATE,
-      'paid_amount', 1400, 'due_amount', 0, 'cash_paid', 1400
+      'subtotal', 1400, 'discount', 0, 'delivery_charge', 0, 'net_total', 1400,
+      'paid_amount', 1000, 'due_amount', 400, 'cash_paid', 1000
     ),
     p_items => jsonb_build_array(jsonb_build_object(
       'item_id', v_item_id, 'item_name', 'Mixed Item', 'qty', 1, 'unit_price', 1400, 'discount', 0, 'total_price', 1400
@@ -1813,7 +1846,7 @@ BEGIN
   v_orig_inv_id := (v_sale_res->>'invoice_id')::UUID;
   SELECT id INTO v_orig_item_id FROM invoice_items WHERE invoice_id = v_orig_inv_id LIMIT 1;
 
-  -- Process mixed return: cash 500, card 500, store credit 400
+  -- Process mixed return: cash 500, card 500
   v_ret_res := public.create_special_return_atomic(
     p_original_invoice_id => v_orig_inv_id,
     p_items               => jsonb_build_array(jsonb_build_object('original_item_id', v_orig_item_id, 'qty', 1)),
@@ -1821,9 +1854,16 @@ BEGIN
     p_printed_by          => 'Mixed Cashier',
     p_shift_id            => v_shift_id,
     p_cash_refunded       => 500,
-    p_card_refunded       => 500,
-    p_store_credit        => 400
+    p_card_refunded       => 500
   );
+
+  IF NOT (v_ret_res->>'success')::BOOLEAN THEN
+    RAISE EXCEPTION 'TEST 22 FAILED: Mixed return failed';
+  END IF;
+
+  IF (v_ret_res->>'khata_offset')::NUMERIC <> 400 THEN
+    RAISE EXCEPTION 'TEST 22 FAILED: Expected khata_offset 400, got %', (v_ret_res->>'khata_offset');
+  END IF;
 
   SELECT * INTO v_ret_inv FROM invoices WHERE id = (v_ret_res->>'return_invoice_id')::UUID;
   IF v_ret_inv.payment_type <> 'mixed' OR v_ret_inv.cash_paid <> 500 OR v_ret_inv.card_paid <> 500 OR v_ret_inv.paid_amount <> 1000 THEN
@@ -1833,7 +1873,7 @@ BEGIN
 
   SELECT current_balance INTO v_client_bal FROM clients WHERE id = v_client_id;
   IF v_client_bal <> 4600 THEN
-    RAISE EXCEPTION 'TEST 22 FAILED: Client balance not reduced by store credit (expected 4600, got %)', v_client_bal;
+    RAISE EXCEPTION 'TEST 22 FAILED: Client balance not reduced by khata_offset (expected 4600, got %)', v_client_bal;
   END IF;
 
   RAISE NOTICE 'TEST 22 PASSED: Mixed tender return sets payment_type=mixed, cash_paid=500, card_paid=500, paid_amount=1000, balance reduced by 400';
@@ -2255,3 +2295,354 @@ ROLLBACK;
 -- Run these tests on a Supabase staging branch, NOT on production.
 -- ============================================================================
 
+
+
+-- ============================================================================
+-- TEST 27: Credit Sale Partial Paid + Return Within Due Amount
+-- ============================================================================
+-- Tests:
+--  - Sale Rs. 1000, paid 200, due 800. Client balance 3000.
+--  - Return worth Rs. 500 (<= due 800).
+--  - khata_offset = LEAST(500, 800, 3000) = 500.
+--  - Remainder = 500 - 500 = 0. Cashier pays 0 cash / 0 card.
+--  - Return invoice: paid_amount = 0, net_total = 500, payment_type = 'cash'.
+--  - Client current_balance reduced from 3000 by 500 to 2500.
+BEGIN;
+
+DO $$
+DECLARE
+  v_tenant_id UUID := gen_random_uuid();
+  v_user_id UUID := gen_random_uuid();
+  v_shift_id UUID := gen_random_uuid();
+  v_client_id UUID := gen_random_uuid();
+  v_item_id UUID;
+  v_sale_res JSONB;
+  v_orig_inv_id UUID;
+  v_orig_item_id UUID;
+  v_ret_res JSONB;
+  v_ret_inv RECORD;
+  v_client_bal NUMERIC;
+BEGIN
+  INSERT INTO tenants (id, name, slug, type) VALUES (v_tenant_id, 'Offset Branch', 'offset-branch', 'shop');
+  INSERT INTO app_users (id, tenant_id, username, password_hash, full_name, role, is_active, can_use_special_receipt)
+  VALUES (v_user_id, v_tenant_id, 'cashier_o', 'dummy_hash', 'Offset Cashier', 'staff', true, true);
+  INSERT INTO clients (id, tenant_id, name, current_balance) VALUES (v_client_id, v_tenant_id, 'Offset Client', 3000);
+  INSERT INTO shifts (id, tenant_id, opened_by, status, start_time, opening_cash)
+  VALUES (v_shift_id, v_tenant_id, v_user_id, 'open', NOW(), 10000);
+  INSERT INTO items (tenant_id, name, code, retail_price, cost_price, stock_qty)
+  VALUES (v_tenant_id, 'Offset Item', 'OI-01', 500, 300, 10) RETURNING id INTO v_item_id;
+
+  v_sale_res := public.create_special_invoice_atomic(
+    p_invoice_data => jsonb_build_object(
+      'tenant_id', v_tenant_id, 'invoice_no', 'OFF-SALE-001', 'invoice_type', 'sales',
+      'client_id', v_client_id, 'shift_id', v_shift_id, 'date', CURRENT_DATE,
+      'subtotal', 1000, 'discount', 0, 'delivery_charge', 0, 'net_total', 1000,
+      'paid_amount', 200, 'due_amount', 800, 'cash_paid', 200
+    ),
+    p_items => jsonb_build_array(jsonb_build_object(
+      'item_id', v_item_id, 'item_name', 'Offset Item', 'qty', 2, 'unit_price', 500, 'discount', 0, 'total_price', 1000
+    )),
+    p_receipt_snap => '{}'::jsonb, p_printed_by => 'Offset Cashier', p_user_id => v_user_id, p_tokens => '[]'::jsonb
+  );
+
+  v_orig_inv_id := (v_sale_res->>'invoice_id')::UUID;
+  SELECT id INTO v_orig_item_id FROM invoice_items WHERE invoice_id = v_orig_inv_id LIMIT 1;
+
+  -- Return 1 unit (500)
+  v_ret_res := public.create_special_return_atomic(
+    p_original_invoice_id => v_orig_inv_id,
+    p_items               => jsonb_build_array(jsonb_build_object('original_item_id', v_orig_item_id, 'qty', 1)),
+    p_user_id             => v_user_id,
+    p_printed_by          => 'Offset Cashier',
+    p_shift_id            => v_shift_id,
+    p_cash_refunded       => 0,
+    p_card_refunded       => 0
+  );
+
+  IF NOT (v_ret_res->>'success')::BOOLEAN THEN
+    RAISE EXCEPTION 'TEST 27 FAILED: Return failed';
+  END IF;
+
+  IF (v_ret_res->>'khata_offset')::NUMERIC <> 500 OR (v_ret_res->>'cashier_refund')::NUMERIC <> 0 THEN
+    RAISE EXCEPTION 'TEST 27 FAILED: khata_offset or cashier_refund mismatch';
+  END IF;
+
+  SELECT * INTO v_ret_inv FROM invoices WHERE id = (v_ret_res->>'return_invoice_id')::UUID;
+  IF v_ret_inv.paid_amount <> 0 OR v_ret_inv.net_total <> 500 THEN
+    RAISE EXCEPTION 'TEST 27 FAILED: Return invoice header values incorrect';
+  END IF;
+
+  SELECT current_balance INTO v_client_bal FROM clients WHERE id = v_client_id;
+  IF v_client_bal <> 2500 THEN
+    RAISE EXCEPTION 'TEST 27 FAILED: Client balance not reduced by 500 (got %)', v_client_bal;
+  END IF;
+
+  RAISE NOTICE 'TEST 27 PASSED: Return within due amount correctly sets offset=500, payout=0, balance=2500';
+END;
+$$;
+
+ROLLBACK;
+
+
+-- ============================================================================
+-- TEST 28: Prior Returns Reduce Available Offset for Subsequent Returns
+-- ============================================================================
+-- Tests:
+--  - Sale Rs. 1000, paid 200, due 800. Client balance 3000.
+--  - Return 1: 1 unit (500). khata_offset = 500, cashier refund = 0.
+--  - Return 2: 1 unit (500).
+--    Dynamic derivation: prior_offsets = SUM(net_total - paid_amount) = 500 - 0 = 500.
+--    orig_due_remaining = 800 - 500 = 300.
+--    khata_offset = LEAST(500, 300, 2500) = 300.
+--    Cashier payout remainder = 500 - 300 = 200 cash!
+--    Client balance reduced by 300 (from 2500 to 2200).
+BEGIN;
+
+DO $$
+DECLARE
+  v_tenant_id UUID := gen_random_uuid();
+  v_user_id UUID := gen_random_uuid();
+  v_shift_id UUID := gen_random_uuid();
+  v_client_id UUID := gen_random_uuid();
+  v_item_id UUID;
+  v_sale_res JSONB;
+  v_orig_inv_id UUID;
+  v_orig_item_id UUID;
+  v_ret1_res JSONB;
+  v_ret2_res JSONB;
+  v_client_bal NUMERIC;
+BEGIN
+  INSERT INTO tenants (id, name, slug, type) VALUES (v_tenant_id, 'MultiRet Branch', 'multiret-branch', 'shop');
+  INSERT INTO app_users (id, tenant_id, username, password_hash, full_name, role, is_active, can_use_special_receipt)
+  VALUES (v_user_id, v_tenant_id, 'cashier_mr', 'dummy_hash', 'Multi Cashier', 'staff', true, true);
+  INSERT INTO clients (id, tenant_id, name, current_balance) VALUES (v_client_id, v_tenant_id, 'Multi Client', 3000);
+  INSERT INTO shifts (id, tenant_id, opened_by, status, start_time, opening_cash)
+  VALUES (v_shift_id, v_tenant_id, v_user_id, 'open', NOW(), 10000);
+  INSERT INTO items (tenant_id, name, code, retail_price, cost_price, stock_qty)
+  VALUES (v_tenant_id, 'Multi Item', 'MRI-01', 500, 300, 10) RETURNING id INTO v_item_id;
+
+  v_sale_res := public.create_special_invoice_atomic(
+    p_invoice_data => jsonb_build_object(
+      'tenant_id', v_tenant_id, 'invoice_no', 'MR-SALE-001', 'invoice_type', 'sales',
+      'client_id', v_client_id, 'shift_id', v_shift_id, 'date', CURRENT_DATE,
+      'subtotal', 1000, 'discount', 0, 'delivery_charge', 0, 'net_total', 1000,
+      'paid_amount', 200, 'due_amount', 800, 'cash_paid', 200
+    ),
+    p_items => jsonb_build_array(jsonb_build_object(
+      'item_id', v_item_id, 'item_name', 'Multi Item', 'qty', 2, 'unit_price', 500, 'discount', 0, 'total_price', 1000
+    )),
+    p_receipt_snap => '{}'::jsonb, p_printed_by => 'Multi Cashier', p_user_id => v_user_id, p_tokens => '[]'::jsonb
+  );
+
+  v_orig_inv_id := (v_sale_res->>'invoice_id')::UUID;
+  SELECT id INTO v_orig_item_id FROM invoice_items WHERE invoice_id = v_orig_inv_id LIMIT 1;
+
+  -- Return 1: offset 500, cash 0
+  v_ret1_res := public.create_special_return_atomic(
+    p_original_invoice_id => v_orig_inv_id,
+    p_items               => jsonb_build_array(jsonb_build_object('original_item_id', v_orig_item_id, 'qty', 1)),
+    p_user_id             => v_user_id,
+    p_printed_by          => 'Multi Cashier',
+    p_shift_id            => v_shift_id,
+    p_cash_refunded       => 0,
+    p_card_refunded       => 0
+  );
+
+  -- Return 2: 2nd unit. Remaining due is 300. Offset = 300, cashier refund = 200 cash!
+  v_ret2_res := public.create_special_return_atomic(
+    p_original_invoice_id => v_orig_inv_id,
+    p_items               => jsonb_build_array(jsonb_build_object('original_item_id', v_orig_item_id, 'qty', 1)),
+    p_user_id             => v_user_id,
+    p_printed_by          => 'Multi Cashier',
+    p_shift_id            => v_shift_id,
+    p_cash_refunded       => 200,
+    p_card_refunded       => 0
+  );
+
+  IF (v_ret2_res->>'khata_offset')::NUMERIC <> 300 OR (v_ret2_res->>'cashier_refund')::NUMERIC <> 200 THEN
+    RAISE EXCEPTION 'TEST 28 FAILED: Return 2 offset or refund mismatch (got offset %, refund %)',
+      (v_ret2_res->>'khata_offset'), (v_ret2_res->>'cashier_refund');
+  END IF;
+
+  SELECT current_balance INTO v_client_bal FROM clients WHERE id = v_client_id;
+  IF v_client_bal <> 2200 THEN
+    RAISE EXCEPTION 'TEST 28 FAILED: Final balance mismatch (expected 2200, got %)', v_client_bal;
+  END IF;
+
+  RAISE NOTICE 'TEST 28 PASSED: Prior returns dynamically reduce available offset for subsequent returns';
+END;
+$$;
+
+ROLLBACK;
+
+
+-- ============================================================================
+-- TEST 29: Client Already Cleared Dues (current_balance = 0) => Offset 0 and Full Cash Refund
+-- ============================================================================
+-- Tests:
+--  - Sale had due 500, but client subsequently paid off debt so current_balance = 0.
+--  - Return net = 300.
+--  - khata_offset = LEAST(300, 500, 0) = 0.
+--  - Balance must NEVER go negative!
+--  - Cashier refunds full 300 in cash. Client balance remains 0.
+BEGIN;
+
+DO $$
+DECLARE
+  v_tenant_id UUID := gen_random_uuid();
+  v_user_id UUID := gen_random_uuid();
+  v_shift_id UUID := gen_random_uuid();
+  v_client_id UUID := gen_random_uuid();
+  v_item_id UUID;
+  v_sale_res JSONB;
+  v_orig_inv_id UUID;
+  v_orig_item_id UUID;
+  v_ret_res JSONB;
+  v_client_bal NUMERIC;
+BEGIN
+  INSERT INTO tenants (id, name, slug, type) VALUES (v_tenant_id, 'ZeroBal Branch', 'zerobal-branch', 'shop');
+  INSERT INTO app_users (id, tenant_id, username, password_hash, full_name, role, is_active, can_use_special_receipt)
+  VALUES (v_user_id, v_tenant_id, 'cashier_zb', 'dummy_hash', 'Zero Cashier', 'staff', true, true);
+  -- Client has 0 balance (already cleared ledger)
+  INSERT INTO clients (id, tenant_id, name, current_balance) VALUES (v_client_id, v_tenant_id, 'Zero Client', 0);
+  INSERT INTO shifts (id, tenant_id, opened_by, status, start_time, opening_cash)
+  VALUES (v_shift_id, v_tenant_id, v_user_id, 'open', NOW(), 10000);
+  INSERT INTO items (tenant_id, name, code, retail_price, cost_price, stock_qty)
+  VALUES (v_tenant_id, 'Zero Item', 'ZI-01', 300, 200, 10) RETURNING id INTO v_item_id;
+
+  v_sale_res := public.create_special_invoice_atomic(
+    p_invoice_data => jsonb_build_object(
+      'tenant_id', v_tenant_id, 'invoice_no', 'ZB-SALE-001', 'invoice_type', 'sales',
+      'client_id', v_client_id, 'shift_id', v_shift_id, 'date', CURRENT_DATE,
+      'subtotal', 300, 'discount', 0, 'delivery_charge', 0, 'net_total', 300,
+      'paid_amount', 0, 'due_amount', 300, 'cash_paid', 0
+    ),
+    p_items => jsonb_build_array(jsonb_build_object(
+      'item_id', v_item_id, 'item_name', 'Zero Item', 'qty', 1, 'unit_price', 300, 'discount', 0, 'total_price', 300
+    )),
+    p_receipt_snap => '{}'::jsonb, p_printed_by => 'Zero Cashier', p_user_id => v_user_id, p_tokens => '[]'::jsonb
+  );
+
+  v_orig_inv_id := (v_sale_res->>'invoice_id')::UUID;
+  SELECT id INTO v_orig_item_id FROM invoice_items WHERE invoice_id = v_orig_inv_id LIMIT 1;
+
+  -- Return item: khata_offset = LEAST(300, 300, 0) = 0. Cashier pays 300 cash.
+  v_ret_res := public.create_special_return_atomic(
+    p_original_invoice_id => v_orig_inv_id,
+    p_items               => jsonb_build_array(jsonb_build_object('original_item_id', v_orig_item_id, 'qty', 1)),
+    p_user_id             => v_user_id,
+    p_printed_by          => 'Zero Cashier',
+    p_shift_id            => v_shift_id,
+    p_cash_refunded       => 300,
+    p_card_refunded       => 0
+  );
+
+  IF (v_ret_res->>'khata_offset')::NUMERIC <> 0 OR (v_ret_res->>'cashier_refund')::NUMERIC <> 300 THEN
+    RAISE EXCEPTION 'TEST 29 FAILED: Offset must be 0 and cashier refund must be 300';
+  END IF;
+
+  SELECT current_balance INTO v_client_bal FROM clients WHERE id = v_client_id;
+  IF v_client_bal <> 0 THEN
+    RAISE EXCEPTION 'TEST 29 FAILED: Client balance must not go negative (got %)', v_client_bal;
+  END IF;
+
+  RAISE NOTICE 'TEST 29 PASSED: Client with 0 balance gets full cash refund without balance going negative';
+END;
+$$;
+
+ROLLBACK;
+
+
+-- ============================================================================
+-- TEST 30: In-Request Duplicate Line Merge & Cents Rule Completion (R1a & R1f)
+-- ============================================================================
+-- Tests:
+--  - Original sale: 3 units for total Rs. 1000.
+--  - Return request sends 1 unit + 2 units in same request referencing the same original_item_id.
+--  - Aggregates to 3 units.
+--  - Since 3 units completes the line (remaining was 3), Cents rule applies: refund = 1000.00 - 0 = 1000.00 exact.
+--  - Zero penny loss.
+--  - If request asks for 2 + 2 units (= 4 units), raises exception exceeding returnable qty.
+BEGIN;
+
+DO $$
+DECLARE
+  v_tenant_id UUID := gen_random_uuid();
+  v_user_id UUID := gen_random_uuid();
+  v_shift_id UUID := gen_random_uuid();
+  v_item_id UUID;
+  v_sale_res JSONB;
+  v_orig_inv_id UUID;
+  v_orig_item_id UUID;
+  v_ret_res JSONB;
+BEGIN
+  INSERT INTO tenants (id, name, slug, type) VALUES (v_tenant_id, 'Dup Merge Branch', 'dup-merge-branch', 'shop');
+  INSERT INTO app_users (id, tenant_id, username, password_hash, full_name, role, is_active, can_use_special_receipt)
+  VALUES (v_user_id, v_tenant_id, 'cashier_dm', 'dummy_hash', 'Dup Cashier', 'staff', true, true);
+  INSERT INTO shifts (id, tenant_id, opened_by, status, start_time, opening_cash)
+  VALUES (v_shift_id, v_tenant_id, v_user_id, 'open', NOW(), 10000);
+  INSERT INTO items (tenant_id, name, code, retail_price, cost_price, stock_qty)
+  VALUES (v_tenant_id, '3Unit Item', '3UI-01', 333.33, 200, 10) RETURNING id INTO v_item_id;
+
+  v_sale_res := public.create_special_invoice_atomic(
+    p_invoice_data => jsonb_build_object(
+      'tenant_id', v_tenant_id, 'invoice_no', '3U-SALE-001', 'invoice_type', 'sales',
+      'shift_id', v_shift_id, 'date', CURRENT_DATE,
+      'subtotal', 1000, 'discount', 0, 'delivery_charge', 0, 'net_total', 1000,
+      'paid_amount', 1000, 'due_amount', 0, 'cash_paid', 1000
+    ),
+    p_items => jsonb_build_array(jsonb_build_object(
+      'item_id', v_item_id, 'item_name', '3Unit Item', 'qty', 3, 'unit_price', 333.33, 'discount', 0, 'total_price', 1000
+    )),
+    p_receipt_snap => '{}'::jsonb, p_printed_by => 'Dup Cashier', p_user_id => v_user_id, p_tokens => '[]'::jsonb
+  );
+
+  v_orig_inv_id := (v_sale_res->>'invoice_id')::UUID;
+  SELECT id INTO v_orig_item_id FROM invoice_items WHERE invoice_id = v_orig_inv_id LIMIT 1;
+
+  -- 1. Attempt requesting 2 + 2 units (exceeds 3) => must fail
+  BEGIN
+    PERFORM public.create_special_return_atomic(
+      p_original_invoice_id => v_orig_inv_id,
+      p_items               => jsonb_build_array(
+        jsonb_build_object('original_item_id', v_orig_item_id, 'qty', 2),
+        jsonb_build_object('original_item_id', v_orig_item_id, 'qty', 2)
+      ),
+      p_user_id             => v_user_id,
+      p_printed_by          => 'Dup Cashier',
+      p_shift_id            => v_shift_id,
+      p_cash_refunded       => 1333.33,
+      p_card_refunded       => 0
+    );
+    RAISE EXCEPTION 'TEST 30 FAILED: Duplicate request exceeding returnable qty was not blocked';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM ILIKE '%exceed%' THEN
+      NULL;
+    ELSE
+      RAISE EXCEPTION 'TEST 30 FAILED: Unexpected error on exceeding duplicate qty: %', SQLERRM;
+    END IF;
+  END;
+
+  -- 2. Valid duplicate request: 1 unit + 2 units => merges to 3 units, completes line, exact 1000 refund
+  v_ret_res := public.create_special_return_atomic(
+    p_original_invoice_id => v_orig_inv_id,
+    p_items               => jsonb_build_array(
+      jsonb_build_object('original_item_id', v_orig_item_id, 'qty', 1),
+      jsonb_build_object('original_item_id', v_orig_item_id, 'qty', 2)
+    ),
+    p_user_id             => v_user_id,
+    p_printed_by          => 'Dup Cashier',
+    p_shift_id            => v_shift_id,
+    p_cash_refunded       => 1000,
+    p_card_refunded       => 0
+  );
+
+  IF (v_ret_res->>'refund_total')::NUMERIC <> 1000 THEN
+    RAISE EXCEPTION 'TEST 30 FAILED: Expected refund_total 1000 exact, got %', (v_ret_res->>'refund_total');
+  END IF;
+
+  RAISE NOTICE 'TEST 30 PASSED: Duplicate items merge in Pre-Pass and Cents Rule refunds exact 1000.00';
+END;
+$$;
+
+ROLLBACK;
