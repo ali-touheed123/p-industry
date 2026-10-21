@@ -1057,6 +1057,8 @@ sequenceDiagram
        `cash_refund + card_refund` must equal `return_net - khata_offset` (within 0.02 tolerance). Cashier only splits the remainder between cash and card.
      - **Walk-in Customers (`client_id IS NULL`):** `khata_offset = 0`, so `cash_refund + card_refund` must equal `return_net`.
      - **Client Balance Floor:** Client balance is reduced by `khata_offset` only (`current_balance = current_balance - khata_offset`). Since `khata_offset <= clients.current_balance`, balance never goes negative.
+     - **Known Behaviour (Whole-Client Balance Capping):**
+       Because `khata_offset` is capped by `clients.current_balance` (which reflects the customer's total outstanding balance across all transactions, not isolated to the invoice being returned), if the client previously made ledger payments that reduced or cleared their overall debt below `orig_due_remaining`, the offset is bounded by their current live debt. The remaining uncapped portion (`return_net - khata_offset`) is disbursed directly to the client as cash/card refund. For example, if an invoice originally had Rs. 800 due, but the client subsequently paid down their account so `clients.current_balance = 0`, `khata_offset` evaluates to 0, and the client receives the entire refund in cash/card without their balance going negative.
      - **Return Invoice Header Fields:**
        `paid_amount = cash_refund + card_refund`, `net_total = return_net`, `due_amount = 0`.
      - **`payment_type` Definition:**

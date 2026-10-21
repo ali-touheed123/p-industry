@@ -42,7 +42,7 @@
 | `TC-SR-D4` | **Token Suppression on All Paper Receipts (Decision 1)** | Verify no token claim slip or token note text appears on any receipt type | Print Engine |
 | `TC-SR-D4b` | **Token Logic Pass-Through in Special RPC (Decision 1)** | Verify tokens are accepted, token_transactions rows created, logic identical | PostgreSQL RPC |
 | `TC-SR-29` | **Phase 8: Special Return at Charged Rate** | Verify return refunds at original special charged rate, not catalog price; populates original_invoice_item_id | Phase 8 Returns |
-| `TC-SR-29b` | **Phase 8: Credit Sale Return Khata Offset** | Verify credit-sale return calculates server khata_offset and protects shift drawer cash in salesMath.ts | Phase 8 Returns |
+| `TC-SR-29b` | **Phase 8: Credit-Sale Return with Server Khata Offset** | Verify credit-sale return calculates server khata_offset, reduces client debt, sets paid_amount for cash/card remainder, and protects drawer cash | Phase 8 Returns |
 | `TC-SR-30` | **Phase 8: Returnable Quantity Guard** | Verify return qty cannot exceed (sold qty − already returned qty) using original_invoice_item_id | Phase 8 Returns |
 | `TC-SR-31` | **Phase 8: Option E Paperless Return (Zero Print)** | Verify return completes in DB and drawer; ZERO paper receipt printed | Phase 8 Returns |
 | `TC-SR-32` | **Phase 8: Cash Refund Reduces Day Close** | Verify cash refund on special return subtracts from expected drawer cash | Phase 8 Returns |
@@ -558,18 +558,19 @@
 
 ---
 
-### TC-SR-29b: Store Credit Return Tender Guard (Phase 8)
+### TC-SR-29b: Credit-Sale Return with Server Khata Offset (Phase 8)
 - **Preconditions:**
-  - Special invoice INV-9003 for registered customer "Client A": 1x Item sold at Rs. 2,000.
+  - Special credit sale INV-9003 for registered customer "Client A" with `current_balance = 5,000`: 1x Item sold at Rs. 2,000 net, with Rs. 500 paid in cash and Rs. 1,500 due (`due_amount = 1,500`).
   - Cashier shift open with Rs. 5,000 in drawer.
 - **Test Steps:**
-  1. Process special return for INV-9003 selecting "Store Credit" tender (Rs. 2,000).
-  2. Inspect return invoice tender fields and `clients.current_balance`.
-  3. Inspect drawer cash in `salesMath.ts` Day Close report.
+  1. Process special return for INV-9003 for 1 unit (return net = Rs. 2,000).
+  2. Server calculates `khata_offset = LEAST(2000, 1500, 5000) = 1,500`. Cashier payout remainder = `2000 - 1500 = 500`.
+  3. Cashier disburses remainder of Rs. 500 in cash (`p_cash_refunded = 500, p_card_refunded = 0`).
+  4. Inspect return invoice tender fields, `clients.current_balance`, and drawer cash in `salesMath.ts`.
 - **Expected Results:**
-  - Return invoice tender: `payment_type = 'credit'`, `cash_paid = 0`, `card_paid = 0`, `others_paid = 0`, `paid_amount = 0`.
-  - `create_invoice_atomic` applies credit directly to customer balance: `clients.current_balance` reduces by Rs. 2,000 (crediting client).
-  - **Drawer Cash Protection:** Because `others_paid = 0`, `salesMath.ts` drawer cash calculation remains exactly Rs. 5,000. Zero phantom cash deduction occurs.
+  - Return invoice header: `net_total = 2,000`, `paid_amount = 500`, `cash_paid = 500`, `card_paid = 0`, `due_amount = 0`, `payment_type = 'cash'`.
+  - Client balance update: `clients.current_balance` reduces by `khata_offset` only (from 5,000 to 3,500; client debt is reduced by Rs. 1,500).
+  - **Drawer Cash Protection:** Drawer cash in `salesMath.ts` is deducted strictly by the cash paid out (`physicalCash -= cash_paid = 500`), resulting in Rs. 4,500. The non-cash debt offset portion (`khata_offset = 1,500`) causes zero phantom cash deduction.
 
 ---
 

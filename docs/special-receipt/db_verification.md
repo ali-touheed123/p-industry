@@ -1077,8 +1077,8 @@ We audited all API routes, database functions, and frontend components to identi
   END IF;
   ```
   `cancel_invoice_atomic` uses the identical flawed formula. If a card return had `cash_paid = 0`, cancelling it adds `v_store_credit` back to `clients.current_balance`!
-- **Resolution for Special Returns:**
-  `create_special_return_atomic` uses Option (a): it inserts the return invoice and items directly, bypassing `create_invoice_atomic`. It updates `clients.current_balance` **ONLY** when `payment_type = 'credit'` (store credit), guaranteeing that card refunds do not touch the client balance.
+- **Resolution for Special Returns (Owner Decision):**
+  `create_special_return_atomic` uses Option (a): it inserts the return invoice and items directly, bypassing `create_invoice_atomic`. It calculates server `khata_offset = LEAST(return_net, original.due_amount - SUM(prior offsets), clients.current_balance)` and reduces `clients.current_balance` by `khata_offset` only. Special returns are strictly cash, card, or cash+card (`mixed`); there is NO store credit or `'credit'` payment type. This guarantees card and cash refunds do not touch or corrupt customer balances.
 
 ---
 
@@ -1216,7 +1216,7 @@ Executed via `information_schema.columns` on `ignspvajzblmsbertmmv` on 2026-10-2
   END IF;
   ```
 - **Incompatibility with Mixed Returns:**
-  `cancel_invoice_atomic` has no awareness of `card_paid`. On a return with mixed tender (e.g. net 1,400, cash 500, card 500, store credit 400), `v_cash_ref` evaluates to 500. `v_store_credit` evaluates to `1400 - 500 = 900`. The function credits Rs. 900 to `clients.current_balance` instead of the original store credit Rs. 400, erroneously converting Rs. 500 of card refund into store credit and corrupting the client's ledger.
+  `cancel_invoice_atomic` has no awareness of `card_paid`. On a return with mixed tender (e.g. net 1,400, cash 500, card 500, khata offset 400), `v_cash_ref` evaluates to 500. `v_store_credit` evaluates to `1400 - 500 = 900`. The function credits Rs. 900 to `clients.current_balance` instead of the original offset Rs. 400, erroneously converting Rs. 500 of card refund into client credit and corrupting the client's ledger.
 - **Real API Cancellation Endpoints:**
   Verified in `src/app/api/invoices/route.ts`:
   - `PATCH /api/invoices` (lines 371–385): Handles cancellation when `status === 'cancelled'` or `body.action === 'cancel'`.
@@ -1239,7 +1239,7 @@ Executed via `information_schema.columns` on `ignspvajzblmsbertmmv` on 2026-10-2
     digitalPaid -= (invCard + invBank);
   });
   ```
-  *Result:* Compatible. `physicalCash -= cash_paid`, `digitalPaid -= card_paid`. Store credit portion is not deducted from cash drawer or digital totals.
+  *Result:* Compatible. `physicalCash -= cash_paid`, `digitalPaid -= card_paid`. Non-cash khata offset portion is not deducted from cash drawer or digital totals.
 - **`src/components/ShiftDrawer.tsx:234–241`:**
   ```tsx
   const cashReturns = returnInvoices.reduce((s, i) => {

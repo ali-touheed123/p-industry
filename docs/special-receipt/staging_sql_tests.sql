@@ -892,7 +892,6 @@ ROLLBACK;
 
 
 -- ============================================================================
--- TEST 10:
 -- TEST 10: Cancelled Invoice Reprint Rejection (A4 & D2)
 -- ============================================================================
 -- Tests:
@@ -2055,10 +2054,11 @@ ROLLBACK;
 
 
 -- ============================================================================
--- TEST 26: R2 & R1c — Cancel Return Asymmetry Demonstration (Real Runnable SQL)
+-- TEST 26: Formula Simulation of cancel_invoice_atomic Asymmetry (Does Not Call Live Function)
 -- ============================================================================
--- Demonstrates why cancel_invoice_atomic is incompatible with mixed returns
--- and proves why D5 (blocking cancellation of return invoices in API route) is essential.
+-- Note: This is a standalone formula simulation of live cancel_invoice_atomic lines 907-917 and does NOT call the live function directly.
+-- It mathematically proves why cancel_invoice_atomic is incompatible with card/mixed returns
+-- and proves why D5 (blocking cancellation of return invoices in BOTH PATCH and DELETE API routes) is mandatory.
 BEGIN;
 
 DO $$
@@ -2075,7 +2075,7 @@ BEGIN
   INSERT INTO tenants (id, name, slug, type) VALUES (v_tenant_id, 'Cancel Asym Branch', 'cancel-asym-branch', 'shop');
   INSERT INTO clients (id, tenant_id, name, current_balance) VALUES (v_client_id, v_tenant_id, 'Asym Client', v_bal_before);
 
-  -- Simulated return invoice with mixed tender: net 1400 (cash 500, card 500, store credit 400)
+  -- Simulated return invoice with mixed tender: net 1400 (cash 500, card 500, khata offset 400)
   INSERT INTO invoices (
     id, tenant_id, invoice_no, invoice_type, status, printed_as, client_id,
     payment_type, date, subtotal, discount, net_total, cash_paid, card_paid, paid_amount, due_amount
@@ -2099,8 +2099,8 @@ BEGIN
   SELECT current_balance INTO v_bal_after FROM clients WHERE id = v_client_id;
 
   -- Demonstration check:
-  -- Net was 1400, cash_ref was 500. v_store_credit evaluated to 900 (instead of original 400)!
-  -- Client balance jumped from 4600 to 5500 (extra 500 credited because card_paid was treated as store credit!).
+  -- Net was 1400, cash_ref was 500. v_store_credit evaluated to 900 (instead of original offset 400)!
+  -- Client balance jumped from 4600 to 5500 (extra 500 credited because card_paid was treated as store credit by the formula!).
   IF v_store_credit = 900 AND v_bal_after = 5500 THEN
     RAISE NOTICE 'TEST 26 PASSED (ASYMMETRY PROVEN): cancel_invoice_atomic treats card_paid as store_credit (% credited instead of 400). Proves D5 API block is mandatory.',
       v_store_credit;
@@ -2114,11 +2114,14 @@ ROLLBACK;
 
 
 -- ============================================================================
--- TEST 27: F9 — Return Line Discount Rejected
+-- TEST 27: F9 — Return on Original Invoice with Discount > 0 Rejected
 -- ============================================================================
+-- Tests:
+--  - F9 guard: If original invoice has invoices.discount > 0, return is rejected
+--    with an exception requiring manual review (due to ambiguous per-line allocation).
 BEGIN;
 
-DO $$
+DO $
 DECLARE
   v_tenant_id UUID := gen_random_uuid();
   v_user_id UUID := gen_random_uuid();
@@ -2131,30 +2134,30 @@ BEGIN
   INSERT INTO shifts (id, tenant_id, opened_by, status, start_time, opening_cash)
   VALUES (v_shift_id, v_tenant_id, v_user_id, 'open', NOW(), 10000);
 
+  -- Original special invoice has invoice-level discount = 100 (subtotal 1000, discount 100, net 900)
   INSERT INTO invoices (id, tenant_id, invoice_no, invoice_type, status, printed_as, date, subtotal, discount, net_total, paid_amount, due_amount)
-  VALUES (v_inv_id, v_tenant_id, 'DISC-INV-001', 'sales', 'completed', 'special', CURRENT_DATE, 1000, 0, 1000, 1000, 0);
+  VALUES (v_inv_id, v_tenant_id, 'DISC-INV-001', 'sales', 'completed', 'special', CURRENT_DATE, 1000, 100, 900, 900, 0);
 
   BEGIN
     PERFORM public.create_special_return_atomic(
       p_original_invoice_id => v_inv_id,
       p_items               => jsonb_build_array(jsonb_build_object(
         'original_item_id', gen_random_uuid(),
-        'qty', 1,
-        'discount', 50 -- Line discount forbidden on returns
+        'qty', 1
       )),
       p_user_id             => v_user_id,
       p_printed_by          => 'DiscRej Cashier',
       p_shift_id            => v_shift_id,
-      p_cash_refunded       => 950
+      p_cash_refunded       => 900
     );
-    RAISE EXCEPTION 'TEST 27 FAILED: Line discount on return was not rejected';
+    RAISE EXCEPTION 'TEST 27 FAILED: Return on discounted original invoice was not rejected';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM ILIKE '%cannot have line discounts%' THEN
-      RAISE NOTICE 'TEST 27 PASSED: Line discount on return rejected — %', SQLERRM;
+    IF SQLERRM ILIKE '%invoice-level discount%' THEN
+      RAISE NOTICE 'TEST 27 PASSED: Return on discounted original invoice rejected — %', SQLERRM;
     ELSE RAISE EXCEPTION 'TEST 27 FAILED: Unexpected error — %', SQLERRM; END IF;
   END;
 END;
-$$;
+$;
 
 ROLLBACK;
 
@@ -2298,7 +2301,7 @@ ROLLBACK;
 
 
 -- ============================================================================
--- TEST 27: Credit Sale Partial Paid + Return Within Due Amount
+-- TEST 30: Credit Sale Partial Paid + Return Within Due Amount
 -- ============================================================================
 -- Tests:
 --  - Sale Rs. 1000, paid 200, due 800. Client balance 3000.
@@ -2309,7 +2312,7 @@ ROLLBACK;
 --  - Client current_balance reduced from 3000 by 500 to 2500.
 BEGIN;
 
-DO $$
+DO $
 DECLARE
   v_tenant_id UUID := gen_random_uuid();
   v_user_id UUID := gen_random_uuid();
@@ -2360,32 +2363,32 @@ BEGIN
   );
 
   IF NOT (v_ret_res->>'success')::BOOLEAN THEN
-    RAISE EXCEPTION 'TEST 27 FAILED: Return failed';
+    RAISE EXCEPTION 'TEST 30 FAILED: Return failed';
   END IF;
 
   IF (v_ret_res->>'khata_offset')::NUMERIC <> 500 OR (v_ret_res->>'cashier_refund')::NUMERIC <> 0 THEN
-    RAISE EXCEPTION 'TEST 27 FAILED: khata_offset or cashier_refund mismatch';
+    RAISE EXCEPTION 'TEST 30 FAILED: khata_offset or cashier_refund mismatch';
   END IF;
 
   SELECT * INTO v_ret_inv FROM invoices WHERE id = (v_ret_res->>'return_invoice_id')::UUID;
   IF v_ret_inv.paid_amount <> 0 OR v_ret_inv.net_total <> 500 THEN
-    RAISE EXCEPTION 'TEST 27 FAILED: Return invoice header values incorrect';
+    RAISE EXCEPTION 'TEST 30 FAILED: Return invoice header values incorrect';
   END IF;
 
   SELECT current_balance INTO v_client_bal FROM clients WHERE id = v_client_id;
   IF v_client_bal <> 2500 THEN
-    RAISE EXCEPTION 'TEST 27 FAILED: Client balance not reduced by 500 (got %)', v_client_bal;
+    RAISE EXCEPTION 'TEST 30 FAILED: Client balance not reduced by 500 (got %)', v_client_bal;
   END IF;
 
-  RAISE NOTICE 'TEST 27 PASSED: Return within due amount correctly sets offset=500, payout=0, balance=2500';
+  RAISE NOTICE 'TEST 30 PASSED: Return within due amount correctly sets offset=500, payout=0, balance=2500';
 END;
-$$;
+$;
 
 ROLLBACK;
 
 
 -- ============================================================================
--- TEST 28: Prior Returns Reduce Available Offset for Subsequent Returns
+-- TEST 31: Prior Returns Reduce Available Offset for Subsequent Returns
 -- ============================================================================
 -- Tests:
 --  - Sale Rs. 1000, paid 200, due 800. Client balance 3000.
@@ -2398,7 +2401,7 @@ ROLLBACK;
 --    Client balance reduced by 300 (from 2500 to 2200).
 BEGIN;
 
-DO $$
+DO $
 DECLARE
   v_tenant_id UUID := gen_random_uuid();
   v_user_id UUID := gen_random_uuid();
@@ -2460,24 +2463,24 @@ BEGIN
   );
 
   IF (v_ret2_res->>'khata_offset')::NUMERIC <> 300 OR (v_ret2_res->>'cashier_refund')::NUMERIC <> 200 THEN
-    RAISE EXCEPTION 'TEST 28 FAILED: Return 2 offset or refund mismatch (got offset %, refund %)',
+    RAISE EXCEPTION 'TEST 31 FAILED: Return 2 offset or refund mismatch (got offset %, refund %)',
       (v_ret2_res->>'khata_offset'), (v_ret2_res->>'cashier_refund');
   END IF;
 
   SELECT current_balance INTO v_client_bal FROM clients WHERE id = v_client_id;
   IF v_client_bal <> 2200 THEN
-    RAISE EXCEPTION 'TEST 28 FAILED: Final balance mismatch (expected 2200, got %)', v_client_bal;
+    RAISE EXCEPTION 'TEST 31 FAILED: Final balance mismatch (expected 2200, got %)', v_client_bal;
   END IF;
 
-  RAISE NOTICE 'TEST 28 PASSED: Prior returns dynamically reduce available offset for subsequent returns';
+  RAISE NOTICE 'TEST 31 PASSED: Prior returns dynamically reduce available offset for subsequent returns';
 END;
-$$;
+$;
 
 ROLLBACK;
 
 
 -- ============================================================================
--- TEST 29: Client Already Cleared Dues (current_balance = 0) => Offset 0 and Full Cash Refund
+-- TEST 32: Client Already Cleared Dues (current_balance = 0) => Offset 0 and Full Cash Refund
 -- ============================================================================
 -- Tests:
 --  - Sale had due 500, but client subsequently paid off debt so current_balance = 0.
@@ -2487,7 +2490,7 @@ ROLLBACK;
 --  - Cashier refunds full 300 in cash. Client balance remains 0.
 BEGIN;
 
-DO $$
+DO $
 DECLARE
   v_tenant_id UUID := gen_random_uuid();
   v_user_id UUID := gen_random_uuid();
@@ -2538,23 +2541,23 @@ BEGIN
   );
 
   IF (v_ret_res->>'khata_offset')::NUMERIC <> 0 OR (v_ret_res->>'cashier_refund')::NUMERIC <> 300 THEN
-    RAISE EXCEPTION 'TEST 29 FAILED: Offset must be 0 and cashier refund must be 300';
+    RAISE EXCEPTION 'TEST 32 FAILED: Offset must be 0 and cashier refund must be 300';
   END IF;
 
   SELECT current_balance INTO v_client_bal FROM clients WHERE id = v_client_id;
   IF v_client_bal <> 0 THEN
-    RAISE EXCEPTION 'TEST 29 FAILED: Client balance must not go negative (got %)', v_client_bal;
+    RAISE EXCEPTION 'TEST 32 FAILED: Client balance must not go negative (got %)', v_client_bal;
   END IF;
 
-  RAISE NOTICE 'TEST 29 PASSED: Client with 0 balance gets full cash refund without balance going negative';
+  RAISE NOTICE 'TEST 32 PASSED: Client with 0 balance gets full cash refund without balance going negative';
 END;
-$$;
+$;
 
 ROLLBACK;
 
 
 -- ============================================================================
--- TEST 30: In-Request Duplicate Line Merge & Cents Rule Completion (R1a & R1f)
+-- TEST 33: In-Request Duplicate Line Merge & Cents Rule Completion (R1a & R1f)
 -- ============================================================================
 -- Tests:
 --  - Original sale: 3 units for total Rs. 1000.
@@ -2565,7 +2568,7 @@ ROLLBACK;
 --  - If request asks for 2 + 2 units (= 4 units), raises exception exceeding returnable qty.
 BEGIN;
 
-DO $$
+DO $
 DECLARE
   v_tenant_id UUID := gen_random_uuid();
   v_user_id UUID := gen_random_uuid();
@@ -2614,12 +2617,12 @@ BEGIN
       p_cash_refunded       => 1333.33,
       p_card_refunded       => 0
     );
-    RAISE EXCEPTION 'TEST 30 FAILED: Duplicate request exceeding returnable qty was not blocked';
+    RAISE EXCEPTION 'TEST 33 FAILED: Duplicate request exceeding returnable qty was not blocked';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM ILIKE '%exceed%' THEN
       NULL;
     ELSE
-      RAISE EXCEPTION 'TEST 30 FAILED: Unexpected error on exceeding duplicate qty: %', SQLERRM;
+      RAISE EXCEPTION 'TEST 33 FAILED: Unexpected error on exceeding duplicate qty: %', SQLERRM;
     END IF;
   END;
 
@@ -2638,11 +2641,11 @@ BEGIN
   );
 
   IF (v_ret_res->>'refund_total')::NUMERIC <> 1000 THEN
-    RAISE EXCEPTION 'TEST 30 FAILED: Expected refund_total 1000 exact, got %', (v_ret_res->>'refund_total');
+    RAISE EXCEPTION 'TEST 33 FAILED: Expected refund_total 1000 exact, got %', (v_ret_res->>'refund_total');
   END IF;
 
-  RAISE NOTICE 'TEST 30 PASSED: Duplicate items merge in Pre-Pass and Cents Rule refunds exact 1000.00';
+  RAISE NOTICE 'TEST 33 PASSED: Duplicate items merge in Pre-Pass and Cents Rule refunds exact 1000.00';
 END;
-$$;
+$;
 
 ROLLBACK;
