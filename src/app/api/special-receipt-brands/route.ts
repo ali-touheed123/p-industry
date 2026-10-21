@@ -2,11 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
 
-async function verifySpecialReceiptPermission(userId: string, tenantId: string) {
+async function verifySpecialReceiptPermission(session: any, tenantId: string) {
+  if (session.role === 'developer') {
+    return { authorized: true, user: { id: 'developer-super-admin', role: 'developer', can_use_special_receipt: true } };
+  }
+
+  if (session.role === 'ceo') {
+    return { authorized: true, user: { id: session.userId, role: 'ceo', can_use_special_receipt: true } };
+  }
+
   const { data: user, error } = await supabaseAdmin
     .from('app_users')
     .select('id, role, is_active, can_use_special_receipt, tenant_id')
-    .eq('id', userId)
+    .eq('id', session.userId)
     .maybeSingle();
 
   if (error || !user) {
@@ -39,7 +47,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    const perm = await verifySpecialReceiptPermission(auth.session.userId, tenantId);
+    const perm = await verifySpecialReceiptPermission(auth.session, tenantId);
     if (!perm.authorized) {
       return NextResponse.json({ success: false, error: perm.error }, { status: perm.status });
     }
@@ -75,7 +83,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    const perm = await verifySpecialReceiptPermission(auth.session.userId, tenant_id);
+    const perm = await verifySpecialReceiptPermission(auth.session, tenant_id);
     if (!perm.authorized) {
       return NextResponse.json({ success: false, error: perm.error }, { status: perm.status });
     }

@@ -621,14 +621,11 @@ export default function PosBilling({
   const totalPaid = cashPayment + cardPayment + bankPayment + othersPayment;
   const balanceDue = netTotal - totalPaid;
 
-  // TASK-SR-13: Dynamic Blink / Pulse Animation on Brand Match
+  // TASK-SR-24: Dynamic Blink / Pulse Animation while items in cart
   const shouldBlinkSpecial = useMemo(() => {
-    if (!canUseSpecialReceipt || specialBrandIds.size === 0 || lineItems.length === 0) return false;
-    return lineItems.some((ci) => {
-      const bId = ci.brand_id || ci.item?.brand_id;
-      return bId ? specialBrandIds.has(bId) : false;
-    });
-  }, [canUseSpecialReceipt, specialBrandIds, lineItems]);
+    if (!canUseSpecialReceipt || lineItems.length === 0) return false;
+    return true;
+  }, [canUseSpecialReceipt, lineItems.length]);
 
   // Auto-sync cash payment continuously whenever netTotal or other tenders change (if cash not manually locked)
   useEffect(() => {

@@ -26,28 +26,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    if (auth.session.role !== 'staff') {
+    let operatorName = 'Staff';
+    let effectiveUserId: string | null = null;
+
+    if (auth.session.role === 'developer') {
+      operatorName = 'Developer Super Admin';
+      effectiveUserId = null;
+    } else if (auth.session.role === 'staff') {
+      const { data: user, error: userErr } = await supabaseAdmin
+        .from('app_users')
+        .select('id, full_name, username, is_active, can_use_special_receipt, tenant_id')
+        .eq('id', auth.session.userId)
+        .maybeSingle();
+
+      if (userErr || !user?.is_active || !user.can_use_special_receipt || user.tenant_id !== tenant_id) {
+        return NextResponse.json(
+          { success: false, error: 'Access denied: Special Receipt permission required for this branch.' },
+          { status: 403 }
+        );
+      }
+      operatorName = user.full_name || user.username || 'Staff';
+      effectiveUserId = user.id;
+    } else {
       return NextResponse.json(
         { success: false, error: 'Access denied: Special returns are restricted to counter staff.' },
         { status: 403 }
       );
     }
-
-    // Fresh permission check
-    const { data: user, error: userErr } = await supabaseAdmin
-      .from('app_users')
-      .select('id, full_name, username, is_active, can_use_special_receipt, tenant_id')
-      .eq('id', auth.session.userId)
-      .maybeSingle();
-
-    if (userErr || !user?.is_active || !user.can_use_special_receipt || user.tenant_id !== tenant_id) {
-      return NextResponse.json(
-        { success: false, error: 'Access denied: Special Receipt permission required for this branch.' },
-        { status: 403 }
-      );
-    }
-
-    const operatorName = user.full_name || user.username || 'Staff';
 
     // Verify active shift
     let activeShiftId = shift_id;
@@ -79,7 +84,7 @@ export async function POST(req: NextRequest) {
     const { data: rpcRes, error: rpcErr } = await supabaseAdmin.rpc('create_special_return_atomic', {
       p_original_invoice_id: original_invoice_id,
       p_items: cleanItems,
-      p_user_id: user.id,
+      p_user_id: effectiveUserId,
       p_printed_by: operatorName,
       p_shift_id: activeShiftId,
       p_cash_refunded: Number(cash_refunded) || 0,

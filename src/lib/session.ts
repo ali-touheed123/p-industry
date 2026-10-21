@@ -83,7 +83,24 @@ export async function getSession(req: NextRequest): Promise<UserSession | null> 
   const devCookie = req.cookies.get(DEV_ADMIN_COOKIE)?.value;
   const authHeader = req.headers.get('authorization')?.replace('Bearer ', '');
 
-  // 1. Try developer admin token FIRST (cookie or Authorization header)
+  // 1. Try standard user session first (preserves active branch cashier / CEO sessions)
+  const primaryToken = userCookie || (authHeader && !devCookie ? authHeader : undefined);
+  if (primaryToken) {
+    try {
+      const { payload } = await jwtVerify(primaryToken, getJwtSecret());
+      const jti = (payload as any).jti || (payload as any).jti_claim;
+
+      if (jti && (await isSessionRevoked(jti))) {
+        return null;
+      }
+
+      return payload as unknown as UserSession;
+    } catch {
+      // Invalid user token, proceed to check dev token
+    }
+  }
+
+  // 2. Try developer admin token (cookie or Authorization header)
   const devToken = devCookie || authHeader;
   if (devToken) {
     try {
@@ -96,24 +113,7 @@ export async function getSession(req: NextRequest): Promise<UserSession | null> 
         };
       }
     } catch {
-      // Invalid dev token, proceed to check standard user session
-    }
-  }
-
-  // 2. Try standard user session
-  const primaryToken = userCookie || authHeader;
-  if (primaryToken) {
-    try {
-      const { payload } = await jwtVerify(primaryToken, getJwtSecret());
-      const jti = (payload as any).jti || (payload as any).jti_claim;
-
-      if (jti && (await isSessionRevoked(jti))) {
-        return null;
-      }
-
-      return payload as unknown as UserSession;
-    } catch {
-      // Invalid user token
+      // Invalid dev token
     }
   }
 

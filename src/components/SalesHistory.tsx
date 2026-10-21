@@ -192,7 +192,7 @@ export default function SalesHistory({
       }
 
       if (data.snapshot) {
-        const specialHtml = buildSpecialReceiptHtml(data.snapshot, data.template);
+        const specialHtml = buildSpecialReceiptHtml(data.snapshot, data.template, true);
         printViaIframe(specialHtml);
       }
     } catch (err: any) {

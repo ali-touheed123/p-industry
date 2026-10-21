@@ -17,35 +17,38 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    // D2 Mandate: Reprints are strictly allowed for counter staff with fresh permission.
-    // CEO and Developer roles are strictly blocked from triggering reprints.
-    if (auth.session.role !== 'staff') {
+    let printedBy = 'Staff';
+    let effectiveUserId: string | null = null;
+
+    if (auth.session.role === 'developer') {
+      printedBy = 'Developer Super Admin';
+      effectiveUserId = null;
+    } else if (auth.session.role === 'staff') {
+      const { data: user, error: userErr } = await supabaseAdmin
+        .from('app_users')
+        .select('id, full_name, username, is_active, can_use_special_receipt, tenant_id')
+        .eq('id', auth.session.userId)
+        .maybeSingle();
+
+      if (userErr || !user?.is_active || !user.can_use_special_receipt || user.tenant_id !== tenant_id) {
+        return NextResponse.json(
+          { success: false, error: 'Access denied: Special Receipt permission required for this branch.' },
+          { status: 403 }
+        );
+      }
+      printedBy = user.full_name || user.username || 'Staff';
+      effectiveUserId = user.id;
+    } else {
       return NextResponse.json(
         { success: false, error: 'Access denied: Only counter staff are authorized to reprint receipts.' },
         { status: 403 }
       );
     }
 
-    // Fresh DB check
-    const { data: user, error: userErr } = await supabaseAdmin
-      .from('app_users')
-      .select('id, full_name, username, is_active, can_use_special_receipt, tenant_id')
-      .eq('id', auth.session.userId)
-      .maybeSingle();
-
-    if (userErr || !user?.is_active || !user.can_use_special_receipt || user.tenant_id !== tenant_id) {
-      return NextResponse.json(
-        { success: false, error: 'Access denied: Special Receipt permission required for this branch.' },
-        { status: 403 }
-      );
-    }
-
-    const printedBy = user.full_name || user.username || 'Staff';
-
     // Call atomic RPC
     const { data: rpcRes, error: rpcErr } = await supabaseAdmin.rpc('log_special_reprint_atomic', {
       p_invoice_id: invoice_id,
-      p_user_id: user.id,
+      p_user_id: effectiveUserId,
       p_printed_by: printedBy,
     });
 

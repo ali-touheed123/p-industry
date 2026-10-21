@@ -42,29 +42,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    // Role check: Only staff can checkout special sales (CEO/Developer rejected)
-    if (auth.session.role !== 'staff') {
+    // 2. Role & Database Permission Verification
+    let printedBy = 'Staff';
+    let effectiveUserId: string | null = null;
+
+    if (auth.session.role === 'developer') {
+      printedBy = 'Developer Super Admin';
+      effectiveUserId = null;
+    } else if (auth.session.role === 'staff') {
+      const { data: user, error: userErr } = await supabaseAdmin
+        .from('app_users')
+        .select('id, username, full_name, role, is_active, can_use_special_receipt, tenant_id')
+        .eq('id', auth.session.userId)
+        .maybeSingle();
+
+      if (userErr || !user?.is_active || !user.can_use_special_receipt || user.tenant_id !== tenant_id) {
+        return NextResponse.json(
+          { success: false, error: 'Access denied: Special Receipt permission required for this branch.' },
+          { status: 403 }
+        );
+      }
+      printedBy = user.full_name || user.username || 'Staff';
+      effectiveUserId = user.id;
+    } else {
       return NextResponse.json(
         { success: false, error: 'Access denied: Special sale checkout is restricted to counter staff.' },
         { status: 403 }
       );
     }
-
-    // 2. Fresh Database Permission Verification
-    const { data: user, error: userErr } = await supabaseAdmin
-      .from('app_users')
-      .select('id, username, full_name, role, is_active, can_use_special_receipt, tenant_id')
-      .eq('id', auth.session.userId)
-      .maybeSingle();
-
-    if (userErr || !user?.is_active || !user.can_use_special_receipt || user.tenant_id !== tenant_id) {
-      return NextResponse.json(
-        { success: false, error: 'Access denied: Special Receipt permission required for this branch.' },
-        { status: 403 }
-      );
-    }
-
-    const printedBy = user.full_name || user.username || 'Staff';
 
     // 3. Active Shift Validation (Must belong to tenant & be open)
     let activeShiftId = shift_id;
@@ -241,7 +246,7 @@ export async function POST(req: NextRequest) {
       p_items: cleanItems,
       p_receipt_snap: receiptSnap,
       p_printed_by: printedBy,
-      p_user_id: user.id,
+      p_user_id: effectiveUserId,
       p_tokens: tokens || [],
     });
 

@@ -75,12 +75,18 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const enrichedLogs = (logs || []).map((log: any) => ({
-      ...log,
-      invoice_status: statusMap.get(log.invoice_id) || 'completed',
+    const enrichedLogs = (logs || []).map((l: any) => ({
+      ...l,
+      invoice_status: l.invoice_id ? (statusMap.get(l.invoice_id) ?? 'unknown') : null,
     }));
 
-    return NextResponse.json({ success: true, logs: enrichedLogs });
+    const invoiceStatusParam = searchParams.get('invoice_status');
+    let finalLogs = enrichedLogs;
+    if (invoiceStatusParam && invoiceStatusParam !== 'all') {
+      finalLogs = enrichedLogs.filter((l: any) => l.invoice_status === invoiceStatusParam);
+    }
+
+    return NextResponse.json({ success: true, logs: finalLogs });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

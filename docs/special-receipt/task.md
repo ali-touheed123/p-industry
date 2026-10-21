@@ -538,3 +538,38 @@
 - **Description:** Enforce strict key whitelist in `v_enriched_items` (do NOT merge raw `v_item`) and top-level snapshot fields to prevent JSON payload injection.
 - **Files Touched:** `supabase/migrations/20261021_01_special_receipt_system.sql`
 - **Risk Level:** Low.
+
+---
+
+## Phase 8: Post-Audit Refinements & User Experience Fixes
+
+### `TASK-SR-21` [REQUIRES USER APPROVAL] — Special Receipt Template Studio Full Control Overhaul
+- **Description:** Replace 5-field basic form in `src/components/SpecialReceiptSettings.tsx` with complete 7-tab Receipt Designer (Paper & Layout Margins/Scale/Fonts, Header text & sizes, Separator styles, Alignment, Meta Fields & Labels, Table Columns & Borders, Totals Styling, Footers & QR, Live Thermal Preview).
+- **Files Touched:** `src/components/SpecialReceiptSettings.tsx`
+- **Risk Level:** Low.
+
+### `TASK-SR-22` [REQUIRES USER APPROVAL] — Brand Triggers Save & Session Permission Hardening
+- **Description:** Fix `verifySpecialReceiptPermission` in `src/app/api/special-receipt-brands/route.ts` and `src/app/api/special-receipt-templates/route.ts`. Authorize branch CEO and developer testing sessions without failing with 'User account not found' or 403.
+- **Files Touched:** `src/app/api/special-receipt-brands/route.ts`, `src/app/api/special-receipt-templates/route.ts`
+- **Risk Level:** Low.
+
+### `TASK-SR-23` [REQUIRES USER APPROVAL] — POS Special Checkout Authorization & Cookie Collision Defense
+- **Description:** In `src/app/api/invoices/special/route.ts`, `src/app/api/invoices/special-return/route.ts`, and `src/lib/session.ts`, allow authorized counter staff with `can_use_special_receipt: true` without getting hijacked by idle developer admin cookies.
+- **Files Touched:** `src/app/api/invoices/special/route.ts`, `src/app/api/invoices/special-return/route.ts`, `src/lib/session.ts`
+- **Risk Level:** Medium.
+
+### `TASK-SR-24` [REQUIRES USER APPROVAL] — Persistent Blinking Special Save & Print Button
+- **Description:** Ensure Special Save & Print (F6) button in `src/components/PosBilling.tsx` continuously pulses/blinks whenever items are in cart (`cart.length > 0`). Upgrade `@keyframes specialPulse` in `src/app/globals.css` with a high-visibility purple breathing glow.
+- **Files Touched:** `src/components/PosBilling.tsx`, `src/app/globals.css`
+- **Risk Level:** Low.
+
+### `TASK-SR-25` [REQUIRES USER APPROVAL] — CEO Special Print Log Invoice Status Link
+- **Description:** In `src/app/api/special-print-log/route.ts` and `src/components/ceo-panel/SpecialPrintLogView.tsx`, join `invoices(status)` to accurately badge cancelled special sales in red and exclude them from total billed metrics.
+- **Files Touched:** `src/app/api/special-print-log/route.ts`, `src/components/ceo-panel/SpecialPrintLogView.tsx`
+- **Risk Level:** Low.
+
+### `TASK-SR-26` [REQUIRES USER APPROVAL] — Special Receipt Reprint Duplicate Flag
+- **Description:** Pass `isReprint = true` in `src/components/SalesHistory.tsx` when calling `buildSpecialReceiptHtml`.
+- **Files Touched:** `src/components/SalesHistory.tsx`
+- **Risk Level:** Low.
+
