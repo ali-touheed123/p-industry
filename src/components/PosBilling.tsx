@@ -203,15 +203,22 @@ export default function PosBilling({
         const res = await fetch(`/api/special-receipt-brands?tenant_id=${tenantId}`);
         const data = await res.json();
         if (isMounted && data.success && Array.isArray(data.brand_ids)) {
-          setSpecialBrandIds(new Set(data.brand_ids));
+          setSpecialBrandIds(new Set(data.brand_ids.map((id: string) => String(id).trim().toLowerCase())));
         }
       } catch (err) {
         console.error('Failed to load special brands:', err);
       }
     };
     loadSpecialBrands();
+
+    const handleFocus = () => {
+      loadSpecialBrands();
+    };
+    window.addEventListener('focus', handleFocus);
+
     return () => {
       isMounted = false;
+      window.removeEventListener('focus', handleFocus);
     };
   }, [tenantId, canUseSpecialReceipt]);
 
@@ -621,11 +628,18 @@ export default function PosBilling({
   const totalPaid = cashPayment + cardPayment + bankPayment + othersPayment;
   const balanceDue = netTotal - totalPaid;
 
-  // TASK-SR-24: Dynamic Blink / Pulse Animation while items in cart
+  // TASK-SR-13: Dynamic Blink / Pulse Animation on Brand Match (only pulses when cart contains items from configured brands)
   const shouldBlinkSpecial = useMemo(() => {
-    if (!canUseSpecialReceipt || lineItems.length === 0) return false;
-    return true;
-  }, [canUseSpecialReceipt, lineItems.length]);
+    if (!canUseSpecialReceipt || lineItems.length === 0 || specialBrandIds.size === 0) {
+      return false;
+    }
+
+    return lineItems.some((li) => {
+      const bId = li.brand_id || li.item?.brand_id;
+      if (!bId) return false;
+      return specialBrandIds.has(String(bId).trim().toLowerCase());
+    });
+  }, [canUseSpecialReceipt, lineItems, specialBrandIds]);
 
   // Auto-sync cash payment continuously whenever netTotal or other tenders change (if cash not manually locked)
   useEffect(() => {
