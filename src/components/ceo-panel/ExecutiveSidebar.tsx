@@ -14,12 +14,13 @@ import {
   Truck,
   Coins,
   ShieldCheck,
+  ScrollText,
   ArrowLeft,
   ChevronRight,
   ChevronLeft,
 } from 'lucide-react';
 
-export type CEOSection = 'overview' | 'sales' | 'returns' | 'day-close' | 'customers' | 'purchase' | 'tokens' | 'branch-orders' | 'audit-logs' | 'settings';
+export type CEOSection = 'overview' | 'sales' | 'returns' | 'day-close' | 'customers' | 'purchase' | 'tokens' | 'branch-orders' | 'audit-logs' | 'special-print-log' | 'settings';
 
 interface ExecutiveSidebarProps {
   currentSection: CEOSection;
@@ -33,16 +34,17 @@ interface ExecutiveSidebarProps {
 }
 
 const NAV_ITEMS: { id: CEOSection; label: string; icon: React.ComponentType<{ style?: React.CSSProperties }> }[] = [
-  { id: 'overview',      label: 'Overview & P&L',         icon: LayoutDashboard },
-  { id: 'sales',         label: 'Sales Register',          icon: TrendingUp },
-  { id: 'returns',       label: 'Returns & Tinting Loss',  icon: RotateCcw },
-  { id: 'day-close',     label: 'Day Close & Variance',    icon: CalendarCheck },
-  { id: 'customers',     label: 'Customers & Udhaar',      icon: Users },
-  { id: 'purchase',      label: 'Procurement & POs',       icon: ShoppingBag },
-  { id: 'tokens',        label: 'Token Stockpile',         icon: Coins },
-  { id: 'branch-orders', label: 'Branch Transfers',        icon: Truck },
-  { id: 'audit-logs',    label: 'Audit & Activity Log',    icon: ShieldCheck },
-  { id: 'settings',      label: 'Branch & Commission',     icon: Settings },
+  { id: 'overview',          label: 'Overview & P&L',         icon: LayoutDashboard },
+  { id: 'sales',             label: 'Sales Register',          icon: TrendingUp },
+  { id: 'returns',           label: 'Returns & Tinting Loss',  icon: RotateCcw },
+  { id: 'day-close',         label: 'Day Close & Variance',    icon: CalendarCheck },
+  { id: 'customers',         label: 'Customers & Udhaar',      icon: Users },
+  { id: 'purchase',          label: 'Procurement & POs',       icon: ShoppingBag },
+  { id: 'tokens',            label: 'Token Stockpile',         icon: Coins },
+  { id: 'branch-orders',     label: 'Branch Transfers',        icon: Truck },
+  { id: 'audit-logs',        label: 'Audit & Activity Log',    icon: ShieldCheck },
+  { id: 'special-print-log', label: 'Special Receipt Log',     icon: ScrollText },
+  { id: 'settings',          label: 'Branch & Commission',     icon: Settings },
 ];
 
 const SidebarContent: React.FC<ExecutiveSidebarProps & { onCloseIfMobile?: () => void }> = ({

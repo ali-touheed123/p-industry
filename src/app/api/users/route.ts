@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
 
     let query = supabaseAdmin
       .from('app_users')
-      .select('id, username, full_name, email, role, tenant_id, is_active, created_at, tenants(name, slug, type)')
+      .select('id, username, full_name, email, role, tenant_id, is_active, can_use_special_receipt, created_at, tenants(name, slug, type)')
       .order('created_at', { ascending: false });
 
     if (tenantId) {
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { username, password, full_name, role, tenant_id, email } = body;
+    const { username, password, full_name, role, tenant_id, email, can_use_special_receipt } = body;
 
     if (!username || !password || !role) {
       return NextResponse.json({ success: false, error: 'Username, password and role are required' }, { status: 400 });
@@ -67,8 +67,9 @@ export async function POST(req: NextRequest) {
         role,
         tenant_id: tenant_id || null,
         is_active: true,
+        can_use_special_receipt: Boolean(can_use_special_receipt),
       })
-      .select('id, username, full_name, email, role, tenant_id, is_active, created_at')
+      .select('id, username, full_name, email, role, tenant_id, is_active, can_use_special_receipt, created_at')
       .single();
 
     if (error) {
@@ -77,8 +78,6 @@ export async function POST(req: NextRequest) {
       }
       throw error;
     }
-
-
 
     return NextResponse.json({ success: true, user: newUser });
   } catch (error: any) {
@@ -95,7 +94,7 @@ export async function PUT(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { id, username, password, full_name, role, tenant_id, email, is_active } = body;
+    const { id, username, password, full_name, role, tenant_id, email, is_active, can_use_special_receipt } = body;
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'User ID is required' }, { status: 400 });
@@ -122,6 +121,7 @@ export async function PUT(req: NextRequest) {
     if (tenant_id !== undefined) updatePayload.tenant_id = tenant_id || null;
     if (email !== undefined) updatePayload.email = email || null;
     if (is_active !== undefined) updatePayload.is_active = is_active;
+    if (can_use_special_receipt !== undefined) updatePayload.can_use_special_receipt = Boolean(can_use_special_receipt);
 
     if (password && String(password).trim()) {
       updatePayload.password_hash = await hashPassword(String(password).trim());
@@ -131,7 +131,7 @@ export async function PUT(req: NextRequest) {
       .from('app_users')
       .update(updatePayload)
       .eq('id', id)
-      .select('id, username, full_name, email, role, tenant_id, is_active, created_at')
+      .select('id, username, full_name, email, role, tenant_id, is_active, can_use_special_receipt, created_at')
       .single();
 
     if (error) {

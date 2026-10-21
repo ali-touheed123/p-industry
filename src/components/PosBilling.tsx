@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { printViaIframe } from '@/utils/iframePrint';
 import { buildPosThermalHtml } from '@/utils/receiptAdapters';
 import { ReceiptTemplate } from '@/types/receipt';
@@ -26,6 +26,7 @@ import {
   Coins,
 } from 'lucide-react';
 import TokenRedemption from './TokenRedemption';
+import SpecialPrintModal from './SpecialPrintModal';
 
 interface Props {
   items: Item[];
@@ -34,6 +35,7 @@ interface Props {
   onCompleteSale: (invoice: any) => void;
   staffName: string;
   tenantName?: string;
+  canUseSpecialReceipt?: boolean;
   restoringHeldOrder?: any;
   onClearRestoringHeldOrder?: () => void;
   editingInvoice?: any;
@@ -100,6 +102,7 @@ const SHORTCUTS = [
   { key: 'F3', label: 'Search' },
   { key: 'F4', label: 'Add Item' },
   { key: 'F5', label: 'Save & Print' },
+  { key: 'F6', label: 'Special' },
   { key: 'F7', label: 'Hold' },
   { key: 'F8', label: 'Hold List' },
   { key: 'F9', label: 'Cancel' },
@@ -113,6 +116,7 @@ export default function PosBilling({
   onCompleteSale,
   staffName,
   tenantName = 'PyntFlow Store',
+  canUseSpecialReceipt = false,
   restoringHeldOrder,
   onClearRestoringHeldOrder,
   editingInvoice,
@@ -187,6 +191,29 @@ export default function PosBilling({
   const [notification, setNotification] = useState<string | null>(null);
   const [printReceiptData, setPrintReceiptData] = useState<any | null>(null);
   const [showTokenRedemptionModal, setShowTokenRedemptionModal] = useState<boolean>(false);
+  const [showSpecialModal, setShowSpecialModal] = useState<boolean>(false);
+  const [specialBrandIds, setSpecialBrandIds] = useState<Set<string>>(new Set());
+
+  // Load Special Receipt Brands lookup (TASK-SR-11)
+  useEffect(() => {
+    if (!tenantId || !canUseSpecialReceipt) return;
+    let isMounted = true;
+    const loadSpecialBrands = async () => {
+      try {
+        const res = await fetch(`/api/special-receipt-brands?tenant_id=${tenantId}`);
+        const data = await res.json();
+        if (isMounted && data.success && Array.isArray(data.brand_ids)) {
+          setSpecialBrandIds(new Set(data.brand_ids));
+        }
+      } catch (err) {
+        console.error('Failed to load special brands:', err);
+      }
+    };
+    loadSpecialBrands();
+    return () => {
+      isMounted = false;
+    };
+  }, [tenantId, canUseSpecialReceipt]);
 
   // Assigned receipt template for this branch (DEV-07)
   const [assignedTemplate, setAssignedTemplate] = useState<ReceiptTemplate | null>(null);
@@ -593,6 +620,15 @@ export default function PosBilling({
   const netTotal = Math.max(0, itemSubtotal - invoiceDiscount + deliveryCharge);
   const totalPaid = cashPayment + cardPayment + bankPayment + othersPayment;
   const balanceDue = netTotal - totalPaid;
+
+  // TASK-SR-13: Dynamic Blink / Pulse Animation on Brand Match
+  const shouldBlinkSpecial = useMemo(() => {
+    if (!canUseSpecialReceipt || specialBrandIds.size === 0 || lineItems.length === 0) return false;
+    return lineItems.some((ci) => {
+      const bId = ci.brand_id || ci.item?.brand_id;
+      return bId ? specialBrandIds.has(bId) : false;
+    });
+  }, [canUseSpecialReceipt, specialBrandIds, lineItems]);
 
   // Auto-sync cash payment continuously whenever netTotal or other tenders change (if cash not manually locked)
   useEffect(() => {
@@ -1120,7 +1156,7 @@ export default function PosBilling({
     );
   });
 
-  // Keyboard Shortcuts Listener ([F2], [F3], [F4], [F5], [F7], [F8], [F9], [Escape])
+  // Keyboard Shortcuts Listener ([F2], [F3], [F4], [F5], [F6], [F7], [F8], [F9], [Escape])
   // FIX FINDING-POS-002: Store latest state and handlers in mutable ref to attach listener once on mount
   const hotkeysStateRef = useRef({
     handleCheckout,
@@ -1129,6 +1165,9 @@ export default function PosBilling({
     handleCancelInvoice,
     selectedProduct,
     filteredCatalog,
+    canUseSpecialReceipt,
+    lineItems,
+    setShowSpecialModal,
   });
 
   useEffect(() => {
@@ -1139,6 +1178,9 @@ export default function PosBilling({
       handleCancelInvoice,
       selectedProduct,
       filteredCatalog,
+      canUseSpecialReceipt,
+      lineItems,
+      setShowSpecialModal,
     };
   });
 
@@ -1148,6 +1190,11 @@ export default function PosBilling({
       if (e.key === 'F5') {
         e.preventDefault();
         state.handleCheckout(true);
+      } else if (e.key === 'F6') {
+        e.preventDefault();
+        if (state.canUseSpecialReceipt && state.lineItems.length > 0) {
+          state.setShowSpecialModal(true);
+        }
       } else if (e.key === 'F2') {
         e.preventDefault();
         state.handleCheckout(false);
@@ -1174,6 +1221,7 @@ export default function PosBilling({
         setShowCustomerModal(false);
         setShowHeldModal(false);
         setShowProductDropdown(false);
+        setShowSpecialModal(false);
         setPrintReceiptData(null);
       }
     };
@@ -2063,6 +2111,20 @@ export default function PosBilling({
 
           {/* 3. Bottom Stacked Action Buttons (Save & Print / Save / Hold / Cancel) */}
           <div style={{ paddingTop: '8px', borderTop: '1px solid #E2E8F0', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {/* TASK-SR-12: Special Save & Print Button (Directly ABOVE regular Save & Print) */}
+            {canUseSpecialReceipt && (
+              <button
+                type="button"
+                disabled={submitting || lineItems.length === 0}
+                onClick={() => setShowSpecialModal(true)}
+                className={`pos-btn-special ${shouldBlinkSpecial ? 'pos-btn-special-blink' : ''}`}
+                title="Special Non-Branded Receipt (Option A Content Rule)"
+              >
+                <Printer style={{ width: 16, height: 16 }} />
+                Special Save &amp; Print (F6)
+              </button>
+            )}
+
             {/* Primary Save & Print */}
             <button
               type="button"
@@ -2645,6 +2707,35 @@ export default function PosBilling({
           }
         }}
       />
+
+      {/* ── Special Print Pre-Print Editor Modal (TASK-SR-15 & TASK-SR-16) ── */}
+      {canUseSpecialReceipt && (
+        <SpecialPrintModal
+          isOpen={showSpecialModal}
+          onClose={() => setShowSpecialModal(false)}
+          tenantId={tenantId}
+          shiftId={shiftId}
+          cartItems={lineItems}
+          selectedClient={selectedClient}
+          customerName={selectedClient ? selectedClient.name : customerSearch}
+          initialDeliveryCharge={deliveryCharge}
+          staffName={staffName}
+          onSuccess={(savedInvoice) => {
+            onCompleteSale(savedInvoice);
+            setLineItems([]);
+            setRemarks('');
+            setInvoiceDiscount(0);
+            setDeliveryCharge(0);
+            setCashPayment(0);
+            setCardPayment(0);
+            setBankPayment(0);
+            setOthersPayment(0);
+            setIsCashManuallyEdited(false);
+            setInvoiceNo(`INV-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`);
+            showFeedback(`Special Invoice #${savedInvoice.invoice_no || ''} completed and printed.`);
+          }}
+        />
+      )}
     </section>
   );
 }

@@ -248,7 +248,25 @@ export const DevUsersView: React.FC<DevUsersViewProps> = ({
 
                     {/* Role Pill */}
                     <td>
-                      {getRolePill(user.role)}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        {getRolePill(user.role)}
+                        {user.role === 'staff' && user.can_use_special_receipt && (
+                          <span
+                            style={{
+                              padding: '2px 8px',
+                              borderRadius: '9999px',
+                              fontSize: '10px',
+                              fontFamily: "'JetBrains Mono', monospace",
+                              fontWeight: 700,
+                              backgroundColor: 'rgba(124, 58, 237, 0.2)',
+                              color: '#c4b5fd',
+                              border: '1px solid rgba(124, 58, 237, 0.4)',
+                            }}
+                          >
+                            SPECIAL RECEIPT
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* Assigned Branch */}

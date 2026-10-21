@@ -766,6 +766,7 @@ export default function TenantAppPage({ params }: PageProps) {
               shiftId={activeShift?.id}
               tenantName={tenant.name}
               staffName={currentUser?.full_name || 'Staff'}
+              canUseSpecialReceipt={Boolean(currentUser?.can_use_special_receipt)}
               restoringHeldOrder={restoringHeldOrder}
               onClearRestoringHeldOrder={() => setRestoringHeldOrder(null)}
               editingInvoice={editingInvoice}
@@ -813,6 +814,7 @@ export default function TenantAppPage({ params }: PageProps) {
               tenantPhone={tenant.phone}
               tenantAddress={tenant.address}
               staffName={currentUser?.full_name || currentUser?.username || 'Staff'}
+              canUseSpecialReceipt={Boolean(currentUser?.can_use_special_receipt)}
             />
           )}
           {(activeTab === 'credit_recovery' || activeTab === 'credit') && (

@@ -16,6 +16,7 @@ export interface UserSession {
   role: 'developer' | 'ceo' | 'staff' | 'godown_staff';
   tenantId?: string;
   tenantSlug?: string;
+  canUseSpecialReceipt?: boolean;
   ceoTenants?: Array<{ id: string; slug: string; name?: string }>;
   jti?: string;
 }
@@ -123,7 +124,14 @@ export async function getSession(req: NextRequest): Promise<UserSession | null> 
  * Helper to enforce tenant authorization on API routes.
  * Ensures the caller is authenticated and either a developer or belongs to the target tenant.
  */
-export async function requireTenantAuth(req: NextRequest, targetTenantId?: string | null) {
+export type AuthResult =
+  | { authorized: true; session: UserSession; error?: string; status?: number }
+  | { authorized: false; error: string; status: number; session: UserSession | null };
+
+export async function requireTenantAuth(
+  req: NextRequest,
+  targetTenantId?: string | null
+): Promise<AuthResult> {
   const session = await getSession(req);
 
   if (!session) {
@@ -196,7 +204,7 @@ export async function requireTenantAuth(req: NextRequest, targetTenantId?: strin
 /**
  * Helper to enforce developer-only authorization.
  */
-export async function requireDevAuth(req: NextRequest) {
+export async function requireDevAuth(req: NextRequest): Promise<AuthResult> {
   const session = await getSession(req);
 
   if (session && session.role === 'developer') {

@@ -9,6 +9,7 @@
 
 import {
   DEFAULT_TEMPLATE_JSON,
+  BLANK_SPECIAL_TEMPLATE_JSON,
   PAPER_SIZE_CONFIG,
 } from '@/types/receipt';
 import type {
@@ -216,9 +217,10 @@ export function buildReceiptPageCss(layout: LayoutConfig, paperSize: PaperSize):
  */
 export function normalizeTemplate(
   rawTemplate: unknown,
-  paperSize?: unknown
+  paperSize?: unknown,
+  fallbackTemplate?: TemplateJson
 ): NormalizedReceiptTemplate {
-  const d = DEFAULT_TEMPLATE_JSON;
+  const d = fallbackTemplate ?? DEFAULT_TEMPLATE_JSON;
   const rawObj = (typeof rawTemplate === 'object' && rawTemplate !== null)
     ? (rawTemplate as Record<string, any>)
     : {};
@@ -395,6 +397,17 @@ export function normalizeTemplate(
   };
 }
 
+/**
+  * Deeply normalizes a special receipt template ensuring blank-canvas defaults.
+  * Guarantees zero identity leaks (no logo, no shop name, no address, no phone, no token slip).
+  */
+export function normalizeSpecialTemplate(
+  rawTemplate: unknown,
+  paperSize?: unknown
+): NormalizedReceiptTemplate {
+  return normalizeTemplate(rawTemplate, paperSize, BLANK_SPECIAL_TEMPLATE_JSON);
+}
+
 // ─── Document HTML Wrapper ───────────────────────────────────────────────────
 
 /**
@@ -501,6 +514,8 @@ export interface RenderReceiptData {
   paymentSplits?: RenderReceiptPaymentSplit;
   tokenClaimCode?: string;
   tokenClaimDetails?: string;
+  headerNote?: string;
+  footerNote?: string;
   isReprint?: boolean;
 }
 
@@ -633,9 +648,9 @@ ${returnBannerHtml}`.trim();
     const shadePart = it.shadeCode ? `Shade: ${escapeHtml(it.shadeCode)} &middot; ` : '';
     const subLine = `${codePart}${shadePart}${it.qty} x ${escapeHtml(cur)} ${fmt(it.rate)}`;
 
-    const tokenNoteHtml = it.tokenNote
-      ? `<div style="font-size:9px;color:#000;font-style:italic;margin-top:1px">${escapeHtml(it.tokenNote)}</div>`
-      : '';
+    // Global Token Print Suppression (Owner Decision 1 & C6):
+    // Tokens and token notes are never printed on physical receipts.
+    const tokenNoteHtml = '';
 
     // Reconcile item-table column percentages for all four supported combinations (Workstream G):
     // Case 1: Name 56%, Qty 9%, Rate 16%, Amount 19% (sum = 100%)
@@ -887,21 +902,9 @@ ${returnBannerHtml}`.trim();
   const footerSection = footerLines.join('\n');
 
   // 6. Token Claim Slip Block (MANDATORY SAFETY RULES ENFORCED)
-  // Condition 1: Must have a genuine non-empty claim code.
-  // Condition 2: tokenClaimSlip.enabled must NOT be false.
-  const hasValidClaimCode = typeof data.tokenClaimCode === 'string' && data.tokenClaimCode.trim().length > 0;
-  const isSlipEnabled = tokenClaimSlip.enabled !== false;
-  const showTokenClaimSlip = hasValidClaimCode && isSlipEnabled;
-
-  const tokenClaimSlipSection = showTokenClaimSlip
-    ? `<div style="border:1px dashed #000;padding:8px;margin-top:10px;text-align:center;break-inside:avoid;page-break-inside:avoid;color:#000">
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;color:#000">&#127915; ${escapeHtml(tokenClaimSlip.title || 'Token Claim Slip')}</div>
-        <div style="font-size:9px;color:#000;margin-bottom:6px">${escapeHtml(tokenClaimSlip.instructions || 'Present this code on your next visit to redeem your token')}</div>
-        <div style="font-size:14px;font-weight:900;letter-spacing:0.1em;border:1px solid #000;padding:4px 8px;display:inline-block;margin:4px 0;color:#000">${escapeHtml(data.tokenClaimCode)}</div>
-        ${tokenClaimSlip.showDetails && data.tokenClaimDetails ? `<div style="font-size:9px;color:#000;margin-top:4px">${escapeHtml(data.tokenClaimDetails)}</div>` : ''}
-        <div style="font-size:8px;color:#000;margin-top:4px">${escapeHtml(tokenClaimSlip.footerNotice || 'Keep this receipt — code cannot be reissued')}</div>
-       </div>`
-    : '';
+  // Global Token Print Suppression (Owner Decision 1 & C6):
+  // Token claim slips are suppressed globally across ALL receipt types (regular, special, reprint).
+  const tokenClaimSlipSection = '';
 
   return `
 ${headerSection}

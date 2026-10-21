@@ -1,4 +1,4 @@
-import { renderReceiptDocument } from '@/utils/receiptRenderCore';
+import { renderReceiptDocument, normalizeSpecialTemplate } from '@/utils/receiptRenderCore';
 import type { RenderReceiptData, RenderReceiptItem } from '@/utils/receiptRenderCore';
 import type { ReceiptTemplate } from '@/types/receipt';
 
@@ -24,11 +24,8 @@ export function buildPosThermalHtml(
       (Number(data.card_paid || 0) > 0 || Number(data.bank_paid || 0) > 0 || Number(data.others_paid || 0) > 0));
 
   const items: RenderReceiptItem[] = (data.items || []).map((item: any) => {
-    const isRemoved = item.tokenAction === 'remove';
-    const hasToken = Boolean(item.hasToken && (item.tokenValue || 0) > 0);
-    const tokenNote = hasToken && isRemoved
-      ? `Token removed — Rs. ${Number(item.tokenValue * item.qty).toLocaleString()} deducted`
-      : undefined;
+    // Global Token Print Suppression (Owner Decision 1 & C6)
+    const tokenNote = undefined;
 
     return {
       name: item.productName || item.item_name || '—',
@@ -70,8 +67,8 @@ export function buildPosThermalHtml(
       bank: Number(data.bank_paid || 0),
       others: Number(data.others_paid || 0),
     } : undefined,
-    tokenClaimCode: data.token_claim_code || undefined,
-    tokenClaimDetails: data.token_claim_details || undefined,
+    tokenClaimCode: undefined,
+    tokenClaimDetails: undefined,
     isReprint: false,
   };
 
@@ -139,3 +136,53 @@ export function buildSalesHistoryThermalHtml(
 
   return renderReceiptDocument(receiptData, tmpl?.template_json, tmpl?.paper_size);
 }
+
+/**
+ * TASK-SR-08 / B7:
+ * Renders a Special Receipt from a server-verified JSON snapshot and template snapshot.
+ * Option A Content Rule: zero branding defaults, derived printed total, no discount display.
+ */
+export function buildSpecialReceiptHtml(
+  snapshot: any,
+  templateSnapshot?: any,
+  isReprint = false
+): string {
+  const normTemplate = normalizeSpecialTemplate(templateSnapshot);
+  const items: RenderReceiptItem[] = (snapshot.items || []).map((it: any) => {
+    const qty = Number(it.qty || 0);
+    const rate = Number(it.pre_discount_rate ?? it.unit_price ?? it.rate ?? 0);
+    return {
+      name: it.receipt_name || it.item_name || '—',
+      code: it.item_code || undefined,
+      shadeCode: it.receipt_shade || it.shade_code || undefined,
+      qty,
+      rate,
+      total: qty * rate,
+    };
+  });
+
+  const receiptData: RenderReceiptData = {
+    tenantName: normTemplate.template_json.header.customShopName || '',
+    tenantAddress: normTemplate.template_json.header.customAddress || '',
+    tenantPhone: normTemplate.template_json.header.customPhone || '',
+    invoiceType: 'sales',
+    invoiceNo: snapshot.invoice_no || '',
+    date: snapshot.date || new Date().toISOString().split('T')[0],
+    time: snapshot.time || undefined,
+    clientName: snapshot.client_name || undefined,
+    paymentMethod: 'CASH',
+    items,
+    subTotal: Number(snapshot.printed_total || snapshot.master_total || 0),
+    discount: 0, // Option A: Zero discount disclosure on paper
+    grandTotal: Number(snapshot.printed_total || 0),
+    paidAmount: Number(snapshot.printed_total || 0),
+    dueAmount: 0,
+    deliveryCharge: Number(snapshot.delivery_charge || 0),
+    headerNote: snapshot.header_note || undefined,
+    footerNote: snapshot.footer_note || undefined,
+    isReprint,
+  };
+
+  return renderReceiptDocument(receiptData, normTemplate.template_json, normTemplate.paper_size);
+}
+

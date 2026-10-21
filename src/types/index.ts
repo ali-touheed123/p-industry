@@ -31,6 +31,7 @@ export interface AppUser {
   role: UserRole;
   tenant_id?: string;
   is_active: boolean;
+  can_use_special_receipt?: boolean;
   created_at: string;
   tenants?: Tenant;
 }
@@ -139,6 +140,8 @@ export interface Invoice {
   bank_paid?: number;
   others_paid?: number;
   status: 'completed' | 'cancelled' | 'return';
+  printed_as?: 'regular' | 'special';
+  original_invoice_id?: string;
   created_by?: string;
   created_at: string;
   items?: InvoiceItem[];
@@ -148,6 +151,7 @@ export interface Invoice {
 export interface InvoiceItem {
   id?: string;
   invoice_id?: string;
+  original_invoice_item_id?: string;
   item_id?: string;
   item_code?: string;
   item_name: string;

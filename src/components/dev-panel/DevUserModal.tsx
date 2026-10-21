@@ -15,6 +15,7 @@ interface DevUserModalProps {
     role: UserRole;
     tenant_id?: string;
     email?: string;
+    can_use_special_receipt?: boolean;
   }) => Promise<boolean>;
   editingUser?: UserItem | null;
   branches: Tenant[];
@@ -35,6 +36,7 @@ export const DevUserModal: React.FC<DevUserModalProps> = ({
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<UserRole>('staff');
   const [tenantId, setTenantId] = useState('');
+  const [canUseSpecialReceipt, setCanUseSpecialReceipt] = useState(false);
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -49,6 +51,7 @@ export const DevUserModal: React.FC<DevUserModalProps> = ({
       setEmail(editingUser.email || '');
       setRole(editingUser.role || 'staff');
       setTenantId(editingUser.tenant_id || '');
+      setCanUseSpecialReceipt(Boolean(editingUser.can_use_special_receipt));
       setPassword('');
     } else {
       setUsername('');
@@ -56,6 +59,7 @@ export const DevUserModal: React.FC<DevUserModalProps> = ({
       setFullName('');
       setEmail('');
       setRole('staff');
+      setCanUseSpecialReceipt(false);
       // Read latest preSelectedTenantId via ref — avoids changing deps array size
       setTenantId(preSelectedRef.current || (branches.length > 0 ? branches[0].id : ''));
     }
@@ -98,6 +102,7 @@ export const DevUserModal: React.FC<DevUserModalProps> = ({
         role,
         tenant_id: role === 'developer' ? undefined : (tenantId || undefined),
         email: email.trim() || `${cleanUsername}@pyntflow.com`,
+        can_use_special_receipt: role === 'staff' ? canUseSpecialReceipt : false,
       });
 
       if (success) {
@@ -243,6 +248,29 @@ export const DevUserModal: React.FC<DevUserModalProps> = ({
                 ))}
               </select>
             </div>
+
+            {/* Field 7: SPECIAL RECEIPT PERMISSION (Only for Staff / Cashier) */}
+            {role === 'staff' && (
+              <div style={{ gridColumn: '1 / -1', padding: '12px 14px', borderRadius: '10px', backgroundColor: 'rgba(124, 58, 237, 0.08)', border: '1px solid rgba(124, 58, 237, 0.25)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#e0e7ff', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>Special Receipt Feature Access</span>
+                    <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', backgroundColor: '#7c3aed', color: '#ffffff', fontWeight: 700 }}>POS</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+                    Authorizes this cashier to design, brand-filter, and print unbranded/custom special receipts.
+                  </div>
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', position: 'relative' }}>
+                  <input
+                    type="checkbox"
+                    checked={canUseSpecialReceipt}
+                    onChange={(e) => setCanUseSpecialReceipt(e.target.checked)}
+                    style={{ width: '18px', height: '18px', accentColor: '#7c3aed', cursor: 'pointer' }}
+                  />
+                </label>
+              </div>
+            )}
           </div>
 
           {/* Action Buttons Row */}

@@ -38,6 +38,7 @@ import {
 import { DevReceiptPreview, ReceiptInvoiceData } from './dev-panel/DevReceiptPreview';
 import { renderReceiptDocument, RenderReceiptData } from '@/utils/receiptRenderCore';
 import { printViaIframe } from '@/utils/iframePrint';
+import SpecialReceiptSettings from './SpecialReceiptSettings';
 
 interface BranchReceiptSettingsProps {
   tenantId: string;
@@ -45,6 +46,7 @@ interface BranchReceiptSettingsProps {
   tenantPhone?: string;
   tenantAddress?: string;
   staffName?: string;
+  canUseSpecialReceipt?: boolean;
   onTemplateSaved?: (savedTemplate: ReceiptTemplate) => void;
 }
 
@@ -65,8 +67,10 @@ export default function BranchReceiptSettings({
   tenantPhone = '',
   tenantAddress = '',
   staffName = 'Counter Staff',
+  canUseSpecialReceipt = false,
   onTemplateSaved,
 }: BranchReceiptSettingsProps) {
+  const [settingsMode, setSettingsMode] = useState<'regular' | 'special'>('regular');
   const [activeTab, setActiveTab] = useState<TabKey>('header');
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
@@ -397,13 +401,62 @@ export default function BranchReceiptSettings({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '4px' }}>
-      {/* ── Top Header Bar ── */}
-      <div
-        style={{
-          background: '#FFFFFF',
-          borderRadius: '14px',
-          padding: '18px 24px',
-          border: '1px solid #E2E8F0',
+      {canUseSpecialReceipt && (
+        <div style={{ display: 'flex', gap: '8px', background: '#F1F5F9', padding: '4px', borderRadius: '10px', width: 'fit-content' }}>
+          <button
+            type="button"
+            onClick={() => setSettingsMode('regular')}
+            style={{
+              padding: '8px 18px',
+              borderRadius: '8px',
+              border: 'none',
+              fontSize: '13px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              background: settingsMode === 'regular' ? '#0F172A' : 'transparent',
+              color: settingsMode === 'regular' ? '#FFFFFF' : '#475569',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            Regular Thermal Receipt
+          </button>
+          <button
+            type="button"
+            onClick={() => setSettingsMode('special')}
+            style={{
+              padding: '8px 18px',
+              borderRadius: '8px',
+              border: 'none',
+              fontSize: '13px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              background: settingsMode === 'special' ? '#0F172A' : 'transparent',
+              color: settingsMode === 'special' ? '#FFFFFF' : '#475569',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <span>Special Receipt Studio</span>
+            <span style={{ fontSize: '10px', background: '#38BDF8', color: '#0F172A', padding: '1px 6px', borderRadius: '4px', fontWeight: 800 }}>
+              Blank &amp; Brands
+            </span>
+          </button>
+        </div>
+      )}
+
+      {settingsMode === 'special' ? (
+        <SpecialReceiptSettings tenantId={tenantId} tenantName={tenantName} />
+      ) : (
+        <>
+          {/* ── Top Header Bar ── */}
+          <div
+            style={{
+              background: '#FFFFFF',
+              borderRadius: '14px',
+              padding: '18px 24px',
+              border: '1px solid #E2E8F0',
           boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
           display: 'flex',
           justifyContent: 'space-between',
@@ -1848,6 +1901,8 @@ export default function BranchReceiptSettings({
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

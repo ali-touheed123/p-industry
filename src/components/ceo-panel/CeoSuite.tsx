@@ -15,6 +15,7 @@ import { PurchaseView } from './PurchaseView';
 import { TokensView } from './TokensView';
 import { BranchOrdersView } from './BranchOrdersView';
 import { AuditLogsView } from './AuditLogsView';
+import { SpecialPrintLogView } from './SpecialPrintLogView';
 import { SettingsView } from './SettingsView';
 import './ceo-panel.css';
 
@@ -264,8 +265,9 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
           {currentSection === 'purchase'      && <PurchaseView key={selectedBranch.id} branch={selectedBranch} />}
           {currentSection === 'tokens'        && <TokensView key={selectedBranch.id} branch={selectedBranch} />}
           {currentSection === 'branch-orders' && <BranchOrdersView key={selectedBranch.id} branch={selectedBranch} />}
-          {currentSection === 'audit-logs'    && <AuditLogsView key={selectedBranch.id} branch={selectedBranch} />}
-          {currentSection === 'settings'      && <SettingsView tenant={selectedBranch as any} />}
+          {currentSection === 'audit-logs'        && <AuditLogsView key={selectedBranch.id} branch={selectedBranch} />}
+          {currentSection === 'special-print-log' && <SpecialPrintLogView key={selectedBranch.id} branch={selectedBranch} />}
+          {currentSection === 'settings'          && <SettingsView tenant={selectedBranch as any} />}
         </main>
       </div>
     </div>

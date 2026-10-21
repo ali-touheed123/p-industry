@@ -4,9 +4,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Invoice, InvoiceItem } from '@/types';
 import { printViaIframe } from '@/utils/iframePrint';
 import { escapeHtml } from '@/utils/receiptRenderCore';
-import { buildSalesHistoryThermalHtml } from '@/utils/receiptAdapters';
+import { buildSalesHistoryThermalHtml, buildSpecialReceiptHtml } from '@/utils/receiptAdapters';
 import { serializeCsv, downloadCsv } from '@/utils/csvSerializer';
 import { ReceiptTemplate } from '@/types/receipt';
+import SpecialReturnModal from './SpecialReturnModal';
 import {
   Search,
   Calendar,
@@ -71,6 +72,8 @@ interface Props {
   tenantId: string;
   tenantName?: string;
   staffName?: string;
+  canUseSpecialReceipt?: boolean;
+  userRole?: string;
   onNavigateToPos?: () => void;
   onEditInvoiceInPos?: (invoice: Invoice) => void;
 }
@@ -79,6 +82,8 @@ export default function SalesHistory({
   tenantId,
   tenantName = 'PaintERP Branch',
   staffName = 'Counter Staff',
+  canUseSpecialReceipt = false,
+  userRole = 'staff',
   onNavigateToPos,
   onEditInvoiceInPos,
 }: Props) {
@@ -158,6 +163,43 @@ export default function SalesHistory({
   const [cancelModal, setCancelModal] = useState<{ invoice: Invoice } | null>(null);
   const [cancelReason, setCancelReason] = useState<string>('');
   const [isCancelling, setIsCancelling] = useState<boolean>(false);
+  const [specialReturnInvoice, setSpecialReturnInvoice] = useState<Invoice | null>(null);
+
+  // Special Reprint Handler (TASK-SR-20 / A4 / D2)
+  const handleSpecialReprint = async (inv: Invoice) => {
+    if (inv.status === 'cancelled') {
+      alert('Cancelled special receipts cannot be reprinted.');
+      return;
+    }
+    if (userRole !== 'staff' || !canUseSpecialReceipt) {
+      alert('Only authorized branch staff with active special receipt permission can reprint.');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/special-print-log/reprint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invoice_id: inv.id,
+          tenant_id: tenantId,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to reprint special receipt.');
+      }
+
+      if (data.snapshot) {
+        const specialHtml = buildSpecialReceiptHtml(data.snapshot, data.template);
+        printViaIframe(specialHtml);
+      }
+    } catch (err: any) {
+      console.error('Special reprint error:', err);
+      alert(`Error reprinting special receipt: ${err.message}`);
+    }
+  };
 
   const handleCancelInvoice = async () => {
     if (!cancelModal) return;
@@ -1874,6 +1916,22 @@ export default function SalesHistory({
                                   RETURN
                                 </span>
                               )}
+                              {inv.printed_as === 'special' && (
+                                <span
+                                  style={{
+                                    fontSize: '9.5px',
+                                    fontWeight: 800,
+                                    background: '#0F172A',
+                                    color: '#38BDF8',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px',
+                                    border: '1px solid #38BDF8',
+                                    letterSpacing: '0.04em',
+                                  }}
+                                >
+                                  SPECIAL
+                                </span>
+                              )}
                             </div>
                           </td>
 
@@ -2072,18 +2130,22 @@ export default function SalesHistory({
                               <button
                                 type="button"
                                 onClick={async () => {
-                                  setThermalPrintInvoice(inv);
-                                  if ((!inv.invoice_items || inv.invoice_items.length === 0) && (!inv.items || inv.items.length === 0)) {
-                                    const full = await ensureInvoiceItems(inv);
-                                    setThermalPrintInvoice(full);
+                                  if (inv.printed_as === 'special') {
+                                    handleSpecialReprint(inv);
+                                  } else {
+                                    setThermalPrintInvoice(inv);
+                                    if ((!inv.invoice_items || inv.invoice_items.length === 0) && (!inv.items || inv.items.length === 0)) {
+                                      const full = await ensureInvoiceItems(inv);
+                                      setThermalPrintInvoice(full);
+                                    }
                                   }
                                 }}
-                                title="Print Thermal Receipt"
+                                title={inv.printed_as === 'special' ? 'Reprint Special Receipt' : 'Print Thermal Receipt'}
                                 style={{
                                   padding: '5px',
-                                  background: '#FFF7ED',
-                                  color: '#EA580C',
-                                  border: '1px solid #FED7AA',
+                                  background: inv.printed_as === 'special' ? '#F0F9FF' : '#FFF7ED',
+                                  color: inv.printed_as === 'special' ? '#0284C7' : '#EA580C',
+                                  border: `1px solid ${inv.printed_as === 'special' ? '#BAE6FD' : '#FED7AA'}`,
                                   borderRadius: '6px',
                                   cursor: 'pointer',
                                   display: 'flex',
@@ -2091,6 +2153,26 @@ export default function SalesHistory({
                               >
                                 <Printer style={{ width: 14, height: 14 }} />
                               </button>
+
+                              {/* Special Return Button (TASK-SR-26) */}
+                              {canUseSpecialReceipt && inv.printed_as === 'special' && !isReturn && (inv.status || '').toLowerCase() !== 'cancelled' && (
+                                <button
+                                  type="button"
+                                  onClick={() => setSpecialReturnInvoice(inv)}
+                                  title="Process Special Return (Option E Zero-Print)"
+                                  style={{
+                                    padding: '5px',
+                                    background: '#FFF7ED',
+                                    color: '#EA580C',
+                                    border: '1px solid #FED7AA',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                  }}
+                                >
+                                  <RotateCcw style={{ width: 14, height: 14 }} />
+                                </button>
+                              )}
 
                               {isRegisteredCustomer(inv) && (
                                 <button
@@ -2112,7 +2194,8 @@ export default function SalesHistory({
                                 </button>
                               )}
 
-                              {onEditInvoiceInPos && !isReturn && (
+                              {/* D1 Edit Block: Special invoices cannot be edited */}
+                              {onEditInvoiceInPos && !isReturn && inv.printed_as !== 'special' && (
                                 <button
                                   type="button"
                                   onClick={() => onEditInvoiceInPos(inv)}
@@ -2617,7 +2700,7 @@ export default function SalesHistory({
               )}
 
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                {onEditInvoiceInPos && selectedInvoice.invoice_type !== 'return' && (
+                {onEditInvoiceInPos && selectedInvoice.invoice_type !== 'return' && selectedInvoice.printed_as !== 'special' && (
                   <button
                     onClick={() => {
                       const invToEdit = selectedInvoice;
@@ -2643,7 +2726,37 @@ export default function SalesHistory({
                   </button>
                 )}
 
-                {selectedInvoice.status !== 'cancelled' && (
+                {/* Special Return Button in Drawer (TASK-SR-26) */}
+                {canUseSpecialReceipt && selectedInvoice.printed_as === 'special' && selectedInvoice.invoice_type !== 'return' && (selectedInvoice.status || '').toLowerCase() !== 'cancelled' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const inv = selectedInvoice;
+                      setSelectedInvoice(null);
+                      setSpecialReturnInvoice(inv);
+                    }}
+                    title="Process Special Return (Option E Zero-Print)"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '8px 14px',
+                      background: '#FFF7ED',
+                      color: '#EA580C',
+                      border: '1px solid #FED7AA',
+                      borderRadius: '8px',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <RotateCcw style={{ width: 14, height: 14 }} />
+                    Special Return
+                  </button>
+                )}
+
+                {/* Cancel button: blocked for returns and cancelled invoices (TASK-FIX-02 / D5) */}
+                {selectedInvoice.status !== 'cancelled' && selectedInvoice.invoice_type !== 'return' && (
                   <button
                     onClick={() => {
                       const invToCancel = selectedInvoice;
@@ -2669,28 +2782,42 @@ export default function SalesHistory({
                   </button>
                 )}
 
-                <button
-                  onClick={() => {
-                    setThermalPrintInvoice(selectedInvoice);
-                    setSelectedInvoice(null);
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '8px 14px',
-                    background: '#F97316',
-                    color: '#FFFFFF',
-                    border: 'none',
-                    borderRadius: '8px',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
-                >
-                  <Printer style={{ width: 14, height: 14 }} />
-                  Thermal Print
-                </button>
+                {/* Print / Reprint Button: routes special receipts through handleSpecialReprint (TASK-SR-20 / D2) */}
+                {!(selectedInvoice.printed_as === 'special' && (selectedInvoice.status === 'cancelled' || userRole !== 'staff' || !canUseSpecialReceipt)) && (
+                  <button
+                    onClick={async () => {
+                      if (selectedInvoice.printed_as === 'special') {
+                        const inv = selectedInvoice;
+                        setSelectedInvoice(null);
+                        handleSpecialReprint(inv);
+                      } else {
+                        const inv = selectedInvoice;
+                        setSelectedInvoice(null);
+                        setThermalPrintInvoice(inv);
+                        if ((!inv.invoice_items || inv.invoice_items.length === 0) && (!inv.items || inv.items.length === 0)) {
+                          const full = await ensureInvoiceItems(inv);
+                          setThermalPrintInvoice(full);
+                        }
+                      }
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '8px 14px',
+                      background: selectedInvoice.printed_as === 'special' ? '#0284C7' : '#F97316',
+                      color: '#FFFFFF',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <Printer style={{ width: 14, height: 14 }} />
+                    {selectedInvoice.printed_as === 'special' ? 'Reprint Special Receipt' : 'Thermal Print'}
+                  </button>
+                )}
 
                 <button
                   onClick={() => setSelectedInvoice(null)}

@@ -274,6 +274,7 @@ export async function POST(req: NextRequest) {
       others_paid: Number(others_paid) || 0,
       status,
       created_by: created_by || null,
+      printed_as: 'regular',
     };
 
     // 2. Prepare Atomic Invoice Items
@@ -366,6 +367,31 @@ export async function PATCH(req: NextRequest) {
     const auth = await requireTenantAuth(req, tenant_id);
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
+    // Query invoice to verify special receipt guards
+    const { data: existingInv } = await supabaseAdmin
+      .from('invoices')
+      .select('id, invoice_type, printed_as')
+      .eq('id', id)
+      .eq('tenant_id', tenant_id)
+      .maybeSingle();
+
+    if (existingInv) {
+      // TASK-FIX-02 (R2, D5): Block cancellation of special return invoices
+      if ((status === 'cancelled' || body.action === 'cancel') && existingInv.invoice_type === 'return' && existingInv.printed_as === 'special') {
+        return NextResponse.json(
+          { success: false, error: 'Special return invoices cannot be cancelled.' },
+          { status: 400 }
+        );
+      }
+      // TASK-SR-02b (D1): Block editing of special invoices
+      if (status !== 'cancelled' && body.action !== 'cancel' && existingInv.printed_as === 'special') {
+        return NextResponse.json(
+          { success: false, error: 'Special invoices cannot be edited. Please cancel this invoice and create a new special sale.' },
+          { status: 400 }
+        );
+      }
     }
 
     // Cancellation request: delegate to atomic cancellation function
@@ -530,6 +556,21 @@ export async function DELETE(req: NextRequest) {
     const auth = await requireTenantAuth(req, tenantId);
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
+    // TASK-FIX-02 (R2, D5): Block cancellation of special return invoices
+    const { data: targetInv } = await supabaseAdmin
+      .from('invoices')
+      .select('invoice_type, printed_as')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    if (targetInv && targetInv.invoice_type === 'return' && targetInv.printed_as === 'special') {
+      return NextResponse.json(
+        { success: false, error: 'Special return invoices cannot be cancelled.' },
+        { status: 400 }
+      );
     }
 
     const { data: cancelRes, error: cancelErr } = await supabaseAdmin.rpc('cancel_invoice_atomic', {

@@ -27,6 +27,7 @@ export interface UserItem {
   role: UserRole;
   tenant_id?: string;
   is_active: boolean;
+  can_use_special_receipt?: boolean;
   created_at: string;
   tenants?: { name: string; slug: string; type: string } | null;
 }

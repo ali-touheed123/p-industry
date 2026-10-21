@@ -1302,6 +1302,48 @@ body {
   cursor: not-allowed;
 }
 
+.pos-btn-special {
+  width: 100%;
+  padding: 0.75rem;
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 12.5px;
+  border-radius: 8px;
+  border: none;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.35);
+  transition: all 0.15s;
+}
+.pos-btn-special:hover {
+  background: linear-gradient(135deg, #4338ca 0%, #6d28d9 100%);
+}
+.pos-btn-special:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@keyframes specialPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.7);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(124, 58, 237, 0);
+    transform: scale(1.015);
+  }
+}
+
+.pos-btn-special-blink {
+  animation: specialPulse 1.8s infinite ease-in-out;
+}
+
 .pos-dropdown-panel {
   position: absolute;
   left: 0;

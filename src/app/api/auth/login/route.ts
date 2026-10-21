@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
       username: user.username,
       full_name: user.full_name,
       role: user.role,
+      can_use_special_receipt: Boolean(user.can_use_special_receipt),
     };
 
     let sessionTenantId = user.tenant_id;
@@ -142,6 +143,7 @@ export async function POST(req: NextRequest) {
       role: user.role,
       tenantId: sessionTenantId,
       tenantSlug: sessionTenantSlug,
+      canUseSpecialReceipt: Boolean(user.can_use_special_receipt),
       ceoTenants,
     });
 

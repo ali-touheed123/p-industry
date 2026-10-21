@@ -521,12 +521,12 @@ BEGIN
 
   INSERT INTO special_print_log (
     tenant_id, invoice_id, invoice_no, printed_by, user_id,
-    event_type, printed_at, master_total, printed_total, charged_total,
+    event_type, printed_at, master_total, printed_total, charged_total, delivery_charge,
     receipt_snapshot, template_snapshot
   ) VALUES (
     v_orig_log.tenant_id, v_orig_log.invoice_id, v_orig_log.invoice_no,
     p_printed_by, p_user_id, 'reprint', NOW(),
-    v_orig_log.master_total, v_orig_log.printed_total, v_orig_log.charged_total,
+    v_orig_log.master_total, v_orig_log.printed_total, v_orig_log.charged_total, v_orig_log.delivery_charge,
     v_orig_log.receipt_snapshot, v_orig_log.template_snapshot
   );
 
@@ -718,12 +718,10 @@ BEGIN
   END IF;
 
   v_paid_amount := v_cash_paid + v_card_paid;
-  IF v_cash_paid > 0 AND v_card_paid > 0 THEN
-    v_payment_type := 'mixed';
-  ELSIF v_card_paid > 0 THEN
-    v_payment_type := 'card';
-  ELSE
-    v_payment_type := 'cash';
+  IF v_cash_paid > 0 AND v_card_paid > 0 THEN v_payment_type := 'mixed';
+  ELSIF v_card_paid > 0 THEN v_payment_type := 'card';
+  ELSIF v_cash_paid > 0 THEN v_payment_type := 'cash';
+  ELSE v_payment_type := 'others';
   END IF;
 
   v_new_invoice_no := 'RET-' || v_orig_invoice.invoice_no || '-'

@@ -247,3 +247,40 @@ export const DEFAULT_TEMPLATE_JSON: TemplateJson = {
   },
   locks: {},
 };
+
+export const BLANK_SPECIAL_TEMPLATE_JSON: TemplateJson = {
+  ...DEFAULT_TEMPLATE_JSON,
+  header: {
+    ...DEFAULT_TEMPLATE_JSON.header,
+    showLogo: false,
+    logoUrl: '',
+    showShopName: false,
+    customShopName: '',
+    showAddress: false,
+    customAddress: '',
+    showPhone: false,
+    customPhone: '',
+    separator: 'dashed',
+  },
+  invoiceInfo: {
+    ...DEFAULT_TEMPLATE_JSON.invoiceInfo,
+    showCashier: false,
+    showCustomer: true,
+  },
+  footer: {
+    ...DEFAULT_TEMPLATE_JSON.footer,
+    showPoweredBy: false,
+    poweredByText: '',
+    showWhatsapp: false,
+    whatsappNumber: '',
+  },
+  tokenClaimSlip: {
+    enabled: false,
+    title: 'Token Claim Slip',
+    instructions: 'Present this code on your next visit to redeem your token',
+    footerNotice: 'Keep this receipt — code cannot be reissued',
+    showDetails: false,
+  },
+  locks: {},
+};
+
