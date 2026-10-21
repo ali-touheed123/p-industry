@@ -60,25 +60,34 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: logErr.message }, { status: 500 });
     }
 
-    // Attach live invoice status for each invoice_id (to reflect cancellations)
+    // Attach live invoice status and payment details for each invoice_id (to reflect cancellations & tender info)
     const invoiceIds = Array.from(new Set((logs || []).map((l: any) => l.invoice_id).filter(Boolean)));
-    const statusMap = new Map<string, string>();
+    const statusMap = new Map<string, any>();
 
     if (invoiceIds.length > 0) {
       const { data: invRows } = await supabaseAdmin
         .from('invoices')
-        .select('id, status')
+        .select('id, status, payment_type, paid_amount, due_amount, client_name, date')
         .in('id', invoiceIds);
 
-      (invRows || []).forEach((inv: { id: string; status: string }) => {
-        statusMap.set(inv.id, inv.status);
+      (invRows || []).forEach((inv: any) => {
+        statusMap.set(inv.id, inv);
       });
     }
 
-    const enrichedLogs = (logs || []).map((l: any) => ({
-      ...l,
-      invoice_status: l.invoice_id ? (statusMap.get(l.invoice_id) ?? 'unknown') : null,
-    }));
+    const enrichedLogs = (logs || []).map((l: any) => {
+      const inv = l.invoice_id ? statusMap.get(l.invoice_id) : null;
+      const snap = l.receipt_snapshot || {};
+      return {
+        ...l,
+        invoice_status: inv?.status ?? 'unknown',
+        payment_type: snap.payment_type || inv?.payment_type || 'cash',
+        paid_amount: snap.paid_amount ?? inv?.paid_amount ?? l.printed_total,
+        due_amount: snap.due_amount ?? inv?.due_amount ?? 0,
+        client_name: snap.client_name || inv?.client_name,
+        date: snap.date || inv?.date,
+      };
+    });
 
     const invoiceStatusParam = searchParams.get('invoice_status');
     let finalLogs = enrichedLogs;

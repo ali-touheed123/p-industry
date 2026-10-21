@@ -760,25 +760,30 @@ export default function SpecialReceiptSettings({
                       { key: 'showCashier', label: 'Print Cashier / Staff Name', fieldKey: 'cashierLabel', defaultLabel: 'Staff:' },
                       { key: 'showCustomer', label: 'Print Customer Name', fieldKey: 'customerLabel', defaultLabel: 'Customer:' },
                       { key: 'showPaymentMethod', label: 'Print Payment Method', fieldKey: 'paymentLabel', defaultLabel: 'Payment:' },
-                    ].map((m) => (
-                      <div key={m.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px', borderRadius: '8px', background: '#F8FAFC', border: '1px solid #E2E8F0' }}>
-                        <label style={{ fontSize: '12px', fontWeight: 600, color: '#334155', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    ].map((m) => {
+                      const isChecked = (templateJson.invoiceInfo as any)[m.key] !== undefined
+                        ? Boolean((templateJson.invoiceInfo as any)[m.key])
+                        : Boolean((BLANK_SPECIAL_TEMPLATE_JSON.invoiceInfo as any)[m.key]);
+                      return (
+                        <div key={m.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px', borderRadius: '8px', background: '#F8FAFC', border: '1px solid #E2E8F0' }}>
+                          <label style={{ fontSize: '12px', fontWeight: 600, color: '#334155', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => updateInvoiceInfo({ [m.key]: e.target.checked } as any)}
+                              style={{ accentColor: '#7C3AED' }}
+                            />
+                            {m.label}
+                          </label>
                           <input
-                            type="checkbox"
-                            checked={Boolean((templateJson.invoiceInfo as any)[m.key])}
-                            onChange={(e) => updateInvoiceInfo({ [m.key]: e.target.checked } as any)}
-                            style={{ accentColor: '#7C3AED' }}
+                            type="text"
+                            value={(templateJson.invoiceInfo as any)[m.fieldKey] || m.defaultLabel}
+                            onChange={(e) => updateInvoiceInfo({ [m.fieldKey]: e.target.value } as any)}
+                            style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '11px', width: '100px' }}
                           />
-                          {m.label}
-                        </label>
-                        <input
-                          type="text"
-                          value={(templateJson.invoiceInfo as any)[m.fieldKey] || m.defaultLabel}
-                          onChange={(e) => updateInvoiceInfo({ [m.fieldKey]: e.target.value } as any)}
-                          style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '11px', width: '100px' }}
-                        />
-                      </div>
-                    ))}
+                        </div>
+                      );
+                    })}
                   </div>
 
                   {/* Meta Font Size */}

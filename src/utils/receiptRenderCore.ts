@@ -270,8 +270,11 @@ export function normalizeTemplate(
   // 3. Invoice Info Section
   const rawInfo = (typeof rawObj.invoiceInfo === 'object' && rawObj.invoiceInfo !== null) ? rawObj.invoiceInfo : {};
   const invoiceInfo: InvoiceInfoConfig = {
-    // T-19 (Option A): Invoice Number is mandatory for legal and audit compliance; cannot be hidden
-    showInvoiceNo: true,
+    // T-19: showInvoiceNo respects the saved template setting (defaults true for backward compat).
+    // For regular (non-special) receipts normalizeTemplate is called without fallbackTemplate override,
+    // so the value from the stored template JSON is honoured. Special templates use normalizeSpecialTemplate
+    // which passes BLANK_SPECIAL_TEMPLATE_JSON whose invoiceInfo.showInvoiceNo is the canonical default.
+    showInvoiceNo: parseBoolean(rawInfo.showInvoiceNo, d.invoiceInfo.showInvoiceNo ?? true),
     invoiceLabel: parseString(rawInfo.invoiceLabel, d.invoiceInfo.invoiceLabel),
     showDate: parseBoolean(rawInfo.showDate, d.invoiceInfo.showDate),
     dateLabel: typeof rawInfo.dateLabel === 'string' ? rawInfo.dateLabel : d.invoiceInfo.dateLabel,

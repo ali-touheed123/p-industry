@@ -223,11 +223,12 @@ export const DevReceiptPreview: React.FC<DevReceiptPreviewProps> = ({
           color: '#000000',
         }}
       >
-        {/* T-19 Strict Compliance Lock: Invoice Number is mandatory and always visible */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, marginBottom: '2px', color: '#000000' }}>
-          <span>{invoiceInfo.invoiceLabel || 'Invoice #'}:</span>
-          <span>{invoiceData.invoice_no || 'INV-0000'}</span>
-        </div>
+        {invoiceInfo.showInvoiceNo !== false && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, marginBottom: '2px', color: '#000000' }}>
+            <span>{invoiceInfo.invoiceLabel || 'Invoice #'}:</span>
+            <span>{invoiceData.invoice_no || 'INV-0000'}</span>
+          </div>
+        )}
 
         {invoiceInfo.showDate !== false && (
           <div style={{ display: 'flex', justifyContent: 'space-between', color: '#000000', marginBottom: '2px' }}>

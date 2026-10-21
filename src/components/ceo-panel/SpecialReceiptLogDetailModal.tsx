@@ -19,37 +19,84 @@ export default function SpecialReceiptLogDetailModal({
 }: SpecialLogDetailModalProps) {
   if (!isOpen || !log) return null;
 
-  const snap = log.receipt_snapshot || {};
-  const tmpl = normalizeSpecialTemplate(log.template_snapshot);
+  const rawSnap = log.receipt_snapshot;
+  const snap = typeof rawSnap === 'string' ? JSON.parse(rawSnap) : (rawSnap || {});
+  const rawTmpl = log.template_snapshot;
+  const parsedTmpl = typeof rawTmpl === 'string' ? JSON.parse(rawTmpl) : rawTmpl;
+  const tmpl = normalizeSpecialTemplate(parsedTmpl);
   const items: any[] = snap.items || [];
 
+  const isReturn = log.event_type === 'return';
+
   // Render receipt HTML for visual reconstruction
-  const receiptItems: RenderReceiptItem[] = items.map((it: any) => ({
-    name: it.receipt_name || it.item_name || '—',
-    code: it.item_code || undefined,
-    shadeCode: it.receipt_shade || it.shade_code || undefined,
-    qty: Number(it.qty || 1),
-    rate: Number(it.unit_price || it.rate || 0),
-    total: Number(it.total_price || (Number(it.qty || 1) * Number(it.unit_price || 0))),
-  }));
+  const receiptItems: RenderReceiptItem[] = items.map((it: any) => {
+    const qty = Number(it.qty || 1);
+    const rate = Number(it.unit_price ?? it.rate ?? 0);
+    const lineTotal = Number(it.total_price ?? it.line_total ?? (qty * rate));
+    return {
+      name: it.receipt_name || it.item_name || '—',
+      code: it.item_code || undefined,
+      shadeCode: it.receipt_shade || it.shade_code || undefined,
+      qty,
+      rate,
+      total: lineTotal,
+    };
+  });
+
+  const effectiveTotal = isReturn
+    ? Number(log.charged_total || snap.refund_total || 0)
+    : Number(log.printed_total || snap.printed_total || 0);
+
+  const rawPaid = snap.paid_amount !== undefined ? Number(snap.paid_amount) : (log.paid_amount !== undefined ? Number(log.paid_amount) : undefined);
+  const rawDue = snap.due_amount !== undefined ? Number(snap.due_amount) : (log.due_amount !== undefined ? Number(log.due_amount) : undefined);
+
+  let paidAmount = effectiveTotal;
+  let dueAmount = 0;
+
+  if (isReturn) {
+    paidAmount = effectiveTotal;
+    dueAmount = 0;
+  } else if (rawDue !== undefined && rawDue > 0) {
+    dueAmount = rawDue;
+    paidAmount = rawPaid !== undefined ? rawPaid : Math.max(0, effectiveTotal - rawDue);
+  } else if (rawPaid !== undefined) {
+    paidAmount = rawPaid;
+    dueAmount = Math.max(0, effectiveTotal - rawPaid);
+  }
+
+  const resolvedPaymentType = isReturn
+    ? (snap.payment_type ? String(snap.payment_type).toUpperCase() : 'REFUND')
+    : (snap.payment_type
+        ? String(snap.payment_type).toUpperCase()
+        : (log.payment_type
+            ? String(log.payment_type).toUpperCase()
+            : (dueAmount > 0 ? 'CREDIT' : 'CASH')));
+
+  const resolvedClientName = snap.client_name || log.client_name || undefined;
+  const resolvedInvoiceNo = snap.invoice_no || log.invoice_no || '';
+
+  const dateRaw = log.printed_at || log.created_at;
+  const dateObj = dateRaw ? new Date(dateRaw) : null;
+  const resolvedDate = snap.date || log.date || (dateObj ? dateObj.toLocaleDateString() : undefined);
+  const resolvedTime = dateObj ? dateObj.toLocaleTimeString() : undefined;
 
   const renderData: RenderReceiptData = {
     tenantName: tmpl.template_json.header.customShopName || '',
     tenantAddress: tmpl.template_json.header.customAddress || '',
     tenantPhone: tmpl.template_json.header.customPhone || '',
-    invoiceType: 'sales',
-    invoiceNo: log.invoice_no || snap.invoice_no || '',
-    date: log.created_at ? new Date(log.created_at).toLocaleDateString() : snap.date,
-    time: log.created_at ? new Date(log.created_at).toLocaleTimeString() : undefined,
-    clientName: snap.client_name || undefined,
-    paymentMethod: snap.payment_type ? (snap.payment_type as string).toUpperCase() : (log.payment_type ? (log.payment_type as string).toUpperCase() : 'CASH'),
+    invoiceType: isReturn ? 'return' : 'sales',
+    invoiceNo: resolvedInvoiceNo,
+    date: resolvedDate,
+    time: resolvedTime,
+    clientName: resolvedClientName,
+    paymentMethod: resolvedPaymentType,
     items: receiptItems,
-    subTotal: Number(log.printed_total || snap.printed_total || 0),
+    subTotal: effectiveTotal,
     discount: 0,
-    grandTotal: Number(log.printed_total || snap.printed_total || 0),
-    paidAmount: Number(snap.paid_amount ?? log.paid_amount ?? log.printed_total ?? 0),
-    dueAmount: Number(snap.due_amount ?? log.due_amount ?? 0),
-    deliveryCharge: Number(log.delivery_charge || snap.delivery_charge || 0),
+    grandTotal: effectiveTotal,
+    paidAmount,
+    dueAmount,
+    deliveryCharge: Number(snap.delivery_charge || log.delivery_charge || 0),
     headerNote: snap.header_note || undefined,
     footerNote: snap.footer_note || undefined,
     isReprint: log.event_type === 'reprint',
@@ -152,7 +199,7 @@ export default function SpecialReceiptLogDetailModal({
                 )}
               </div>
               <p style={{ fontSize: '11px', color: '#94A3B8', margin: 0 }}>
-                Invoice #{log.invoice_no} • Printed By: {log.printed_by} • Recorded: {new Date(log.created_at).toLocaleString()}
+                Invoice #{log.invoice_no} • Printed By: {log.printed_by} • Recorded: {dateObj ? dateObj.toLocaleString() : '—'}
               </p>
             </div>
           </div>
@@ -179,7 +226,7 @@ export default function SpecialReceiptLogDetailModal({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '12px' }}>
               <h4 style={{ fontSize: '12px', fontWeight: 800, color: '#334155', margin: '0 0 10px', textTransform: 'uppercase' }}>
-                3-Way Line Item Price Breakdown
+                {isReturn ? 'Return Line Items Breakdown' : '3-Way Line Item Price Breakdown'}
               </h4>
 
               <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden', background: '#FFFFFF' }}>
@@ -188,18 +235,21 @@ export default function SpecialReceiptLogDetailModal({
                     <tr>
                       <th style={{ padding: '6px 8px' }}>Item (Catalog / Print)</th>
                       <th style={{ padding: '6px 6px', textAlign: 'center' }}>Qty</th>
-                      <th style={{ padding: '6px 8px', textAlign: 'right' }}>Master Price</th>
-                      <th style={{ padding: '6px 8px', textAlign: 'right' }}>Printed Rate</th>
-                      <th style={{ padding: '6px 8px', textAlign: 'right' }}>Charged Rate</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'right' }}>{isReturn ? 'Refund Rate' : 'Master Price'}</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'right' }}>{isReturn ? 'Original Unit' : 'Printed Rate'}</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'right' }}>{isReturn ? 'Refund Total' : 'Charged Rate'}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {items.map((it: any, i: number) => {
                       const qty = Number(it.qty || 1);
-                      const masterRate = Number(it.master_price ?? it.unit_price ?? 0);
-                      const printedRate = Number(it.unit_price ?? 0);
+                      const unitPrice = Number(it.unit_price ?? it.rate ?? 0);
+                      const masterRate = isReturn ? unitPrice : Number(it.master_price ?? unitPrice);
+                      const printedRate = unitPrice;
                       const disc = Number(it.discount || 0);
-                      const chargedRate = Math.round((printedRate - disc / qty) * 100) / 100;
+                      const chargedRate = isReturn
+                        ? Number(it.line_total ?? it.total_price ?? (qty * unitPrice))
+                        : Math.round((printedRate - disc / qty) * 100) / 100;
 
                       return (
                         <tr key={i} style={{ borderBottom: '1px solid #F1F5F9' }}>
@@ -223,7 +273,7 @@ export default function SpecialReceiptLogDetailModal({
                           <td style={{ padding: '6px 8px', textAlign: 'right', color: '#0284C7', fontWeight: 600 }}>
                             Rs. {printedRate.toLocaleString()}
                           </td>
-                          <td style={{ padding: '6px 8px', textAlign: 'right', color: '#16A34A', fontWeight: 700 }}>
+                          <td style={{ padding: '6px 8px', textAlign: 'right', color: isReturn ? '#EA580C' : '#16A34A', fontWeight: 700 }}>
                             Rs. {chargedRate.toLocaleString()}
                           </td>
                         </tr>
@@ -235,54 +285,62 @@ export default function SpecialReceiptLogDetailModal({
             </div>
 
             {/* Financial Summary */}
-            <div
-              style={{
-                background: '#FFFFFF',
-                border: '1px solid #E2E8F0',
-                borderRadius: '12px',
-                padding: '14px',
-                display: 'grid',
-                gridTemplateColumns: 'repeat(2, 1fr)',
-                gap: '12px',
-              }}
-            >
-              <div>
-                <span style={{ fontSize: '10px', color: '#64748B', fontWeight: 700, textTransform: 'uppercase' }}>
-                  Master Catalog Value
-                </span>
-                <div style={{ fontSize: '16px', fontWeight: 800, color: '#0F172A' }}>
-                  Rs. {Number(log.master_total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </div>
-              </div>
+            {(() => {
+              const calculatedVariance = snap.total_variance !== undefined
+                ? Number(snap.total_variance)
+                : (isReturn ? 0 : ((Number(log.charged_total || 0) - Number(log.delivery_charge || 0)) - Number(log.master_total || 0)));
 
-              <div>
-                <span style={{ fontSize: '10px', color: '#0284C7', fontWeight: 700, textTransform: 'uppercase' }}>
-                  Printed Paper Total
-                </span>
-                <div style={{ fontSize: '16px', fontWeight: 800, color: '#0284C7' }}>
-                  Rs. {Number(log.printed_total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </div>
-              </div>
+              return (
+                <div
+                  style={{
+                    background: '#FFFFFF',
+                    border: '1px solid #E2E8F0',
+                    borderRadius: '12px',
+                    padding: '14px',
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(2, 1fr)',
+                    gap: '12px',
+                  }}
+                >
+                  <div>
+                    <span style={{ fontSize: '10px', color: '#64748B', fontWeight: 700, textTransform: 'uppercase' }}>
+                      {isReturn ? 'Return Event Type' : 'Master Catalog Value'}
+                    </span>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: '#0F172A' }}>
+                      {isReturn ? 'Sales Return' : `Rs. ${Number(log.master_total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+                    </div>
+                  </div>
 
-              <div>
-                <span style={{ fontSize: '10px', color: '#16A34A', fontWeight: 700, textTransform: 'uppercase' }}>
-                  Actual Charged Total
-                </span>
-                <div style={{ fontSize: '16px', fontWeight: 800, color: '#16A34A' }}>
-                  Rs. {Number(log.charged_total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </div>
-              </div>
+                  <div>
+                    <span style={{ fontSize: '10px', color: '#0284C7', fontWeight: 700, textTransform: 'uppercase' }}>
+                      {isReturn ? 'Total Refund Amount' : 'Printed Paper Total'}
+                    </span>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: isReturn ? '#EA580C' : '#0284C7' }}>
+                      Rs. {Number(effectiveTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </div>
+                  </div>
 
-              <div>
-                <span style={{ fontSize: '10px', color: '#DC2626', fontWeight: 700, textTransform: 'uppercase' }}>
-                  Price Variance
-                </span>
-                <div style={{ fontSize: '16px', fontWeight: 800, color: Number(log.price_variance || 0) >= 0 ? '#16A34A' : '#DC2626' }}>
-                  {Number(log.price_variance || 0) >= 0 ? '+' : ''}
-                  Rs. {Number(log.price_variance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  <div>
+                    <span style={{ fontSize: '10px', color: '#16A34A', fontWeight: 700, textTransform: 'uppercase' }}>
+                      Actual Charged / Logged Total
+                    </span>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: '#16A34A' }}>
+                      Rs. {Number(log.charged_total || snap.refund_total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <span style={{ fontSize: '10px', color: '#DC2626', fontWeight: 700, textTransform: 'uppercase' }}>
+                      Price Variance
+                    </span>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: calculatedVariance >= 0 ? '#16A34A' : '#DC2626' }}>
+                      {calculatedVariance >= 0 ? '+' : ''}
+                      Rs. {calculatedVariance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
+              );
+            })()}
 
             <div
               style={{
@@ -321,17 +379,20 @@ export default function SpecialReceiptLogDetailModal({
                 maxHeight: '520px',
               }}
             >
-              <div
-                style={{
-                  background: '#FFFFFF',
-                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                  borderRadius: '4px',
-                  padding: '8px',
-                  width: '100%',
-                  maxWidth: '340px',
-                }}
-                dangerouslySetInnerHTML={{ __html: receiptHtml }}
-              />
+            <iframe
+              srcDoc={receiptHtml}
+              title="Reconstructed receipt"
+              style={{
+                width: '100%',
+                maxWidth: '340px',
+                border: 'none',
+                minHeight: '480px',
+                background: '#FFFFFF',
+                borderRadius: '4px',
+                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+              }}
+              sandbox="allow-scripts allow-same-origin"
+            />
             </div>
           </div>
         </div>

@@ -161,22 +161,41 @@ export function buildSpecialReceiptHtml(
     };
   });
 
+  const printedTotal = Number(snapshot.printed_total || snapshot.master_total || 0);
+  const rawPaid = snapshot.paid_amount !== undefined ? Number(snapshot.paid_amount) : undefined;
+  const rawDue = snapshot.due_amount !== undefined ? Number(snapshot.due_amount) : undefined;
+
+  let paidAmount = printedTotal;
+  let dueAmount = 0;
+
+  if (rawDue !== undefined && rawDue > 0) {
+    dueAmount = rawDue;
+    paidAmount = rawPaid !== undefined ? rawPaid : Math.max(0, printedTotal - rawDue);
+  } else if (rawPaid !== undefined) {
+    paidAmount = rawPaid;
+    dueAmount = Math.max(0, printedTotal - rawPaid);
+  }
+
+  const resolvedPaymentMethod = snapshot.payment_type
+    ? String(snapshot.payment_type).toUpperCase()
+    : (dueAmount > 0 ? 'CREDIT' : 'CASH');
+
   const receiptData: RenderReceiptData = {
     tenantName: normTemplate.template_json.header.customShopName || '',
     tenantAddress: normTemplate.template_json.header.customAddress || '',
     tenantPhone: normTemplate.template_json.header.customPhone || '',
-    invoiceType: 'sales',
+    invoiceType: snapshot.invoice_type || 'sales',
     invoiceNo: snapshot.invoice_no || '',
     date: snapshot.date || new Date().toISOString().split('T')[0],
     time: snapshot.time || undefined,
     clientName: snapshot.client_name || undefined,
-    paymentMethod: snapshot.payment_type ? (snapshot.payment_type as string).toUpperCase() : 'CASH',
+    paymentMethod: resolvedPaymentMethod,
     items,
-    subTotal: Number(snapshot.printed_total || snapshot.master_total || 0),
+    subTotal: printedTotal,
     discount: 0, // Option A: Zero discount disclosure on paper
-    grandTotal: Number(snapshot.printed_total || 0),
-    paidAmount: Number(snapshot.printed_total || 0),
-    dueAmount: 0,
+    grandTotal: printedTotal,
+    paidAmount,
+    dueAmount,
     deliveryCharge: Number(snapshot.delivery_charge || 0),
     headerNote: snapshot.header_note || undefined,
     footerNote: snapshot.footer_note || undefined,

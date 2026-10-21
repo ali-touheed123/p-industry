@@ -340,6 +340,9 @@ export default function SpecialPrintModal({
           header_note: headerNote.trim() || undefined,
           footer_note: footerNote.trim() || undefined,
           delivery_charge: Number(deliveryCharge || 0),
+          payment_type: resolvedPaymentType,
+          paid_amount: finalPaidAmount,
+          due_amount: dueAmount,
         },
       };
 
@@ -357,8 +360,16 @@ export default function SpecialPrintModal({
 
       // Single-Transaction Execution: Print strictly from server snapshot
       if (resData.snapshot) {
+        const enrichedSnapshot = {
+          ...resData.snapshot,
+          payment_type: resData.snapshot.payment_type || resolvedPaymentType,
+          paid_amount: resData.snapshot.paid_amount ?? finalPaidAmount,
+          due_amount: resData.snapshot.due_amount ?? dueAmount,
+          client_name: resData.snapshot.client_name || (selectedClient ? selectedClient.name : customerName),
+          invoice_no: resData.snapshot.invoice_no || invoiceNo,
+        };
         const specialHtml = buildSpecialReceiptHtml(
-          resData.snapshot,
+          enrichedSnapshot,
           resData.template
         );
         printViaIframe(specialHtml);

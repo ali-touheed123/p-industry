@@ -260,6 +260,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: rpcErr.message }, { status: 400 });
     }
 
+    if (rpcRes && rpcRes.snapshot) {
+      rpcRes.snapshot.payment_type = rpcRes.snapshot.payment_type || payment_type;
+      rpcRes.snapshot.paid_amount = rpcRes.snapshot.paid_amount ?? parsedPaid;
+      rpcRes.snapshot.due_amount = rpcRes.snapshot.due_amount ?? parsedDue;
+      rpcRes.snapshot.invoice_no = rpcRes.snapshot.invoice_no || invoice_no;
+      rpcRes.snapshot.client_name = rpcRes.snapshot.client_name || client_name;
+      rpcRes.snapshot.date = rpcRes.snapshot.date || date;
+    }
+
     return NextResponse.json(rpcRes);
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
