@@ -120,6 +120,7 @@ export function buildSalesHistoryThermalHtml(
     items,
     subTotal: Number(inv.subtotal || 0),
     discount: Number(inv.discount || 0),
+    deliveryCharge: Number(inv.delivery_charge || 0), // BUG-1 FIX: was missing, caused NET TOTAL to jump without delivery line
     grandTotal: Number(inv.net_total || 0),
     paidAmount: Number(inv.paid_amount || 0),
     dueAmount: Number(inv.due_amount || 0),
@@ -168,12 +169,23 @@ export function buildSpecialReceiptHtml(
   let paidAmount = printedTotal;
   let dueAmount = 0;
 
-  if (rawDue !== undefined && rawDue > 0) {
-    dueAmount = rawDue;
-    paidAmount = rawPaid !== undefined ? rawPaid : Math.max(0, printedTotal - rawDue);
+  if (rawDue !== undefined) {
+    if (rawDue > 0) {
+      dueAmount = rawDue;
+      paidAmount = rawPaid !== undefined ? rawPaid : Math.max(0, printedTotal - rawDue);
+    } else {
+      // Settled in full: zero balance due on paper
+      dueAmount = 0;
+      paidAmount = printedTotal;
+    }
   } else if (rawPaid !== undefined) {
-    paidAmount = rawPaid;
-    dueAmount = Math.max(0, printedTotal - rawPaid);
+    if (rawPaid >= printedTotal) {
+      paidAmount = printedTotal;
+      dueAmount = 0;
+    } else {
+      paidAmount = rawPaid;
+      dueAmount = Math.max(0, printedTotal - rawPaid);
+    }
   }
 
   const resolvedPaymentMethod = snapshot.payment_type

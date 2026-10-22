@@ -56,12 +56,23 @@ export default function SpecialReceiptLogDetailModal({
   if (isReturn) {
     paidAmount = effectiveTotal;
     dueAmount = 0;
-  } else if (rawDue !== undefined && rawDue > 0) {
-    dueAmount = rawDue;
-    paidAmount = rawPaid !== undefined ? rawPaid : Math.max(0, effectiveTotal - rawDue);
+  } else if (rawDue !== undefined) {
+    if (rawDue > 0) {
+      dueAmount = rawDue;
+      paidAmount = rawPaid !== undefined ? rawPaid : Math.max(0, effectiveTotal - rawDue);
+    } else {
+      // Settled in full: zero balance due on paper
+      dueAmount = 0;
+      paidAmount = effectiveTotal;
+    }
   } else if (rawPaid !== undefined) {
-    paidAmount = rawPaid;
-    dueAmount = Math.max(0, effectiveTotal - rawPaid);
+    if (rawPaid >= effectiveTotal) {
+      paidAmount = effectiveTotal;
+      dueAmount = 0;
+    } else {
+      paidAmount = rawPaid;
+      dueAmount = Math.max(0, effectiveTotal - rawPaid);
+    }
   }
 
   const resolvedPaymentType = isReturn
