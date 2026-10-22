@@ -141,6 +141,7 @@ export default function PosBilling({
   const [clientSearchQuery, setClientSearchQuery] = useState<string>('');
   const [newClientName, setNewClientName] = useState<string>('');
   const [newClientPhone, setNewClientPhone] = useState<string>('');
+  const [newClientReference, setNewClientReference] = useState<string>('');
   const [remarks, setRemarks] = useState<string>('');
 
   // Customer History Real Data State
@@ -167,6 +168,8 @@ export default function PosBilling({
   // Product search & Add row state
   const [productQuery, setProductQuery] = useState<string>('');
   const [inputQty, setInputQty] = useState<number>(1);
+  const [inputRate, setInputRate] = useState<number>(0);
+  const [inputDiscount, setInputDiscount] = useState<number>(0);
   const [selectedProduct, setSelectedProduct] = useState<Item | null>(null);
   const [showProductDropdown, setShowProductDropdown] = useState<boolean>(false);
 
@@ -228,6 +231,10 @@ export default function PosBilling({
   assignedTemplateRef.current = assignedTemplate;
 
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const qtyInputRef = useRef<HTMLInputElement>(null);
+  const rateInputRef = useRef<HTMLInputElement>(null);
+  const discInputRef = useRef<HTMLInputElement>(null);
+  const addItemBtnRef = useRef<HTMLButtonElement>(null);
   const prevLineItemsCountRef = useRef<number>(0);
 
   // Toggle Keep vs Remove Token for a line item
@@ -663,11 +670,11 @@ export default function PosBilling({
   };
 
   // Add Item to table with stock validation and immutable state updates
-  const handleAddItem = (specificItem?: Item, overrideRate?: number, skipCheck: boolean = false) => {
+  const handleAddItem = (specificItem?: Item, overrideRate?: number, skipCheck: boolean = false, overrideDiscount?: number) => {
     const prod = specificItem || selectedProduct;
     if (!prod) {
       if (filteredCatalog.length === 1) {
-        handleAddItem(filteredCatalog[0], overrideRate, skipCheck);
+        handleAddItem(filteredCatalog[0], overrideRate, skipCheck, overrideDiscount);
       }
       return;
     }
@@ -705,13 +712,15 @@ export default function PosBilling({
     const { shadeCode, shadeColorHex } = getShadeInfo(prod);
     const hasToken = Boolean(prod.has_token && (Number(prod.token_value) || 0) > 0);
     const tokenVal = hasToken ? Number(prod.token_value) || 0 : 0;
-    const itemRate = overrideRate !== undefined ? overrideRate : (prod.retail_price || 0);
+    // Use overrideRate if provided; fall back to inputRate (if set by keyboard chain) then retail_price
+    const itemRate = overrideRate !== undefined ? overrideRate : (inputRate > 0 ? inputRate : (prod.retail_price || 0));
+    const itemDiscount = overrideDiscount !== undefined ? overrideDiscount : (inputDiscount > 0 ? inputDiscount : 0);
 
     if (existingIndex >= 0) {
       setLineItems((prev) =>
         prev.map((li, idx) =>
           idx === existingIndex
-            ? { ...li, qty: li.qty + requestedQty, rate: overrideRate !== undefined ? overrideRate : li.rate }
+            ? { ...li, qty: li.qty + requestedQty, rate: overrideRate !== undefined ? overrideRate : (inputRate > 0 ? inputRate : li.rate), discountPercent: itemDiscount }
             : li
         )
       );
@@ -736,7 +745,7 @@ export default function PosBilling({
         unit: prod.unit || 'PCS',
         rate: itemRate,
         originalRate: itemRate,
-        discountPercent: 0,
+        discountPercent: itemDiscount,
         hasToken,
         tokenValue: tokenVal,
         tokenAction: 'keep',
@@ -744,10 +753,14 @@ export default function PosBilling({
       setLineItems((prev) => [...prev, newLineItem]);
     }
 
+    // Reset all entry-row inputs and return focus to search
     setProductQuery('');
     setSelectedProduct(null);
     setInputQty(1);
+    setInputRate(0);
+    setInputDiscount(0);
     setShowProductDropdown(false);
+    setTimeout(() => searchInputRef.current?.focus(), 30);
   };
 
   const handleRemoveItem = (id: string) => {
@@ -1529,14 +1542,25 @@ export default function PosBilling({
                       e.preventDefault();
                       setShowProductDropdown(true);
                       setActiveProductIndex((prev) => (filteredCatalog.length ? (prev - 1 + filteredCatalog.length) % filteredCatalog.length : 0));
-                    } else if (e.key === 'Enter') {
+                    } else if (e.key === 'Enter' && e.shiftKey) {
+                      // Shift+Enter = add directly to cart (bypass keyboard chain)
                       e.preventDefault();
-                      if (showProductDropdown && filteredCatalog.length > 0 && activeProductIndex >= 0 && activeProductIndex < filteredCatalog.length) {
-                        handleAddItem(filteredCatalog[activeProductIndex]);
-                      } else if (selectedProduct) {
-                        handleAddItem(selectedProduct);
-                      } else if (filteredCatalog.length === 1) {
-                        handleAddItem(filteredCatalog[0]);
+                      const prod = (showProductDropdown && filteredCatalog.length > 0)
+                        ? filteredCatalog[activeProductIndex]
+                        : (selectedProduct || (filteredCatalog.length === 1 ? filteredCatalog[0] : null));
+                      if (prod) handleAddItem(prod, undefined, false);
+                    } else if (e.key === 'Enter') {
+                      // Plain Enter = SELECT product, move focus to Qty
+                      e.preventDefault();
+                      const prod = (showProductDropdown && filteredCatalog.length > 0)
+                        ? filteredCatalog[activeProductIndex]
+                        : (filteredCatalog.length === 1 ? filteredCatalog[0] : null);
+                      if (prod) {
+                        setSelectedProduct(prod);
+                        setInputRate(prod.retail_price || 0);
+                        setProductQuery(`${prod.name}${prod.shade_code ? ` (${prod.shade_code})` : ''}`);
+                        setShowProductDropdown(false);
+                        qtyInputRef.current?.focus();
                       }
                     } else if (e.key === 'Escape') {
                       setShowProductDropdown(false);
@@ -1624,22 +1648,77 @@ export default function PosBilling({
                 Qty:
               </span>
               <input
+                ref={qtyInputRef}
                 type="number"
                 min={1}
                 value={inputQty}
                 onChange={(e) => setInputQty(Number(e.target.value) || 1)}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowUp') { e.preventDefault(); setInputQty((prev) => prev + 1); }
+                  else if (e.key === 'ArrowDown') { e.preventDefault(); setInputQty((prev) => Math.max(1, prev - 1)); }
+                  else if (e.key === 'Enter') { e.preventDefault(); rateInputRef.current?.focus(); }
+                  else if (e.key === 'Escape') { setSelectedProduct(null); setProductQuery(''); searchInputRef.current?.focus(); }
+                }}
+                style={{ width: '100%', fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A', background: 'transparent', border: 'none', textAlign: 'center', outline: 'none' }}
+              />
+            </div>
+
+            {/* Rate Field */}
+            <div style={{ width: '110px', flexShrink: 0, display: 'flex', alignItems: 'center', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '4px 8px' }}>
+              <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B', textTransform: 'uppercase', fontWeight: 700, marginRight: '4px' }}>
+                Rate:
+              </span>
+              <input
+                ref={rateInputRef}
+                type="number"
+                min={0}
+                step="any"
+                value={inputRate || ''}
+                placeholder="0"
+                onChange={(e) => setInputRate(Number(e.target.value) || 0)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); discInputRef.current?.focus(); }
+                  else if (e.key === 'Escape') { searchInputRef.current?.focus(); }
+                }}
+                style={{ width: '100%', fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A', background: 'transparent', border: 'none', textAlign: 'center', outline: 'none' }}
+              />
+            </div>
+
+            {/* Disc% Field */}
+            <div style={{ width: '90px', flexShrink: 0, display: 'flex', alignItems: 'center', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '4px 8px' }}>
+              <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B', textTransform: 'uppercase', fontWeight: 700, marginRight: '4px' }}>
+                Dis%:
+              </span>
+              <input
+                ref={discInputRef}
+                type="number"
+                min={0}
+                max={100}
+                step="any"
+                value={inputDiscount || ''}
+                placeholder="0"
+                onChange={(e) => setInputDiscount(Math.min(100, Math.max(0, Number(e.target.value) || 0)))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); addItemBtnRef.current?.click(); }
+                  else if (e.key === 'Escape') { searchInputRef.current?.focus(); }
+                }}
                 style={{ width: '100%', fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A', background: 'transparent', border: 'none', textAlign: 'center', outline: 'none' }}
               />
             </div>
 
             {/* Add Item Button */}
             <button
+              ref={addItemBtnRef}
               type="button"
               onClick={() => {
-                if (selectedProduct) {
-                  handleAddItem(selectedProduct);
-                } else if (filteredCatalog.length === 1) {
-                  handleAddItem(filteredCatalog[0]);
+                const prod = selectedProduct || (filteredCatalog.length === 1 ? filteredCatalog[0] : null);
+                if (prod) {
+                  handleAddItem(
+                    prod,
+                    inputRate > 0 ? inputRate : undefined,
+                    false,
+                    inputDiscount > 0 ? inputDiscount : undefined
+                  );
                 }
               }}
               style={{ padding: '8px 18px', background: '#F97316', color: '#ffffff', fontWeight: 700, fontSize: '12px', borderRadius: '8px', border: 'none', boxShadow: '0 2px 6px rgba(249,115,22,0.3)', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', flexShrink: 0 }}
@@ -1876,8 +1955,34 @@ export default function PosBilling({
                           <td style={{ fontFamily: 'JetBrains Mono, monospace', color: '#64748B', fontSize: '11px', whiteSpace: 'nowrap' }}>
                             {item.unit}
                           </td>
-                          <td style={{ textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600, color: '#1E293B', whiteSpace: 'nowrap' }}>
-                            {item.rate.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            <input
+                              type="number"
+                              min={0}
+                              step="any"
+                              value={item.rate === 0 ? '' : item.rate}
+                              placeholder="0.00"
+                              onChange={(e) => {
+                                const val = Math.max(0, parseFloat(e.target.value) || 0);
+                                setLineItems((prev) =>
+                                  prev.map((li) => li.id === item.id ? { ...li, rate: val } : li)
+                                  // originalRate stays unchanged (Token-safe: D5)
+                                );
+                              }}
+                              style={{
+                                width: '72px',
+                                textAlign: 'right',
+                                fontFamily: 'JetBrains Mono, monospace',
+                                color: '#1E293B',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                background: '#F8FAFC',
+                                border: '1px solid #E2E8F0',
+                                borderRadius: '4px',
+                                padding: '2px 4px',
+                                outline: 'none',
+                              }}
+                            />
                           </td>
                           <td style={{ textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', color: '#475569', whiteSpace: 'nowrap' }}>
                             <input
@@ -2462,6 +2567,14 @@ export default function PosBilling({
                   className="pos-text-input"
                   style={{ width: '130px' }}
                 />
+                <input
+                  type="text"
+                  value={newClientReference}
+                  onChange={(e) => setNewClientReference(e.target.value)}
+                  placeholder="Referrer / Agent..."
+                  className="pos-text-input"
+                  style={{ width: '130px' }}
+                />
                 <button
                   type="button"
                   onClick={async () => {
@@ -2474,6 +2587,7 @@ export default function PosBilling({
                           tenant_id: tenantId,
                           name: newClientName,
                           phone: newClientPhone,
+                          reference: newClientReference || undefined,
                           credit_limit: 50000,
                         }),
                       });
@@ -2484,6 +2598,7 @@ export default function PosBilling({
                         setCustomerSearch(data.client.name);
                         setNewClientName('');
                         setNewClientPhone('');
+                        setNewClientReference('');
                         setShowCustomerModal(false);
                         showFeedback(`Customer ${data.client.name} created!`);
                       }

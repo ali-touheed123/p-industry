@@ -71,6 +71,7 @@ export async function POST(req: NextRequest) {
       address,
       credit_limit = 50000,
       current_balance = 0,
+      reference,
     } = body;
 
     if (!tenant_id || !name) {
@@ -97,6 +98,7 @@ export async function POST(req: NextRequest) {
         address: address || null,
         credit_limit: Number(credit_limit) || 50000,
         current_balance: Number(current_balance) || 0,
+        reference: reference || null,
       })
       .select()
       .single();
@@ -113,7 +115,7 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { id, credit_limit, name, phone, address, city } = body;
+    const { id, credit_limit, name, phone, address, city, reference } = body;
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Client ID is required' }, { status: 400 });
@@ -141,6 +143,7 @@ export async function PATCH(req: NextRequest) {
     if (phone !== undefined) updates.phone = phone || null;
     if (address !== undefined) updates.address = address || null;
     if (city !== undefined) updates.city = city || null;
+    if (reference !== undefined) updates.reference = reference || null;
 
     // Scope update to tenant as defence-in-depth
     const { data: client, error } = await supabaseAdmin

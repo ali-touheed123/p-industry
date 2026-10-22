@@ -103,6 +103,7 @@ export interface Client {
   credit_limit: number;
   current_balance: number;
   token_balance?: number;
+  reference?: string;
   created_at: string;
 }
 

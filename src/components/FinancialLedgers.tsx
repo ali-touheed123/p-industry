@@ -112,6 +112,7 @@ export default function FinancialLedgers({
   const [newPartyName, setNewPartyName] = useState('');
   const [newPartyPhone, setNewPartyPhone] = useState('');
   const [newPartyAddress, setNewPartyAddress] = useState('');
+  const [newPartyReference, setNewPartyReference] = useState('');
   const [newPartyLimit, setNewPartyLimit] = useState('50000');
   const [submittingParty, setSubmittingParty] = useState(false);
 
@@ -432,6 +433,7 @@ export default function FinancialLedgers({
             phone: newPartyPhone,
             address: newPartyAddress,
             city: newPartyAddress,
+            reference: newPartyReference.trim() || undefined,
             credit_limit: parseFloat(newPartyLimit) || 50000,
           }
         : {
@@ -454,6 +456,7 @@ export default function FinancialLedgers({
         setNewPartyName('');
         setNewPartyPhone('');
         setNewPartyAddress('');
+        setNewPartyReference('');
         await fetchParties();
         if (data.client) setSelectedParty(data.client);
         if (data.supplier) setSelectedParty(data.supplier);
@@ -790,7 +793,7 @@ export default function FinancialLedgers({
                   </span>
                 </div>
                 <p className="text-muted text-xs font-mono" style={{ marginTop: '2px' }}>
-                  ID: {selectedParty.code || '—'} • Tel: {selectedParty.phone || 'No phone'}
+                  ID: {selectedParty.code || '—'} • Tel: {selectedParty.phone || 'No phone'}{selectedParty.reference ? ` • Ref: ${selectedParty.reference}` : ''}
                 </p>
               </div>
 
@@ -1202,6 +1205,12 @@ export default function FinancialLedgers({
                 <span className="text-muted">City / Location:</span>
                 <strong>{selectedParty.city || selectedParty.address || '—'}</strong>
               </div>
+              {selectedParty.reference && (
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span className="text-muted">Reference / Agent:</span>
+                  <strong style={{ color: 'var(--primary, #0284c7)' }}>{selectedParty.reference}</strong>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1662,15 +1671,27 @@ export default function FinancialLedgers({
               </div>
 
               {activeTab === 'clients' && (
-                <div>
-                  <label className="form-label">Credit Limit (PKR)</label>
-                  <input
-                    type="number"
-                    className="form-input"
-                    value={newPartyLimit}
-                    onChange={e => setNewPartyLimit(e.target.value)}
-                  />
-                </div>
+                <>
+                  <div>
+                    <label className="form-label">Reference / Referrer / Agent</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="e.g. Agent name, Contractor, Walk-in..."
+                      value={newPartyReference}
+                      onChange={e => setNewPartyReference(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label">Credit Limit (PKR)</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={newPartyLimit}
+                      onChange={e => setNewPartyLimit(e.target.value)}
+                    />
+                  </div>
+                </>
               )}
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
