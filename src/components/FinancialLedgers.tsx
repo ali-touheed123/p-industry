@@ -116,6 +116,17 @@ export default function FinancialLedgers({
   const [newPartyLimit, setNewPartyLimit] = useState('50000');
   const [submittingParty, setSubmittingParty] = useState(false);
 
+  // Edit Party Modal State
+  const [showEditPartyModal, setShowEditPartyModal] = useState(false);
+  const [editPartyId, setEditPartyId] = useState('');
+  const [editPartyName, setEditPartyName] = useState('');
+  const [editPartyPhone, setEditPartyPhone] = useState('');
+  const [editPartyAddress, setEditPartyAddress] = useState('');
+  const [editPartyReference, setEditPartyReference] = useState('');
+  const [editPartyLimit, setEditPartyLimit] = useState('50000');
+  const [submittingEditParty, setSubmittingEditParty] = useState(false);
+  const [editPartyError, setEditPartyError] = useState('');
+
   // Fetch Clients & Suppliers
   const fetchParties = async () => {
     if (!tenantId) return;
@@ -468,6 +479,83 @@ export default function FinancialLedgers({
     }
   };
 
+  // Open Edit Party Modal
+  const handleOpenEditParty = (party: any) => {
+    if (!party) return;
+    setEditPartyId(party.id);
+    setEditPartyName(party.name || '');
+    setEditPartyPhone(party.phone || '');
+    setEditPartyAddress(party.address || party.city || '');
+    setEditPartyReference(party.reference || '');
+    setEditPartyLimit(party.credit_limit !== undefined ? String(party.credit_limit) : '50000');
+    setEditPartyError('');
+    setShowEditPartyModal(true);
+  };
+
+  // Save Edit Party Details
+  const handleSaveEditParty = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editPartyId || !tenantId) return;
+    if (!editPartyName.trim()) {
+      setEditPartyError('Customer name is required');
+      return;
+    }
+    setSubmittingEditParty(true);
+    setEditPartyError('');
+
+    try {
+      const endpoint = activeTab === 'clients' ? '/api/clients' : '/api/suppliers';
+      const payload: any = {
+        id: editPartyId,
+        tenant_id: tenantId,
+        name: editPartyName.trim(),
+        phone: editPartyPhone.trim() || null,
+        address: editPartyAddress.trim() || null,
+        city: editPartyAddress.trim() || null,
+      };
+
+      if (activeTab === 'clients') {
+        payload.reference = editPartyReference.trim() || null;
+        payload.credit_limit = parseFloat(editPartyLimit) || 0;
+      }
+
+      const res = await fetch(endpoint, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to update details');
+      }
+
+      const updatedRecord = data.client || data.supplier;
+
+      // Update in local state
+      if (activeTab === 'clients') {
+        setClients((prev) =>
+          prev.map((c) => (c.id === editPartyId ? { ...c, ...updatedRecord } : c))
+        );
+      } else if (activeTab === 'suppliers') {
+        setSuppliers((prev) =>
+          prev.map((s) => (s.id === editPartyId ? { ...s, ...updatedRecord } : s))
+        );
+      }
+
+      if (selectedParty?.id === editPartyId) {
+        setSelectedParty((prev: any) => ({ ...prev, ...updatedRecord }));
+      }
+
+      setShowEditPartyModal(false);
+      await fetchParties();
+    } catch (err: any) {
+      setEditPartyError(err.message || 'Error updating details');
+    } finally {
+      setSubmittingEditParty(false);
+    }
+  };
+
   // WhatsApp Statement Image Share (Respecting Clients vs Suppliers)
   const handleSendWhatsAppLedger = async () => {
     if (!selectedParty) return;
@@ -764,9 +852,34 @@ export default function FinancialLedgers({
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--on-surface-variant)' }}>
                   <span>ID: {party.code || party.city || '—'}</span>
-                  <span className="font-mono font-bold" style={{ color: isOverdue ? 'var(--error)' : 'inherit', fontSize: '12px' }}>
-                    Rs. {bal.toLocaleString()}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span className="font-mono font-bold" style={{ color: isOverdue ? 'var(--error)' : 'inherit', fontSize: '12px' }}>
+                      Rs. {bal.toLocaleString()}
+                    </span>
+                    {activeTab !== 'branches' && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedParty(party);
+                          handleOpenEditParty(party);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--on-surface-variant)',
+                          cursor: 'pointer',
+                          padding: '2px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          borderRadius: '4px',
+                        }}
+                        title={`Edit ${party.name}`}
+                      >
+                        <Pencil size={12} />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -791,6 +904,29 @@ export default function FinancialLedgers({
                   <span className="badge badge-secondary" style={{ fontSize: '10px' }}>
                     {activeTab === 'clients' ? 'Client' : activeTab === 'suppliers' ? 'Supplier' : 'Sister Branch'}
                   </span>
+                  {activeTab !== 'branches' && (
+                    <button
+                      onClick={() => handleOpenEditParty(selectedParty)}
+                      style={{
+                        background: 'var(--surface-container-high)',
+                        border: '1px solid var(--outline-variant)',
+                        borderRadius: '6px',
+                        padding: '3px 8px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        color: 'var(--on-surface)',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        transition: 'all 0.15s',
+                      }}
+                      title={`Edit ${activeTab === 'clients' ? 'Client' : 'Supplier'} Info`}
+                    >
+                      <Pencil size={11} />
+                      Edit Info
+                    </button>
+                  )}
                 </div>
                 <p className="text-muted text-xs font-mono" style={{ marginTop: '2px' }}>
                   ID: {selectedParty.code || '—'} • Tel: {selectedParty.phone || 'No phone'}{selectedParty.reference ? ` • Ref: ${selectedParty.reference}` : ''}
@@ -1193,6 +1329,31 @@ export default function FinancialLedgers({
 
             {/* Contact Details */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem', borderTop: '1px solid var(--outline-variant)', paddingTop: '1rem', fontSize: '13px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
+                <span className="label-caps" style={{ color: 'var(--on-surface-variant)', fontSize: '11px' }}>Contact Info</span>
+                {activeTab !== 'branches' && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditParty(selectedParty)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--secondary)',
+                      cursor: 'pointer',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: 0,
+                    }}
+                    title="Edit Contact & Info"
+                  >
+                    <Pencil size={11} />
+                    Edit
+                  </button>
+                )}
+              </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span className="text-muted">Account Code:</span>
                 <strong className="font-mono">{selectedParty.code || '—'}</strong>
@@ -1708,6 +1869,137 @@ export default function FinancialLedgers({
                   className="btn btn-primary"
                 >
                   {submittingParty ? 'Saving...' : 'Create Profile'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── EDIT PARTY / CLIENT MODAL ── */}
+      {showEditPartyModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2500, padding: '1rem' }}>
+          <div className="card" style={{ width: '440px', maxWidth: '94vw', padding: '1.5rem', background: '#FFFFFF', borderRadius: '14px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.3)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: 34, height: 34, borderRadius: '8px', background: 'var(--secondary-fixed, #e0f2fe)', color: 'var(--secondary, #0284c7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Pencil size={17} />
+                </div>
+                <div>
+                  <h3 className="headline-sm" style={{ margin: 0, fontSize: '15px', fontWeight: 800 }}>
+                    {activeTab === 'clients' ? 'Edit Customer Profile' : 'Edit Supplier Profile'}
+                  </h3>
+                  <div style={{ fontSize: '11px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
+                    {selectedParty?.code ? `Account Code: ${selectedParty.code}` : 'Update customer information'}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEditPartyModal(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', padding: '4px' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {editPartyError && (
+              <div style={{ padding: '8px 12px', background: '#FEE2E2', color: '#B91C1C', borderRadius: '6px', fontSize: '12px', marginBottom: '1rem', fontWeight: 600 }}>
+                {editPartyError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveEditParty} style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+              <div>
+                <label className="form-label" style={{ fontSize: '12px', fontWeight: 700, marginBottom: '4px', display: 'block', color: '#334155' }}>
+                  Customer Name / Business <span style={{ color: '#EF4444' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  className="form-input"
+                  placeholder="e.g. Al-Madina Hardware"
+                  value={editPartyName}
+                  onChange={e => setEditPartyName(e.target.value)}
+                  style={{ width: '100%', height: '36px', fontSize: '13px' }}
+                />
+              </div>
+
+              <div>
+                <label className="form-label" style={{ fontSize: '12px', fontWeight: 700, marginBottom: '4px', display: 'block', color: '#334155' }}>
+                  Phone Number
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="0300-1234567"
+                  value={editPartyPhone}
+                  onChange={e => setEditPartyPhone(e.target.value)}
+                  style={{ width: '100%', height: '36px', fontSize: '13px' }}
+                />
+              </div>
+
+              <div>
+                <label className="form-label" style={{ fontSize: '12px', fontWeight: 700, marginBottom: '4px', display: 'block', color: '#334155' }}>
+                  Address / City Location
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Shop #12, Commercial Market, Lahore"
+                  value={editPartyAddress}
+                  onChange={e => setEditPartyAddress(e.target.value)}
+                  style={{ width: '100%', height: '36px', fontSize: '13px' }}
+                />
+              </div>
+
+              {activeTab === 'clients' && (
+                <>
+                  <div>
+                    <label className="form-label" style={{ fontSize: '12px', fontWeight: 700, marginBottom: '4px', display: 'block', color: '#334155' }}>
+                      Reference / Referrer / Agent
+                    </label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="e.g. Contractor Bilal, Agent..."
+                      value={editPartyReference}
+                      onChange={e => setEditPartyReference(e.target.value)}
+                      style={{ width: '100%', height: '36px', fontSize: '13px' }}
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label" style={{ fontSize: '12px', fontWeight: 700, marginBottom: '4px', display: 'block', color: '#334155' }}>
+                      Credit Limit (PKR)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      className="form-input"
+                      value={editPartyLimit}
+                      onChange={e => setEditPartyLimit(e.target.value)}
+                      style={{ width: '100%', height: '36px', fontSize: '13px', fontFamily: 'JetBrains Mono, monospace' }}
+                    />
+                  </div>
+                </>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid #F1F5F9' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowEditPartyModal(false)}
+                  className="btn btn-secondary-outline"
+                  style={{ padding: '8px 16px', fontSize: '13px' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingEditParty}
+                  className="btn btn-primary"
+                  style={{ padding: '8px 18px', fontSize: '13px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                >
+                  {submittingEditParty ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
             </form>

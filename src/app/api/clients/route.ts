@@ -139,7 +139,7 @@ export async function PATCH(req: NextRequest) {
 
     const updates: Record<string, any> = {};
     if (credit_limit !== undefined) updates.credit_limit = Number(credit_limit);
-    if (name !== undefined) updates.name = name;
+    if (name !== undefined) updates.name = typeof name === 'string' ? name.trim() : name;
     if (phone !== undefined) updates.phone = phone || null;
     if (address !== undefined) updates.address = address || null;
     if (city !== undefined) updates.city = city || null;
@@ -155,6 +155,24 @@ export async function PATCH(req: NextRequest) {
       .single();
 
     if (error) throw error;
+
+    // Option B: Cascade updated client name to historical invoices and payment vouchers
+    if (name !== undefined && typeof name === 'string' && name.trim()) {
+      const trimmedName = name.trim();
+      await Promise.all([
+        supabaseAdmin
+          .from('invoices')
+          .update({ client_name: trimmedName })
+          .eq('client_id', id)
+          .eq('tenant_id', existingClient.tenant_id),
+        supabaseAdmin
+          .from('vouchers')
+          .update({ party_name: trimmedName })
+          .eq('party_id', id)
+          .eq('party_type', 'client')
+          .eq('tenant_id', existingClient.tenant_id),
+      ]);
+    }
 
     return NextResponse.json({ success: true, client });
   } catch (error: any) {

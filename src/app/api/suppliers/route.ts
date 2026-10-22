@@ -149,6 +149,24 @@ export async function PATCH(req: NextRequest) {
 
     if (error) throw error;
 
+    // Option B: Cascade updated supplier name to historical purchases and payment vouchers
+    if (name !== undefined && typeof name === 'string' && name.trim()) {
+      const trimmedName = name.trim();
+      await Promise.all([
+        supabaseAdmin
+          .from('purchases')
+          .update({ supplier_name: trimmedName })
+          .eq('supplier_id', id)
+          .eq('tenant_id', existingSupplier.tenant_id),
+        supabaseAdmin
+          .from('vouchers')
+          .update({ party_name: trimmedName })
+          .eq('party_id', id)
+          .eq('party_type', 'supplier')
+          .eq('tenant_id', existingSupplier.tenant_id),
+      ]);
+    }
+
     return NextResponse.json({ success: true, supplier });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
