@@ -146,6 +146,35 @@ export async function GET(req: NextRequest) {
 
     if (vouchErr) throw vouchErr;
 
+    // 2b. Branch transfer vouchers → attach the transferred products (branch_order_items) for detailed statements.
+    //     Transfers are booked as one lump value, so only name/code/unit/qty are available (no rate/amount).
+    const ibtRefs = Array.from(
+      new Set(
+        (vouchers || [])
+          .filter((v: any) => v.voucher_type === 'branch_transfer_in' || v.voucher_type === 'branch_transfer_out')
+          .map((v: any) => v.reference_no)
+          .filter(Boolean)
+      )
+    );
+    const transferItemsByOrderNo: Record<string, any[]> = {};
+    if (ibtRefs.length > 0) {
+      const { data: orders } = await supabaseAdmin
+        .from('branch_orders')
+        .select('order_no, branch_order_items(*)')
+        .in('order_no', ibtRefs as string[]);
+      (orders || []).forEach((o: any) => {
+        transferItemsByOrderNo[o.order_no] = (o.branch_order_items || []).map((it: any) => ({
+          item_name: it.item_name || it.item_code,
+          code: it.item_code,
+          shade_code: '',
+          pack_size: it.unit || 'Can',
+          qty: Number(it.qty) || 0,
+          unit_price: 0,
+          total_price: 0,
+        }));
+      });
+    }
+
     // 3. Merge & Sort Chronologically
     const transactions: any[] = [...records];
 
@@ -165,6 +194,7 @@ export async function GET(req: NextRequest) {
           desc: `${v.voucher_no} — ${v.remarks || 'Stock Received (Payable)'}`,
           debit: amt,
           credit: 0,
+          items: transferItemsByOrderNo[v.reference_no] || undefined,
         });
       } else if (vType === 'branch_transfer_out') {
         // We dispatched stock → Credit (they OWE us)
@@ -177,6 +207,7 @@ export async function GET(req: NextRequest) {
           desc: `${v.voucher_no} — ${v.remarks || 'Stock Dispatched (Receivable)'}`,
           debit: 0,
           credit: amt,
+          items: transferItemsByOrderNo[v.reference_no] || undefined,
         });
       } else {
         // ── Standard Receipts / Payments / Settlements ──────────────────

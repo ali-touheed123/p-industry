@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { printViaIframe } from '@/utils/iframePrint';
-import { buildPosThermalHtml } from '@/utils/receiptAdapters';
+import { buildPosThermalHtml, buildSpecialReceiptHtml } from '@/utils/receiptAdapters';
 import { ReceiptTemplate } from '@/types/receipt';
 import { Item, Client } from '@/types';
 import {
@@ -26,7 +26,6 @@ import {
   Coins,
 } from 'lucide-react';
 import TokenRedemption from './TokenRedemption';
-import SpecialPrintModal from './SpecialPrintModal';
 
 interface Props {
   items: Item[];
@@ -73,6 +72,7 @@ export interface InvoiceLineItem {
   unit: string;
   rate: number;
   originalRate?: number;
+  specialRate?: number; // Special sale: final per-unit rate charged (receipt prints `rate`)
   discountPercent: number;
   hasToken?: boolean;
   tokenValue?: number;
@@ -170,6 +170,7 @@ export default function PosBilling({
   const [inputQty, setInputQty] = useState<number>(1);
   const [inputRate, setInputRate] = useState<number>(0);
   const [inputDiscount, setInputDiscount] = useState<number>(0);
+  const [inputSpecialRate, setInputSpecialRate] = useState<number>(0);
   const [selectedProduct, setSelectedProduct] = useState<Item | null>(null);
   const [showProductDropdown, setShowProductDropdown] = useState<boolean>(false);
 
@@ -194,7 +195,6 @@ export default function PosBilling({
   const [notification, setNotification] = useState<string | null>(null);
   const [printReceiptData, setPrintReceiptData] = useState<any | null>(null);
   const [showTokenRedemptionModal, setShowTokenRedemptionModal] = useState<boolean>(false);
-  const [showSpecialModal, setShowSpecialModal] = useState<boolean>(false);
   const [specialBrandIds, setSpecialBrandIds] = useState<Set<string>>(new Set());
 
   // Load Special Receipt Brands lookup (TASK-SR-11)
@@ -234,6 +234,7 @@ export default function PosBilling({
   const qtyInputRef = useRef<HTMLInputElement>(null);
   const rateInputRef = useRef<HTMLInputElement>(null);
   const discInputRef = useRef<HTMLInputElement>(null);
+  const specialRateInputRef = useRef<HTMLInputElement>(null);
   const addItemBtnRef = useRef<HTMLButtonElement>(null);
   const prevLineItemsCountRef = useRef<number>(0);
 
@@ -521,6 +522,7 @@ export default function PosBilling({
           rate: Number(it.rate || it.unit_price) || 0,
           originalRate: Number(it.originalRate || it.rate || it.unit_price) || 0,
           discountPercent: Number(it.discountPercent || it.discount_percent) || 0,
+          specialRate: Number(it.specialRate) > 0 ? Number(it.specialRate) : undefined,
           hasToken: it.hasToken ?? live?.has_token ?? false,
           tokenValue: it.tokenValue ?? (live?.has_token ? Number(live?.token_value) || 0 : 0),
           tokenAction: it.tokenAction || 'keep',
@@ -613,7 +615,7 @@ export default function PosBilling({
 
   // Calculations
   const itemSubtotal = lineItems.reduce((sum, item) => {
-    let effectiveRate = item.rate;
+    let effectiveRate = item.specialRate && item.specialRate > 0 ? item.specialRate : item.rate;
     if (invoiceType === 'return' && item.hasToken && item.tokenReturnedWithBucket === false) {
       effectiveRate = Math.max(0, effectiveRate - (item.tokenValue || 0));
     }
@@ -623,7 +625,7 @@ export default function PosBilling({
   }, 0);
 
   const totalItemDiscount = lineItems.reduce((sum, item) => {
-    let effectiveRate = item.rate;
+    let effectiveRate = item.specialRate && item.specialRate > 0 ? item.specialRate : item.rate;
     if (invoiceType === 'return' && item.hasToken && item.tokenReturnedWithBucket === false) {
       effectiveRate = Math.max(0, effectiveRate - (item.tokenValue || 0));
     }
@@ -715,12 +717,17 @@ export default function PosBilling({
     // Use overrideRate if provided; fall back to inputRate (if set by keyboard chain) then retail_price
     const itemRate = overrideRate !== undefined ? overrideRate : (inputRate > 0 ? inputRate : (prod.retail_price || 0));
     const itemDiscount = overrideDiscount !== undefined ? overrideDiscount : (inputDiscount > 0 ? inputDiscount : 0);
+    const itemSpecialRate = canUseSpecialReceipt && inputSpecialRate > 0 ? inputSpecialRate : undefined;
+    if (itemSpecialRate !== undefined && itemSpecialRate > itemRate) {
+      showFeedback('Special Rate, Rate se zyada nahi ho sakta.');
+      return;
+    }
 
     if (existingIndex >= 0) {
       setLineItems((prev) =>
         prev.map((li, idx) =>
           idx === existingIndex
-            ? { ...li, qty: li.qty + requestedQty, rate: overrideRate !== undefined ? overrideRate : (inputRate > 0 ? inputRate : li.rate), discountPercent: itemDiscount }
+            ? { ...li, qty: li.qty + requestedQty, rate: overrideRate !== undefined ? overrideRate : (inputRate > 0 ? inputRate : li.rate), discountPercent: itemDiscount, specialRate: itemSpecialRate }
             : li
         )
       );
@@ -746,6 +753,7 @@ export default function PosBilling({
         rate: itemRate,
         originalRate: itemRate,
         discountPercent: itemDiscount,
+        specialRate: itemSpecialRate,
         hasToken,
         tokenValue: tokenVal,
         tokenAction: 'keep',
@@ -759,6 +767,7 @@ export default function PosBilling({
     setInputQty(1);
     setInputRate(0);
     setInputDiscount(0);
+    setInputSpecialRate(0);
     setShowProductDropdown(false);
     setTimeout(() => searchInputRef.current?.focus(), 30);
   };
@@ -924,6 +933,10 @@ export default function PosBilling({
   const handleCheckout = async (openPrint = true) => {
     if (lineItems.length === 0 || submitting) {
       showFeedback('Please add at least one item before checkout.');
+      return;
+    }
+    if (lineItems.some((li) => li.specialRate && li.specialRate > 0)) {
+      showFeedback('Cart mein Special Rate lagi hui hai. Is sale ke liye "Special Save & Print (F6)" use karein, ya Special Rate hata dein.');
       return;
     }
     setSubmitting(true);
@@ -1180,6 +1193,183 @@ export default function PosBilling({
     );
   });
 
+  // Special Save & Print: saves via /api/invoices/special and opens the browser print preview directly (no modal).
+  // Receipt prints the cart `rate` (original); customer is charged the Special Rate (per unit) minus Disc %.
+  const handleSpecialDirect = async () => {
+    if (!canUseSpecialReceipt || submitting) return;
+    if (lineItems.length === 0) {
+      showFeedback('Please add at least one item before checkout.');
+      return;
+    }
+    if (invoiceType !== 'sales') {
+      showFeedback('Special Save & Print sirf sales invoice ke liye hai.');
+      return;
+    }
+    if (editingInvoice?.id) {
+      showFeedback('Existing invoice edit karte waqt Special Save & Print available nahi.');
+      return;
+    }
+    if (invoiceDiscount > 0) {
+      showFeedback('Special sale mein invoice discount allowed nahi. Line Disc % ya Special Rate use karein.');
+      return;
+    }
+    setSubmitting(true);
+
+    const specialLines = lineItems.map((ci) => {
+      const qty = Number(ci.qty) || 1;
+      const printedRate = Number(ci.rate) || 0;
+      const chargedRate = ci.specialRate && ci.specialRate > 0 ? Math.min(ci.specialRate, printedRate) : printedRate;
+      const gross = qty * printedRate;
+      const lineTotal = Math.round(qty * chargedRate * (1 - (ci.discountPercent || 0) / 100) * 100) / 100;
+      const lineDiscount = Math.round((gross - lineTotal) * 100) / 100;
+      const discPct = gross > 0 ? Math.round((lineDiscount / gross) * 100 * 100) / 100 : 0;
+      return { ci, qty, printedRate, lineTotal, lineDiscount, discPct };
+    });
+
+    const linesTotal = Math.round(specialLines.reduce((a, l) => a + l.lineTotal, 0) * 100) / 100;
+    const roundedNetTotal = Math.round((linesTotal + Number(deliveryCharge || 0)) * 100) / 100;
+    const nonCashPaid = Math.round((cardPayment + bankPayment + othersPayment) * 100) / 100;
+
+    if (nonCashPaid > roundedNetTotal) {
+      showFeedback(`Non-cash payment (Rs. ${nonCashPaid.toLocaleString()}) exceeds Net Total (Rs. ${roundedNetTotal.toLocaleString()}). Please correct tender amounts.`);
+      setSubmitting(false);
+      return;
+    }
+
+    const maxCashRetained = Math.max(0, Math.round((roundedNetTotal - nonCashPaid) * 100) / 100);
+    const actualCashRetained = Math.min(cashPayment, maxCashRetained);
+    const finalPaid = Math.round((actualCashRetained + nonCashPaid) * 100) / 100;
+    const rawDue = roundedNetTotal - finalPaid;
+    const finalDue = rawDue > 0.01 ? Math.round(rawDue * 100) / 100 : 0;
+
+    if (!selectedClient && finalDue > 0) {
+      showFeedback('Cannot sell on credit to a walk-in customer. Please select a registered customer account, or collect full payment before completing this sale.');
+      setSubmitting(false);
+      return;
+    }
+    if (selectedClient && finalDue > 0) {
+      const currentBal = Number(selectedClient.current_balance) || 0;
+      const limit = Number(selectedClient.credit_limit) || 0;
+      if (limit > 0 && currentBal + finalDue > limit) {
+        showFeedback(`Insufficient credit limit. Available limit: Rs. ${Math.max(0, limit - currentBal).toLocaleString()}`);
+        setSubmitting(false);
+        return;
+      }
+    }
+
+    const customerDisplayName = selectedClient ? selectedClient.name : customerSearch || 'Walk-in Customer';
+    const modesUsed =
+      (actualCashRetained > 0 ? 1 : 0) + (cardPayment > 0 ? 1 : 0) + (bankPayment > 0 ? 1 : 0) + (othersPayment > 0 ? 1 : 0);
+    let resolvedPaymentType = 'cash';
+    if (finalDue > 0) resolvedPaymentType = 'credit';
+    else if (modesUsed > 1 || othersPayment > 0) resolvedPaymentType = 'split';
+    else if (cardPayment > 0) resolvedPaymentType = 'card';
+    else if (bankPayment > 0) resolvedPaymentType = 'bank';
+
+    const payload = {
+      tenant_id: tenantId,
+      invoice_no: invoiceNo,
+      client_id: selectedClient?.id || null,
+      client_name: customerDisplayName,
+      shift_id: shiftId || null,
+      date: new Date().toISOString().split('T')[0],
+      subtotal: linesTotal,
+      discount: 0,
+      delivery_charge: Number(deliveryCharge || 0),
+      remarks: remarks || null,
+      net_total: roundedNetTotal,
+      paid_amount: finalPaid,
+      due_amount: finalDue,
+      payment_type: resolvedPaymentType,
+      cash_paid: actualCashRetained,
+      card_paid: cardPayment,
+      bank_paid: bankPayment,
+      others_paid: othersPayment,
+      items: specialLines.map(({ ci, qty, printedRate, lineTotal, lineDiscount, discPct }) => ({
+        item_id: ci.item?.id || null,
+        item_code: ci.code,
+        item_name: ci.productName,
+        shade_code: ci.shadeCode,
+        pack_size: ci.packSize,
+        unit: ci.unit,
+        qty,
+        unit_price: printedRate,
+        pre_discount_rate: printedRate,
+        discount: lineDiscount,
+        discount_percent: discPct,
+        total_price: lineTotal,
+        receipt_name: (ci.productName || '').trim() || ci.productName,
+        receipt_shade: (ci.shadeCode || '').trim() || undefined,
+        receipt_pack_size: (ci.packSize || '').trim() || ci.unit,
+        receipt_notes: undefined,
+        has_token: ci.hasToken,
+        token_value: ci.tokenValue,
+        token_action: ci.tokenAction || 'keep',
+      })),
+      receipt_snapshot: {
+        header_note: undefined,
+        footer_note: undefined,
+        delivery_charge: Number(deliveryCharge || 0),
+        payment_type: resolvedPaymentType,
+        paid_amount: finalPaid,
+        due_amount: finalDue,
+      },
+    };
+
+    try {
+      const res = await fetch('/api/invoices/special', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const resData = await res.json();
+      if (!res.ok || !resData.success) {
+        throw new Error(resData.error || 'Failed to record special sale.');
+      }
+
+      if (resData.snapshot) {
+        const enrichedSnapshot = {
+          ...resData.snapshot,
+          payment_type: resData.snapshot.payment_type || resolvedPaymentType,
+          paid_amount: resData.snapshot.paid_amount ?? finalPaid,
+          due_amount: resData.snapshot.due_amount ?? finalDue,
+          client_name: resData.snapshot.client_name || customerDisplayName,
+          invoice_no: resData.snapshot.invoice_no || invoiceNo,
+        };
+        printViaIframe(buildSpecialReceiptHtml(enrichedSnapshot, resData.template));
+      }
+
+      const savedInvoice = resData.invoice || { invoice_no: invoiceNo };
+      onCompleteSale(savedInvoice);
+
+      if (activeHeldOrderId) {
+        try {
+          await fetch(`/api/held-invoices?id=${activeHeldOrderId}`, { method: 'DELETE' });
+        } catch (delHeldErr) {
+          console.error('Failed to remove held invoice after special checkout:', delHeldErr);
+        }
+        setActiveHeldOrderId(null);
+      }
+
+      setLineItems([]);
+      setRemarks('');
+      setInvoiceDiscount(0);
+      setDeliveryCharge(0);
+      setCashPayment(0);
+      setCardPayment(0);
+      setBankPayment(0);
+      setOthersPayment(0);
+      setIsCashManuallyEdited(false);
+      setInvoiceNo(`INV-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`);
+      showFeedback(`Special Invoice #${savedInvoice.invoice_no || ''} completed and printed.`);
+    } catch (err: any) {
+      console.error('Special sale execution error:', err);
+      showFeedback(err.message || 'Special sale failed. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   // Keyboard Shortcuts Listener ([F2], [F3], [F4], [F5], [F6], [F7], [F8], [F9], [Escape])
   // FIX FINDING-POS-002: Store latest state and handlers in mutable ref to attach listener once on mount
   const hotkeysStateRef = useRef({
@@ -1191,7 +1381,7 @@ export default function PosBilling({
     filteredCatalog,
     canUseSpecialReceipt,
     lineItems,
-    setShowSpecialModal,
+    handleSpecialDirect,
   });
 
   useEffect(() => {
@@ -1204,7 +1394,7 @@ export default function PosBilling({
       filteredCatalog,
       canUseSpecialReceipt,
       lineItems,
-      setShowSpecialModal,
+      handleSpecialDirect,
     };
   });
 
@@ -1217,7 +1407,7 @@ export default function PosBilling({
       } else if (e.key === 'F6') {
         e.preventDefault();
         if (state.canUseSpecialReceipt && state.lineItems.length > 0) {
-          state.setShowSpecialModal(true);
+          state.handleSpecialDirect();
         }
       } else if (e.key === 'F2') {
         e.preventDefault();
@@ -1245,7 +1435,6 @@ export default function PosBilling({
         setShowCustomerModal(false);
         setShowHeldModal(false);
         setShowProductDropdown(false);
-        setShowSpecialModal(false);
         setPrintReceiptData(null);
       }
     };
@@ -1253,6 +1442,10 @@ export default function PosBilling({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  const activeEntryProduct = selectedProduct || (filteredCatalog.length === 1 ? filteredCatalog[0] : null);
+  const activeEntryBrandId = activeEntryProduct?.brand_id ? String(activeEntryProduct.brand_id).trim().toLowerCase() : '';
+  const specialFieldEnabled = canUseSpecialReceipt && Boolean(activeEntryBrandId) && specialBrandIds.has(activeEntryBrandId);
 
   return (
     <section className="pos-screen">
@@ -1677,12 +1870,36 @@ export default function PosBilling({
                 placeholder="0"
                 onChange={(e) => setInputRate(Number(e.target.value) || 0)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') { e.preventDefault(); discInputRef.current?.focus(); }
+                  if (e.key === 'Enter') { e.preventDefault(); (specialFieldEnabled ? specialRateInputRef : discInputRef).current?.focus(); }
                   else if (e.key === 'Escape') { searchInputRef.current?.focus(); }
                 }}
                 style={{ width: '100%', fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A', background: 'transparent', border: 'none', textAlign: 'center', outline: 'none' }}
               />
             </div>
+
+            {/* Special Rate Field (final per-unit rate; only for special-brand items) */}
+            {specialFieldEnabled && (
+              <div style={{ width: '120px', flexShrink: 0, display: 'flex', alignItems: 'center', background: '#FFF7ED', border: '1px solid #FDBA74', borderRadius: '8px', padding: '4px 8px' }}>
+                <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#C2410C', textTransform: 'uppercase', fontWeight: 700, marginRight: '4px' }}>
+                  Spl:
+                </span>
+                <input
+                  ref={specialRateInputRef}
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={inputSpecialRate || ''}
+                  placeholder="0"
+                  title="Special Rate (final rate per unit customer se liya jayega)"
+                  onChange={(e) => setInputSpecialRate(Math.max(0, Number(e.target.value) || 0))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); discInputRef.current?.focus(); }
+                    else if (e.key === 'Escape') { searchInputRef.current?.focus(); }
+                  }}
+                  style={{ width: '100%', fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#9A3412', background: 'transparent', border: 'none', textAlign: 'center', outline: 'none' }}
+                />
+              </div>
+            )}
 
             {/* Disc% Field */}
             <div style={{ width: '90px', flexShrink: 0, display: 'flex', alignItems: 'center', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '4px 8px' }}>
@@ -1756,7 +1973,8 @@ export default function PosBilling({
                     </tr>
                   ) : (
                     lineItems.map((item, index) => {
-                      const lineGross = item.rate * item.qty;
+                      const rowChargedRate = item.specialRate && item.specialRate > 0 ? item.specialRate : item.rate;
+                      const lineGross = rowChargedRate * item.qty;
                       const lineDiscount = (lineGross * item.discountPercent) / 100;
                       const lineNet = lineGross - lineDiscount;
 
@@ -1965,7 +2183,7 @@ export default function PosBilling({
                               onChange={(e) => {
                                 const val = Math.max(0, parseFloat(e.target.value) || 0);
                                 setLineItems((prev) =>
-                                  prev.map((li) => li.id === item.id ? { ...li, rate: val } : li)
+                                  prev.map((li) => li.id === item.id ? { ...li, rate: val, specialRate: li.specialRate && li.specialRate > val ? undefined : li.specialRate } : li)
                                   // originalRate stays unchanged (Token-safe: D5)
                                 );
                               }}
@@ -1983,6 +2201,11 @@ export default function PosBilling({
                                 outline: 'none',
                               }}
                             />
+                            {item.specialRate && item.specialRate > 0 ? (
+                              <div style={{ fontSize: '10px', fontWeight: 700, color: '#C2410C', fontFamily: 'JetBrains Mono, monospace' }}>
+                                Spl: {item.specialRate.toLocaleString()}
+                              </div>
+                            ) : null}
                           </td>
                           <td style={{ textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', color: '#475569', whiteSpace: 'nowrap' }}>
                             <input
@@ -2232,7 +2455,7 @@ export default function PosBilling({
               <button
                 type="button"
                 disabled={submitting || lineItems.length === 0}
-                onClick={() => setShowSpecialModal(true)}
+                onClick={handleSpecialDirect}
                 className={`pos-btn-special ${shouldBlinkSpecial ? 'pos-btn-special-blink' : ''}`}
                 title="Special Non-Branded Receipt (Option A Content Rule)"
               >
@@ -2833,35 +3056,6 @@ export default function PosBilling({
           }
         }}
       />
-
-      {/* ── Special Print Pre-Print Editor Modal (TASK-SR-15 & TASK-SR-16) ── */}
-      {canUseSpecialReceipt && (
-        <SpecialPrintModal
-          isOpen={showSpecialModal}
-          onClose={() => setShowSpecialModal(false)}
-          tenantId={tenantId}
-          shiftId={shiftId}
-          cartItems={lineItems}
-          selectedClient={selectedClient}
-          customerName={selectedClient ? selectedClient.name : customerSearch}
-          initialDeliveryCharge={deliveryCharge}
-          staffName={staffName}
-          onSuccess={(savedInvoice) => {
-            onCompleteSale(savedInvoice);
-            setLineItems([]);
-            setRemarks('');
-            setInvoiceDiscount(0);
-            setDeliveryCharge(0);
-            setCashPayment(0);
-            setCardPayment(0);
-            setBankPayment(0);
-            setOthersPayment(0);
-            setIsCashManuallyEdited(false);
-            setInvoiceNo(`INV-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`);
-            showFeedback(`Special Invoice #${savedInvoice.invoice_no || ''} completed and printed.`);
-          }}
-        />
-      )}
     </section>
   );
 }

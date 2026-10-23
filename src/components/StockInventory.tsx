@@ -1,5 +1,6 @@
 'use client';
 
+import StockAdjustmentGrid from './StockAdjustmentGrid';
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Item } from '@/types';
 import {
@@ -255,16 +256,6 @@ export default function StockInventory({
   const [formRetailPrice, setFormRetailPrice] = useState<string>('');
   const [formStockQty, setFormStockQty] = useState<string>('20');
   const [formMinAlert, setFormMinAlert] = useState<string>('5');
-
-  // Receive Stock Form State
-  const [selectedProdForReceive, setSelectedProdForReceive] = useState<string>(items[0]?.id || '');
-  const [receiveQty, setReceiveQty] = useState<number>(20);
-  const [receiveBatchNo, setReceiveBatchNo] = useState<string>(
-    () => `BATCH-${new Date().toISOString().slice(2, 7).replace('-', '')}-A9`
-  );
-  const [supplierBillRef, setSupplierBillRef] = useState<string>(
-    () => `SUP-INV-${Math.floor(10000 + Math.random() * 90000)}`
-  );
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -1311,43 +1302,6 @@ export default function StockInventory({
   };
 
   // Confirm Inward Goods Receipt (GRN)
-  const handleConfirmReceive = async () => {
-    if (!selectedProdForReceive || receiveQty <= 0 || !tenantId) return;
-    setSubmitting(true);
-
-    const prod = items.find((i) => i.id === selectedProdForReceive);
-    if (!prod) {
-      setSubmitting(false);
-      return;
-    }
-
-    try {
-      const res = await fetch('/api/items/receive', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tenant_id: tenantId,
-          item_id: prod.id,
-          qty: receiveQty,
-          batch_no: receiveBatchNo.trim(),
-          supplier_bill_ref: supplierBillRef.trim(),
-          received_by: tenantName || 'Inventory Staff',
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        showToast(`Received ${receiveQty} units of ${prod.name}! (${data.grn_no || 'GRN Saved'})`);
-        setShowReceiveModal(false);
-        onStockUpdated?.();
-      } else {
-        alert(`Failed: ${data.error}`);
-      }
-    } catch (err: any) {
-      alert(`Error receiving stock: ${err.message}`);
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   // State for Export dropdown menu (Requirement A: Exactly Excel and Print)
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -1720,10 +1674,7 @@ export default function StockInventory({
 
               <button
                 type="button"
-                onClick={() => {
-                  setSelectedProdForReceive(items[0]?.id || '');
-                  setShowReceiveModal(true);
-                }}
+                onClick={() => setShowReceiveModal(true)}
                 className="inv-btn-secondary"
                 title="Audit stock count correction or damage adjustment"
               >
@@ -2344,115 +2295,18 @@ export default function StockInventory({
         </div>
       )}
 
-      {/* ── MODAL 2: STOCK ADJUSTMENT (+ / -) ── */}
-      {showReceiveModal && (
-        <div className="pos-modal-overlay">
-          <div className="pos-modal-card" style={{ maxWidth: '480px' }}>
-            <div style={{ padding: '1rem', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#F8FAFC' }}>
-              <div>
-                <h3 style={{ fontWeight: 700, fontSize: '13px', textTransform: 'uppercase', color: '#0F172A' }}>
-                  Stock Adjustment (+ / -)
-                </h3>
-                <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B' }}>
-                  Physical Count / Damage / Audit Correction (Logged to Audit Trail)
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowReceiveModal(false)}
-                style={{ background: 'none', border: 'none', color: '#94A3B8', fontSize: '16px', fontWeight: 700, cursor: 'pointer' }}
-              >
-                ✕
-              </button>
-            </div>
-
-            <div style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '12px' }}>
-              <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', padding: '8px 12px', borderRadius: '6px', fontSize: '11px', color: '#1E40AF', lineHeight: 1.4 }}>
-                ℹ️ <strong>Note:</strong> Standard vendor stock must be entered via <strong>Purchases</strong>, and branch transfers via <strong>Branch Orders</strong>. Use this tool only for audit variances or damaged stock.
-              </div>
-
-              <div>
-                <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
-                  Select SKU / Product:
-                </label>
-                <select
-                  value={selectedProdForReceive}
-                  onChange={(e) => setSelectedProdForReceive(e.target.value)}
-                  className="pos-text-input"
-                  style={{ fontWeight: 500 }}
-                >
-                  {items.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.code} — {p.name} ({p.pack_size || p.unit}) • Current Stock: {p.stock_qty}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                <div>
-                  <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
-                    Adjustment Qty (+):
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={receiveQty}
-                    onChange={(e) => setReceiveQty(Number(e.target.value) || 1)}
-                    className="pos-text-input"
-                    style={{ fontWeight: 700 }}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
-                    Adjustment Reason:
-                  </label>
-                  <select
-                    value={supplierBillRef}
-                    onChange={(e) => setSupplierBillRef(e.target.value)}
-                    className="pos-text-input"
-                  >
-                    <option value="Physical Audit Discrepancy">Physical Audit Discrepancy</option>
-                    <option value="Damaged / Leaked Cans">Damaged / Leaked Cans</option>
-                    <option value="Opening Stock Correction">Opening Stock Correction</option>
-                    <option value="Sample / Tester Consumption">Sample / Tester Consumption</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label style={{ fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
-                  Audit Batch Ref / Notes:
-                </label>
-                <input
-                  type="text"
-                  value={receiveBatchNo}
-                  onChange={(e) => setReceiveBatchNo(e.target.value)}
-                  placeholder="e.g. Audit Notes / Shelf 4 verification"
-                  className="pos-text-input"
-                />
-              </div>
-            </div>
-
-            <div style={{ padding: '1rem', display: 'flex', gap: '8px', borderTop: '1px solid #E2E8F0' }}>
-              <button
-                type="button"
-                onClick={() => setShowReceiveModal(false)}
-                style={{ flex: 1, padding: '10px', background: '#F1F5F9', color: '#334155', fontWeight: 700, fontSize: '12px', borderRadius: '8px', border: '1px solid #CBD5E1', cursor: 'pointer' }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={submitting}
-                onClick={handleConfirmReceive}
-                style={{ flex: 1, padding: '10px', background: '#F97316', color: '#ffffff', fontWeight: 700, fontSize: '12px', borderRadius: '8px', border: 'none', cursor: 'pointer', textTransform: 'uppercase' }}
-              >
-                {submitting ? 'Saving Adjustment...' : 'Apply Stock Adjustment'}
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* ── MODAL 2: STOCK ADJUSTMENT (+ / -) — keyboard grid ── */}
+      {showReceiveModal && tenantId && (
+        <StockAdjustmentGrid
+          items={items}
+          tenantId={tenantId}
+          staffName={tenantName || 'Inventory Staff'}
+          onClose={() => setShowReceiveModal(false)}
+          onSaved={(msg) => {
+            showToast(msg);
+            onStockUpdated?.();
+          }}
+        />
       )}
 
       {/* AI Invoice Scanner Modal */}

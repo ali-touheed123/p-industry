@@ -22,7 +22,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Client, Supplier } from '@/types';
-import { generateLedgerStatementBlob } from '@/utils/receiptCanvas';
+import { generateLedgerStatementPdf, type LedgerPdfMode } from '@/utils/ledgerPdf';
 
 interface Props {
   tenantId?: string;
@@ -82,10 +82,12 @@ export default function FinancialLedgers({
     party: any;
     phone: string;
     blob: Blob;
-    imageUrl: string;
+    pdfUrl: string;
+    mode: LedgerPdfMode;
+    pageCount: number;
   } | null>(null);
   const [isGeneratingStatementImage, setIsGeneratingStatementImage] = useState<boolean>(false);
-  const [copiedStatement, setCopiedStatement] = useState<boolean>(false);
+  const [statementMode, setStatementMode] = useState<LedgerPdfMode>('summary');
 
   // Edit Credit Limit State
   const [isEditingLimit, setIsEditingLimit] = useState(false);
@@ -556,21 +558,35 @@ export default function FinancialLedgers({
     }
   };
 
-  // WhatsApp Statement Image Share (Respecting Clients vs Suppliers)
+  // WhatsApp Statement PDF (Summary / Detailed, multi-page) for Clients, Suppliers and Branches
   const handleSendWhatsAppLedger = async () => {
     if (!selectedParty) return;
 
     try {
       setIsGeneratingStatementImage(true);
-      const partyTypeParam = activeTab === 'suppliers' ? 'supplier' : 'client';
-      const blob = await generateLedgerStatementBlob(
-        selectedParty,
-        partyTypeParam,
-        filteredStatement,
+      const partyTypeParam: 'client' | 'supplier' | 'branch' =
+        activeTab === 'suppliers' ? 'supplier' : activeTab === 'branches' ? 'branch' : 'client';
+
+      // Closing balance: live party balance when the period reaches the latest entry, else running balance at period end
+      const lastFiltered = filteredStatement[filteredStatement.length - 1];
+      const lastFull = statement[statement.length - 1];
+      const closingBalance =
+        lastFiltered && lastFull && lastFiltered.id === lastFull.id
+          ? Number(selectedParty.current_balance ?? lastFiltered.bal)
+          : lastFiltered
+          ? lastFiltered.bal
+          : undefined;
+
+      const { blob, pageCount } = await generateLedgerStatementPdf({
+        party: selectedParty,
+        partyType: partyTypeParam,
+        transactions: filteredStatement,
         tenantName,
-        dateRangeLabel
-      );
-      const imageUrl = URL.createObjectURL(blob);
+        dateRangeLabel,
+        mode: statementMode,
+        closingBalance,
+      });
+      const pdfUrl = URL.createObjectURL(blob);
 
       const rawPhone = selectedParty.phone || '';
       let cleanPhone = rawPhone.replace(/[^0-9]/g, '');
@@ -578,55 +594,28 @@ export default function FinancialLedgers({
         cleanPhone = '92' + cleanPhone.slice(1);
       }
 
-      // Try automatic copy to clipboard
-      let copied = false;
-      try {
-        if (navigator.clipboard && window.ClipboardItem) {
-          await navigator.clipboard.write([
-            new ClipboardItem({ 'image/png': blob })
-          ]);
-          copied = true;
-        }
-      } catch (clipErr) {
-        console.warn('Clipboard write permission denied or unsupported:', clipErr);
-        copied = false;
-      }
-
-      setCopiedStatement(copied);
       setWhatsAppStatementModal({
         party: selectedParty,
         phone: cleanPhone,
         blob,
-        imageUrl,
+        pdfUrl,
+        mode: statementMode,
+        pageCount,
       });
     } catch (err: any) {
-      console.error('Error generating WhatsApp ledger statement image:', err);
-      alert('Could not render statement image. Please check party details.');
+      console.error('Error generating ledger statement PDF:', err);
+      alert('Could not generate statement PDF. Please check party details.');
     } finally {
       setIsGeneratingStatementImage(false);
     }
   };
 
-  const handleCopyStatementImage = async () => {
-    if (!whatsAppStatementModal) return;
-    try {
-      await navigator.clipboard.write([
-        new ClipboardItem({ 'image/png': whatsAppStatementModal.blob })
-      ]);
-      setCopiedStatement(true);
-      setTimeout(() => setCopiedStatement(false), 3000);
-    } catch (err) {
-      console.error('Failed to copy statement image to clipboard', err);
-      alert('Unable to copy to clipboard automatically. Please download the statement image below.');
-    }
-  };
-
-  const handleDownloadStatementImage = () => {
+  const handleDownloadStatementPdf = () => {
     if (!whatsAppStatementModal) return;
     const a = document.createElement('a');
-    a.href = whatsAppStatementModal.imageUrl;
+    a.href = whatsAppStatementModal.pdfUrl;
     const safeName = (whatsAppStatementModal.party.name || 'Statement').replace(/\s+/g, '_');
-    a.download = `Statement_${safeName}.png`;
+    a.download = `Statement_${safeName}_${whatsAppStatementModal.mode}.pdf`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -644,10 +633,9 @@ export default function FinancialLedgers({
 
   const closeWhatsAppStatementModal = () => {
     if (whatsAppStatementModal) {
-      URL.revokeObjectURL(whatsAppStatementModal.imageUrl);
+      URL.revokeObjectURL(whatsAppStatementModal.pdfUrl);
     }
     setWhatsAppStatementModal(null);
-    setCopiedStatement(false);
   };
 
   const partiesList = activeTab === 'clients' ? clients : activeTab === 'suppliers' ? suppliers : branches;
@@ -961,12 +949,33 @@ export default function FinancialLedgers({
                     );
                   })}
                   <div style={{ width: '1px', height: '20px', background: 'var(--outline-variant)', margin: '0 2px' }} />
+                  <div style={{ display: 'flex', borderRadius: '6px', overflow: 'hidden', border: '1px solid var(--outline-variant)' }} title="Statement PDF type">
+                    {(['summary', 'detailed'] as const).map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setStatementMode(m)}
+                        style={{
+                          height: '26px',
+                          padding: '0 8px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          border: 'none',
+                          cursor: 'pointer',
+                          background: statementMode === m ? '#16A34A' : 'var(--surface)',
+                          color: statementMode === m ? '#fff' : 'var(--on-surface-variant)',
+                        }}
+                      >
+                        {m === 'summary' ? 'Summary' : 'Detailed'}
+                      </button>
+                    ))}
+                  </div>
                   <button
                     onClick={handleSendWhatsAppLedger}
                     disabled={isGeneratingStatementImage}
                     className="btn btn-secondary"
                     style={{ height: '28px', padding: '0 8px', color: '#16A34A', borderColor: '#BBF7D0', background: '#F0FDF4' }}
-                    title="Share A4 Statement Image via WhatsApp"
+                    title="Generate Statement PDF (multi-page) for WhatsApp"
                   >
                     {isGeneratingStatementImage ? (
                       <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} />
@@ -1161,10 +1170,10 @@ export default function FinancialLedgers({
                                             {it.qty}
                                           </td>
                                           <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>
-                                            Rs. {Number(it.unit_price || 0).toLocaleString()}
+                                            {Number(it.unit_price || 0) > 0 || Number(it.total_price || 0) > 0 ? `Rs. ${Number(it.unit_price || 0).toLocaleString()}` : '—'}
                                           </td>
                                           <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A' }}>
-                                            Rs. {Number(it.total_price || (it.qty * it.unit_price)).toLocaleString()}
+                                            {Number(it.unit_price || 0) > 0 || Number(it.total_price || 0) > 0 ? `Rs. ${Number(it.total_price || (it.qty * it.unit_price)).toLocaleString()}` : '—'}
                                           </td>
                                         </tr>
                                       ))}
@@ -2024,7 +2033,7 @@ export default function FinancialLedgers({
           <div
             style={{
               width: '100%',
-              maxWidth: '520px',
+              maxWidth: '720px',
               background: '#FFFFFF',
               borderRadius: '16px',
               boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
@@ -2062,10 +2071,10 @@ export default function FinancialLedgers({
                 </div>
                 <div>
                   <h3 style={{ fontSize: '15px', fontWeight: 800, margin: 0 }}>
-                    WhatsApp Statement Image
+                    WhatsApp Statement PDF
                   </h3>
                   <div style={{ fontSize: '11px', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>
-                    {whatsAppStatementModal.party.name} · {activeTab === 'suppliers' ? 'Supplier Statement' : 'Customer Khata'}
+                    {whatsAppStatementModal.party.name} · {activeTab === 'suppliers' ? 'Supplier Statement' : activeTab === 'branches' ? 'Branch Statement' : 'Customer Khata'} · {whatsAppStatementModal.mode === 'detailed' ? 'Detailed' : 'Summary'} · {whatsAppStatementModal.pageCount} page{whatsAppStatementModal.pageCount === 1 ? '' : 's'}
                   </div>
                 </div>
               </div>
@@ -2136,54 +2145,39 @@ export default function FinancialLedgers({
                 </div>
               </div>
 
-              {/* Status / Instructions Notice */}
+              {/* Instructions Notice */}
               <div
                 style={{
-                  background: copiedStatement ? '#ECFDF5' : '#EFF6FF',
-                  border: `1px solid ${copiedStatement ? '#A7F3D0' : '#BFDBFE'}`,
+                  background: '#EFF6FF',
+                  border: '1px solid #BFDBFE',
                   borderRadius: '8px',
                   padding: '10px 12px',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
                   fontSize: '12px',
-                  color: copiedStatement ? '#065F46' : '#1E40AF',
+                  color: '#1E40AF',
                 }}
               >
-                {copiedStatement ? (
-                  <CheckCircle2 size={18} style={{ color: '#059669', flexShrink: 0 }} />
-                ) : (
-                  <Copy size={18} style={{ color: '#2563EB', flexShrink: 0 }} />
-                )}
+                <Download size={18} style={{ color: '#2563EB', flexShrink: 0 }} />
                 <span>
-                  {copiedStatement
-                    ? 'Statement image copied to clipboard! In WhatsApp Web, simply press Ctrl + V to paste and send.'
-                    : 'Click "Copy Image" below to place statement on clipboard, then Ctrl + V into the WhatsApp chat.'}
+                  Click &quot;Download PDF&quot;, phir WhatsApp chat mein file attach karein (paperclip icon ya drag &amp; drop). Saare pages ek hi PDF mein hain.
                 </span>
               </div>
 
-              {/* Statement Image Visual Preview */}
+              {/* Statement PDF Preview */}
               <div
                 style={{
                   background: '#F1F5F9',
                   border: '1px solid #E2E8F0',
                   borderRadius: '10px',
-                  padding: '12px',
-                  display: 'flex',
-                  justifyContent: 'center',
-                  maxHeight: '360px',
-                  overflowY: 'auto',
+                  overflow: 'hidden',
                 }}
               >
-                <img
-                  src={whatsAppStatementModal.imageUrl}
-                  alt={`Statement for ${whatsAppStatementModal.party.name}`}
-                  style={{
-                    maxWidth: '100%',
-                    height: 'auto',
-                    borderRadius: '6px',
-                    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
-                  }}
+                <iframe
+                  src={whatsAppStatementModal.pdfUrl}
+                  title={`Statement for ${whatsAppStatementModal.party.name}`}
+                  style={{ width: '100%', height: '460px', border: 'none', display: 'block' }}
                 />
               </div>
             </div>
@@ -2203,13 +2197,13 @@ export default function FinancialLedgers({
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button
                   type="button"
-                  onClick={handleCopyStatementImage}
+                  onClick={handleDownloadStatementPdf}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: '5px',
-                    padding: '8px 12px',
-                    background: copiedStatement ? '#059669' : '#0F172A',
+                    padding: '8px 14px',
+                    background: '#0F172A',
                     color: '#FFFFFF',
                     border: 'none',
                     borderRadius: '7px',
@@ -2218,29 +2212,8 @@ export default function FinancialLedgers({
                     cursor: 'pointer',
                   }}
                 >
-                  {copiedStatement ? <Check size={15} /> : <Copy size={15} />}
-                  <span>{copiedStatement ? 'Copied!' : 'Copy Image'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleDownloadStatementImage}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '5px',
-                    padding: '8px 12px',
-                    background: '#FFFFFF',
-                    color: '#334155',
-                    border: '1px solid #CBD5E1',
-                    borderRadius: '7px',
-                    fontSize: '12px',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
-                >
                   <Download size={15} />
-                  <span>Download</span>
+                  <span>Download PDF</span>
                 </button>
               </div>
 
