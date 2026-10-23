@@ -161,7 +161,8 @@ export async function GET(req: NextRequest) {
       const { data: orders } = await supabaseAdmin
         .from('branch_orders')
         .select('order_no, branch_order_items(*)')
-        .in('order_no', ibtRefs as string[]);
+        .in('order_no', ibtRefs as string[])
+        .or(`from_tenant_id.eq.${tenantId},to_tenant_id.eq.${tenantId}`);
       (orders || []).forEach((o: any) => {
         transferItemsByOrderNo[o.order_no] = (o.branch_order_items || []).map((it: any) => ({
           item_name: it.item_name || it.item_code,
