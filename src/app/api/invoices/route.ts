@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
 import { sanitizePostgRESTLike } from '@/lib/utils';
+import { validateLockedRates } from '@/lib/rate-lock';
 
 // GET: Fetch invoices for a tenant / branch or shift with date filtering and search
 export async function GET(req: NextRequest) {
@@ -214,6 +215,14 @@ export async function POST(req: NextRequest) {
           { success: false, error: `Invalid discount percentage (${lineDiscPercent}%) for item "${it.item_name || it.name || it.productName || 'Product'}": must be between 0 and 100` },
           { status: 400 }
         );
+      }
+    }
+
+    // 0.05 Rate lock: sale rates must match the catalog retail price (returns exempt)
+    if (auth.session.role !== 'developer') {
+      const rateLockError = await validateLockedRates(tenant_id, items, invoice_type);
+      if (rateLockError) {
+        return NextResponse.json({ success: false, error: rateLockError, code: 'RATE_LOCKED' }, { status: 400 });
       }
     }
 
@@ -453,6 +462,19 @@ export async function PATCH(req: NextRequest) {
         { success: false, error: 'Paid and due amounts cannot be negative' },
         { status: 400 }
       );
+    }
+
+    // Rate lock: lines must match catalog retail price, or the rate the line already had on this invoice
+    if (auth.session.role !== 'developer') {
+      const { data: existingLineRows } = await supabaseAdmin
+        .from('invoice_items')
+        .select('item_id, item_code, unit_price')
+        .eq('invoice_id', id);
+      const patchInvoiceType = (existingInv as any)?.invoice_type || body.invoice_type || 'sales';
+      const rateLockError = await validateLockedRates(tenant_id, items, patchInvoiceType, existingLineRows || []);
+      if (rateLockError) {
+        return NextResponse.json({ success: false, error: rateLockError, code: 'RATE_LOCKED' }, { status: 400 });
+      }
     }
 
     for (const it of items) {

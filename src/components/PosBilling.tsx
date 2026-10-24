@@ -519,8 +519,20 @@ export default function PosBilling({
           packSize: it.packSize || it.pack_size || 'Can',
           qty: Number(it.qty) || 1,
           unit: it.unit || 'PCS',
-          rate: Number(it.rate || it.unit_price) || 0,
-          originalRate: Number(it.originalRate || it.rate || it.unit_price) || 0,
+          rate: (() => {
+            const heldIsReturn = (restoringHeldOrder.invoice_type || restoringHeldOrder.invoiceType) === 'return';
+            const stored = Number(it.rate || it.unit_price) || 0;
+            if (heldIsReturn || !live) return stored;
+            // Rate lock: held bills re-price to the current catalog rate (token removal keeps its deduction)
+            const base = Number(live.retail_price) || 0;
+            const tokenVal = it.hasToken ?? live.has_token ? (Number(it.tokenValue ?? live.token_value) || 0) : 0;
+            return (it.tokenAction === 'remove') ? Math.max(0, base - tokenVal) : base;
+          })(),
+          originalRate: (() => {
+            const heldIsReturn = (restoringHeldOrder.invoice_type || restoringHeldOrder.invoiceType) === 'return';
+            if (heldIsReturn || !live) return Number(it.originalRate || it.rate || it.unit_price) || 0;
+            return Number(live.retail_price) || 0;
+          })(),
           discountPercent: Number(it.discountPercent || it.discount_percent) || 0,
           specialRate: Number(it.specialRate) > 0 ? Number(it.specialRate) : undefined,
           hasToken: it.hasToken ?? live?.has_token ?? false,
@@ -682,7 +694,8 @@ export default function PosBilling({
     }
 
     // Check if registered customer previously bought this product before adding
-    if (selectedClient && !skipCheck && overrideRate === undefined) {
+    // Rate lock: previous/current rate choice only exists for return bills; sales always use the catalog rate
+    if (invoiceType === 'return' && selectedClient && !skipCheck && overrideRate === undefined) {
       const prodCodeKey = (prod.code || '').trim().toLowerCase();
       const prodNameKey = (prod.name || '').trim().toLowerCase();
       const lastPurch =
@@ -715,7 +728,10 @@ export default function PosBilling({
     const hasToken = Boolean(prod.has_token && (Number(prod.token_value) || 0) > 0);
     const tokenVal = hasToken ? Number(prod.token_value) || 0 : 0;
     // Use overrideRate if provided; fall back to inputRate (if set by keyboard chain) then retail_price
-    const itemRate = overrideRate !== undefined ? overrideRate : (inputRate > 0 ? inputRate : (prod.retail_price || 0));
+    const ratesLocked = invoiceType !== 'return';
+    const itemRate = ratesLocked
+      ? (prod.retail_price || 0)
+      : (overrideRate !== undefined ? overrideRate : (inputRate > 0 ? inputRate : (prod.retail_price || 0)));
     const itemDiscount = overrideDiscount !== undefined ? overrideDiscount : (inputDiscount > 0 ? inputDiscount : 0);
     const itemSpecialRate = canUseSpecialReceipt && inputSpecialRate > 0 ? inputSpecialRate : undefined;
     if (itemSpecialRate !== undefined && itemSpecialRate > itemRate) {
@@ -727,7 +743,7 @@ export default function PosBilling({
       setLineItems((prev) =>
         prev.map((li, idx) =>
           idx === existingIndex
-            ? { ...li, qty: li.qty + requestedQty, rate: overrideRate !== undefined ? overrideRate : (inputRate > 0 ? inputRate : li.rate), discountPercent: itemDiscount, specialRate: itemSpecialRate }
+            ? { ...li, qty: li.qty + requestedQty, rate: ratesLocked ? li.rate : (overrideRate !== undefined ? overrideRate : (inputRate > 0 ? inputRate : li.rate)), discountPercent: itemDiscount, specialRate: itemSpecialRate }
             : li
         )
       );
@@ -1868,7 +1884,9 @@ export default function PosBilling({
                 step="any"
                 value={inputRate || ''}
                 placeholder="0"
-                onChange={(e) => setInputRate(Number(e.target.value) || 0)}
+                readOnly={invoiceType !== 'return'}
+                title={invoiceType !== 'return' ? 'Rate locked — sirf CEO Edit Product / Bulk Edit Prices se badal sakta hai' : undefined}
+                onChange={(e) => { if (invoiceType === 'return') setInputRate(Number(e.target.value) || 0); }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') { e.preventDefault(); (specialFieldEnabled ? specialRateInputRef : discInputRef).current?.focus(); }
                   else if (e.key === 'Escape') { searchInputRef.current?.focus(); }
@@ -2180,7 +2198,10 @@ export default function PosBilling({
                               step="any"
                               value={item.rate === 0 ? '' : item.rate}
                               placeholder="0.00"
+                              readOnly={invoiceType !== 'return'}
+                              title={invoiceType !== 'return' ? 'Rate locked' : undefined}
                               onChange={(e) => {
+                                if (invoiceType !== 'return') return;
                                 const val = Math.max(0, parseFloat(e.target.value) || 0);
                                 setLineItems((prev) =>
                                   prev.map((li) => li.id === item.id ? { ...li, rate: val, specialRate: li.specialRate && li.specialRate > val ? undefined : li.specialRate } : li)

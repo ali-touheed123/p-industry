@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
+import { validateLockedRates } from '@/lib/rate-lock';
 
 export async function POST(req: NextRequest) {
   try {
@@ -40,6 +41,14 @@ export async function POST(req: NextRequest) {
     const auth = await requireTenantAuth(req, tenant_id);
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
+    // Rate lock: printed rate on a special sale is the catalog retail price
+    if (auth.session.role !== 'developer') {
+      const rateLockError = await validateLockedRates(tenant_id, items, 'sales');
+      if (rateLockError) {
+        return NextResponse.json({ success: false, error: rateLockError, code: 'RATE_LOCKED' }, { status: 400 });
+      }
     }
 
     // 2. Role & Database Permission Verification
