@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Item } from '@/types';
+import { ceoFetch } from '@/lib/ceoApprovalClient';
 
 interface Props {
   items: Item[];
@@ -156,7 +157,7 @@ export default function StockAdjustmentGrid({ items, tenantId, staffName, onClos
 
     setSaving(true);
     try {
-      const res = await fetch('/api/items/adjust', {
+      const res = await ceoFetch('/api/items/adjust', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

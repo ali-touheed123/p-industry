@@ -29,6 +29,8 @@ import {
 import AiInvoiceScan from './AiInvoiceScan';
 import CompanyOrderSheetModal from './inventory/CompanyOrderSheetModal';
 import { exportToXlsx } from '@/utils/excelExporter';
+import { useCeoApproval } from '@/components/CeoPasswordModal';
+import { ceoFetch } from '@/lib/ceoApprovalClient';
 import { printViaIframe } from '@/utils/iframePrint';
 import {
   getBulkDraft,
@@ -46,6 +48,8 @@ interface Props {
   tenantId?: string;
   tenantName?: string;
   onStockUpdated?: () => void;
+  /** Staff must enter the CEO password before stock adjustment, bulk price edit and product edit. */
+  requireCeoApproval?: boolean;
 }
 
 const DEFAULT_CATEGORIES = [
@@ -76,7 +80,9 @@ export default function StockInventory({
   tenantId,
   tenantName = 'PyntFlow Store',
   onStockUpdated,
+  requireCeoApproval = false,
 }: Props) {
+  const { ensure: ensureCeoApproval, modal: ceoApprovalModal } = useCeoApproval(tenantId, requireCeoApproval);
   // Filters state (Matching painterp InventoryView.tsx)
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
 
@@ -688,7 +694,7 @@ export default function StockInventory({
         return payloadItem;
       });
 
-      const res = await fetch('/api/items', {
+      const res = await ceoFetch('/api/items', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1241,7 +1247,7 @@ export default function StockInventory({
     try {
       if (editingItemId) {
         // Update existing item
-        const res = await fetch('/api/items', {
+        const res = await ceoFetch('/api/items', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id: editingItemId, ...payload }),
@@ -1411,6 +1417,7 @@ export default function StockInventory({
 
   return (
     <section className="inv-screen" style={{ width: '100%', overflowX: 'hidden' }}>
+      {ceoApprovalModal}
       {/* Toast Notification */}
       {notification && (
         <div style={{ position: 'fixed', top: '16px', right: '16px', zIndex: 60, background: '#0F172A', color: '#ffffff', padding: '10px 16px', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', border: '1px solid #334155', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 600 }}>
@@ -1674,7 +1681,7 @@ export default function StockInventory({
 
               <button
                 type="button"
-                onClick={() => setShowReceiveModal(true)}
+                onClick={() => ensureCeoApproval(() => setShowReceiveModal(true))}
                 className="inv-btn-secondary"
                 title="Audit stock count correction or damage adjustment"
               >
@@ -1714,7 +1721,7 @@ export default function StockInventory({
 
               <button
                 type="button"
-                onClick={openBulkPriceModal}
+                onClick={() => ensureCeoApproval(openBulkPriceModal)}
                 className="inv-btn-secondary"
                 title="Bulk update cost and retail prices with concurrency safety"
                 style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#ECFDF5', borderColor: '#A7F3D0', color: '#047857', fontWeight: 600 }}
@@ -1913,7 +1920,7 @@ export default function StockInventory({
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
                             <button
                               type="button"
-                              onClick={() => handleOpenEditProduct(prod)}
+                              onClick={() => ensureCeoApproval(() => handleOpenEditProduct(prod))}
                               style={{ padding: '5px', color: '#64748B', background: 'none', border: 'none', cursor: 'pointer', borderRadius: '4px' }}
                               title="Edit Product Details"
                             >

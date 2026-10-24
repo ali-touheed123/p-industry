@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
 import { BLANK_SPECIAL_TEMPLATE_JSON } from '@/types/receipt';
+import { requireCeoApproval } from '@/lib/ceo-approval';
 
 /**
  * Helper to authoritatively verify fresh database permission.
@@ -104,6 +105,9 @@ export async function POST(req: NextRequest) {
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
+    // CEO approval gate (staff must have entered the CEO password)
+    const ceoGate = await requireCeoApproval(req, auth.session);
+    if (!ceoGate.ok) return ceoGate.response;
 
     // Fresh permission check
     const perm = await verifySpecialReceiptPermission(auth.session, tenant_id);
@@ -150,6 +154,9 @@ export async function DELETE(req: NextRequest) {
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
+    // CEO approval gate (staff must have entered the CEO password)
+    const ceoGate = await requireCeoApproval(req, auth.session);
+    if (!ceoGate.ok) return ceoGate.response;
 
     const perm = await verifySpecialReceiptPermission(auth.session, tenantId);
     if (!perm.authorized) {

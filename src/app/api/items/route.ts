@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
+import { requireCeoApproval } from '@/lib/ceo-approval';
 
 // Helper: match item unit string to config unit string safely without accidental fuzzy collisions
 function matchUnitToConfig(itemUnitRaw: string | null | undefined, configUnitRaw: string | null | undefined): boolean {
@@ -431,6 +432,9 @@ export async function PATCH(req: NextRequest) {
       if (!auth.authorized) {
         return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
       }
+      // CEO approval gate: bulk price edit requires the CEO password for staff
+      const ceoGateBatch = await requireCeoApproval(req, auth.session);
+      if (!ceoGateBatch.ok) return ceoGateBatch.response;
 
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       const validItemIds = updates.map((u: any) => u.id).filter((id: string) => uuidRegex.test(id));
@@ -629,6 +633,9 @@ export async function PATCH(req: NextRequest) {
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
+    // CEO approval gate: editing a product requires the CEO password for staff
+    const ceoGateSingle = await requireCeoApproval(req, auth.session);
+    if (!ceoGateSingle.ok) return ceoGateSingle.response;
 
     // Strip tenant_id from update payload to prevent cross-tenant hijacking or reassignment
     delete (updateFields as any).tenant_id;

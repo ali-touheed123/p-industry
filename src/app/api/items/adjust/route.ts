@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
+import { requireCeoApproval } from '@/lib/ceo-approval';
 
 // POST: Batch signed stock adjustment (+/-). Each row is applied independently and atomically,
 // so one failing row never blocks the others. Every row is audit-logged by stock_adjustment_atomic.
@@ -23,6 +24,9 @@ export async function POST(req: NextRequest) {
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
+    // CEO approval gate (staff must have entered the CEO password)
+    const ceoGate = await requireCeoApproval(req, auth.session);
+    if (!ceoGate.ok) return ceoGate.response;
 
     const seen = new Set<string>();
     const results: Array<{

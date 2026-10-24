@@ -31,6 +31,7 @@ import {
 import { DevReceiptPreview, ReceiptInvoiceData } from './dev-panel/DevReceiptPreview';
 import { printViaIframe } from '@/utils/iframePrint';
 import { buildSpecialReceiptHtml } from '@/utils/receiptAdapters';
+import { ceoFetch } from '@/lib/ceoApprovalClient';
 
 interface SpecialReceiptSettingsProps {
   tenantId: string;
@@ -195,7 +196,7 @@ export default function SpecialReceiptSettings({
   const handleSaveTemplate = async () => {
     setSaving(true);
     try {
-      const res = await fetch('/api/special-receipt-templates', {
+      const res = await ceoFetch('/api/special-receipt-templates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -219,7 +220,7 @@ export default function SpecialReceiptSettings({
     if (!confirm('Are you sure you want to reset the Special Receipt to the default blank canvas?')) return;
     setSaving(true);
     try {
-      const res = await fetch(`/api/special-receipt-templates?tenant_id=${tenantId}`, {
+      const res = await ceoFetch(`/api/special-receipt-templates?tenant_id=${tenantId}`, {
         method: 'DELETE',
       });
       const data = await res.json();
@@ -269,7 +270,7 @@ export default function SpecialReceiptSettings({
   const handleSaveBrands = async () => {
     setSavingBrands(true);
     try {
-      const res = await fetch('/api/special-receipt-brands', {
+      const res = await ceoFetch('/api/special-receipt-brands', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

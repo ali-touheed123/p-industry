@@ -39,6 +39,7 @@ import { DevReceiptPreview, ReceiptInvoiceData } from './dev-panel/DevReceiptPre
 import { renderReceiptDocument, RenderReceiptData } from '@/utils/receiptRenderCore';
 import { printViaIframe } from '@/utils/iframePrint';
 import SpecialReceiptSettings from './SpecialReceiptSettings';
+import { ceoFetch } from '@/lib/ceoApprovalClient';
 
 interface BranchReceiptSettingsProps {
   tenantId: string;
@@ -148,7 +149,7 @@ export default function BranchReceiptSettings({
       setSaving(true);
       setFeedback(null);
 
-      const res = await fetch('/api/receipt-templates/branch', {
+      const res = await ceoFetch('/api/receipt-templates/branch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -185,7 +186,7 @@ export default function BranchReceiptSettings({
       setResetting(true);
       setShowResetModal(false);
 
-      const res = await fetch(`/api/receipt-templates/branch?tenant_id=${tenantId}`, {
+      const res = await ceoFetch(`/api/receipt-templates/branch?tenant_id=${tenantId}`, {
         method: 'DELETE',
       });
       const data = await res.json();

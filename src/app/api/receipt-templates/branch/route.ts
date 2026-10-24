@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { DEFAULT_TEMPLATE_JSON, ReceiptTemplate } from '@/types/receipt';
 import { requireTenantAuth } from '@/lib/session';
+import { requireCeoApproval } from '@/lib/ceo-approval';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -91,6 +92,9 @@ export async function POST(req: NextRequest) {
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status, headers: NO_CACHE_HEADERS });
     }
+    // CEO approval gate (staff must have entered the CEO password)
+    const ceoGate = await requireCeoApproval(req, auth.session);
+    if (!ceoGate.ok) return ceoGate.response;
 
     // Fetch tenant name for clean template identification
     const { data: tenantData } = await supabaseAdmin
@@ -219,6 +223,9 @@ export async function DELETE(req: NextRequest) {
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status, headers: NO_CACHE_HEADERS });
     }
+    // CEO approval gate (staff must have entered the CEO password)
+    const ceoGate = await requireCeoApproval(req, auth.session);
+    if (!ceoGate.ok) return ceoGate.response;
 
     // Delete assignment for this tenant
     const { error: delErr } = await supabaseAdmin

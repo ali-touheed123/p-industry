@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
+import { requireCeoApproval } from '@/lib/ceo-approval';
 
 async function verifySpecialReceiptPermission(session: any, tenantId: string) {
   if (session.role === 'developer') {
@@ -82,6 +83,9 @@ export async function POST(req: NextRequest) {
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
+    // CEO approval gate (staff must have entered the CEO password)
+    const ceoGate = await requireCeoApproval(req, auth.session);
+    if (!ceoGate.ok) return ceoGate.response;
 
     const perm = await verifySpecialReceiptPermission(auth.session, tenant_id);
     if (!perm.authorized) {

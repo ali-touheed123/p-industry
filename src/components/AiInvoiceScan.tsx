@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useId } from 'react';
 import { Item, Supplier } from '@/types';
+import { ceoFetch } from '@/lib/ceoApprovalClient';
 import {
   Upload,
   Camera,
@@ -459,7 +460,7 @@ export default function AiInvoiceScan({
         const item = finalItems[i];
         if (item.matched_item_id && item.retail_price > 0) {
           try {
-            await fetch('/api/items', {
+            await ceoFetch('/api/items', {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({

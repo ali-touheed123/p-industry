@@ -26,6 +26,8 @@ const TokenLedger = dynamic(() => import('@/components/TokenLedger'), { loading:
 const TokenManagementView = dynamic(() => import('@/components/TokenManagementView'), { loading: () => <ViewFallback /> });
 const BranchReceiptSettings = dynamic(() => import('@/components/BranchReceiptSettings'), { loading: () => <ViewFallback /> });
 import { clearAllBulkDrafts } from '@/lib/bulkDraftStore';
+import { useCeoApproval } from '@/components/CeoPasswordModal';
+import { clearCeoApproval } from '@/lib/ceoApprovalClient';
 
 import {
   ShoppingCart,
@@ -153,6 +155,7 @@ export default function TenantAppPage({ params }: PageProps) {
       await fetch('/api/auth/logout', { method: 'POST' });
     } catch {}
     clearAllBulkDrafts();
+    clearCeoApproval();
     setCurrentUser(null);
   };
 
@@ -326,6 +329,8 @@ export default function TenantAppPage({ params }: PageProps) {
   };
 
   const isCEO = currentUser?.role === 'ceo' || currentUser?.role === 'developer';
+  // Staff must enter the CEO password before protected features (receipt settings, price/stock edits)
+  const { ensure: ensureCeoApproval, modal: ceoApprovalModal } = useCeoApproval(tenant?.id, !isCEO);
   const totalSales = invoices.reduce((s, i) => s + (i.grandTotal || 0), 0);
 
   // Automatic Redirect for Invalid / Non-existent Shop URL
@@ -489,6 +494,7 @@ export default function TenantAppPage({ params }: PageProps) {
 
   return (
     <div className="app-shell">
+      {ceoApprovalModal}
       {/* ── Collapsible Dark Navy Sidebar ── */}
       <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
         {/* Brand Header */}
@@ -529,7 +535,13 @@ export default function TenantAppPage({ params }: PageProps) {
             return (
               <button
                 key={item.id}
-                onClick={() => setActiveTab(item.id as any)}
+                onClick={() => {
+                  if (item.id === 'receipt') {
+                    ensureCeoApproval(() => setActiveTab('receipt'));
+                  } else {
+                    setActiveTab(item.id as any);
+                  }
+                }}
                 title={isSidebarCollapsed ? (hasBadge ? `${item.label} (${item.badgeCount} pending)` : item.label) : undefined}
                 className={`sidebar-link ${isActive ? 'active' : ''}`}
                 style={{ position: 'relative' }}
@@ -784,6 +796,7 @@ export default function TenantAppPage({ params }: PageProps) {
               tenantId={tenant.id}
               tenantName={tenant.name}
               onStockUpdated={refreshItems}
+              requireCeoApproval={!isCEO}
             />
           )}
           {(activeTab === 'customers' || activeTab === 'ledgers') && (
