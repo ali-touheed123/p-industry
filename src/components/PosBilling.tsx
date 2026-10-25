@@ -697,6 +697,10 @@ export default function PosBilling({
     return true;
   };
 
+  // Special-brand rule: for users with special receipt access, every special-brand item on a sale needs a Special Rate
+  const isSpecialBrandItem = (it: { brand_id?: string | null } | null | undefined): boolean =>
+    canUseSpecialReceipt && invoiceType === 'sales' && Boolean(it?.brand_id) && specialBrandIds.has(String(it?.brand_id));
+
   const handleAddItem = (specificItem?: Item, overrideRate?: number, skipCheck: boolean = false, overrideDiscount?: number) => {
     if (blockForCustomerName()) return;
     const prod = specificItem || selectedProduct;
@@ -748,6 +752,15 @@ export default function PosBilling({
       : (overrideRate !== undefined ? overrideRate : (inputRate > 0 ? inputRate : (prod.retail_price || 0)));
     const itemDiscount = overrideDiscount !== undefined ? overrideDiscount : (inputDiscount > 0 ? inputDiscount : 0);
     const itemSpecialRate = canUseSpecialReceipt && inputSpecialRate > 0 ? inputSpecialRate : undefined;
+    if (isSpecialBrandItem(prod) && itemSpecialRate === undefined) {
+      showFeedback('Special brand ka item hai — Special Rate likhna zaroori hai.');
+      setSelectedProduct(prod);
+      setInputRate(prod.retail_price || 0);
+      setProductQuery(`${prod.name}${prod.shade_code ? ` (${prod.shade_code})` : ''}`);
+      setShowProductDropdown(false);
+      setTimeout(() => specialRateInputRef.current?.focus(), 60);
+      return;
+    }
     if (itemSpecialRate !== undefined && itemSpecialRate > itemRate) {
       showFeedback('Special Rate, Rate se zyada nahi ho sakta.');
       return;
@@ -961,6 +974,10 @@ export default function PosBilling({
   };
 
   // Checkout and Database Persistence
+  // Cart lines of special brands that still miss a Special Rate (remove and re-add them with a Special Rate)
+  const specialBrandLineMissingRate = () =>
+    editingInvoice ? undefined : lineItems.find((li) => isSpecialBrandItem(li.item || undefined) && !(li.specialRate && li.specialRate > 0));
+
   const handleCheckout = async (openPrint = true) => {
     if (lineItems.length === 0 || submitting) {
       showFeedback('Please add at least one item before checkout.');
@@ -968,6 +985,13 @@ export default function PosBilling({
     }
     if (blockForCustomerName()) {
       return;
+    }
+    {
+      const missingSpecial = specialBrandLineMissingRate();
+      if (missingSpecial) {
+        showFeedback(`"${missingSpecial.productName}" par Special Rate zaroori hai. Item hata kar Special Rate ke saath dobara add karein.`);
+        return;
+      }
     }
     if (lineItems.some((li) => li.specialRate && li.specialRate > 0)) {
       showFeedback('Cart mein Special Rate lagi hui hai. Is sale ke liye "Special Save & Print (F6)" use karein, ya Special Rate hata dein.');
@@ -1232,6 +1256,13 @@ export default function PosBilling({
   const handleSpecialDirect = async () => {
     if (!canUseSpecialReceipt || submitting) return;
     if (blockForCustomerName()) return;
+    {
+      const missingSpecial = specialBrandLineMissingRate();
+      if (missingSpecial) {
+        showFeedback(`"${missingSpecial.productName}" par Special Rate zaroori hai. Item hata kar Special Rate ke saath dobara add karein.`);
+        return;
+      }
+    }
     if (lineItems.length === 0) {
       showFeedback('Please add at least one item before checkout.');
       return;
@@ -1942,7 +1973,18 @@ export default function PosBilling({
                   title="Special Rate (final rate per unit customer se liya jayega)"
                   onChange={(e) => setInputSpecialRate(Math.max(0, Number(e.target.value) || 0))}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') { e.preventDefault(); discInputRef.current?.focus(); }
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (!(inputSpecialRate > 0)) {
+                        showFeedback('Special Rate likhna zaroori hai — iske baghair aage nahi barh sakte.');
+                        return;
+                      }
+                      if (inputSpecialRate > (inputRate || 0)) {
+                        showFeedback('Special Rate, Rate se zyada nahi ho sakta.');
+                        return;
+                      }
+                      discInputRef.current?.focus();
+                    }
                     else if (e.key === 'Escape') { searchInputRef.current?.focus(); }
                   }}
                   style={{ width: '100%', fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#9A3412', background: 'transparent', border: 'none', textAlign: 'center', outline: 'none' }}
