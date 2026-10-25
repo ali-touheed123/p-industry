@@ -1401,6 +1401,7 @@ export default function PosBilling({
           due_amount: resData.snapshot.due_amount ?? finalDue,
           client_name: resData.snapshot.client_name || customerDisplayName,
           invoice_no: resData.snapshot.invoice_no || invoiceNo,
+          show_sales_return: true,
         };
         printViaIframe(buildSpecialReceiptHtml(enrichedSnapshot, resData.template));
       }

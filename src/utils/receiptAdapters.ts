@@ -162,7 +162,25 @@ export function buildSpecialReceiptHtml(
     };
   });
 
-  const printedTotal = Number(snapshot.printed_total || snapshot.master_total || 0);
+  const printedTotalRaw = Number(snapshot.printed_total || snapshot.master_total || 0);
+  const deliveryChargeAmt = Number(snapshot.delivery_charge || 0);
+
+  // "Sales Return" line (new special receipts only): every discount the customer got —
+  // (printed rate - special rate) and the Disc % — added up and shown under the subtotal.
+  const showSalesReturn = snapshot.show_sales_return === true && (snapshot.invoice_type || 'sales') !== 'return';
+  const itemsGross = items.reduce((sum, it) => sum + it.total, 0);
+  const chargedItemsTotal = (snapshot.items || []).reduce((sum: number, it: any) => {
+    const qty = Number(it.qty || 0);
+    const rate = Number(it.pre_discount_rate ?? it.unit_price ?? it.rate ?? 0);
+    return sum + Number(it.total_price ?? qty * rate);
+  }, 0);
+  const salesReturnAmount = showSalesReturn ? Math.max(0, Math.round((itemsGross - chargedItemsTotal) * 100) / 100) : 0;
+
+  // Subtotal never includes delivery (delivery is its own line). Net total = items - sales return + delivery.
+  const printedTotal = showSalesReturn
+    ? Math.max(0, Math.round((itemsGross - salesReturnAmount + deliveryChargeAmt) * 100) / 100)
+    : printedTotalRaw;
+  const subTotalShown = showSalesReturn ? itemsGross : Math.max(0, printedTotalRaw - deliveryChargeAmt);
   const rawPaid = snapshot.paid_amount !== undefined ? Number(snapshot.paid_amount) : undefined;
   const rawDue = snapshot.due_amount !== undefined ? Number(snapshot.due_amount) : undefined;
 
@@ -203,17 +221,24 @@ export function buildSpecialReceiptHtml(
     clientName: snapshot.client_name || undefined,
     paymentMethod: resolvedPaymentMethod,
     items,
-    subTotal: printedTotal,
-    discount: 0, // Option A: Zero discount disclosure on paper
+    subTotal: subTotalShown,
+    discount: salesReturnAmount, // only the combined "Sales Return" amount is disclosed, never per-item discounts
     grandTotal: printedTotal,
     paidAmount,
     dueAmount,
-    deliveryCharge: Number(snapshot.delivery_charge || 0),
+    deliveryCharge: deliveryChargeAmt,
     headerNote: snapshot.header_note || undefined,
     footerNote: snapshot.footer_note || undefined,
     isReprint,
   };
 
-  return renderReceiptDocument(receiptData, normTemplate.template_json, normTemplate.paper_size, normTemplate.template_json);
+  const templateJson = salesReturnAmount > 0
+    ? {
+        ...normTemplate.template_json,
+        totals: { ...normTemplate.template_json.totals, showDiscount: true, discountLabel: 'Sales Return:' },
+      }
+    : normTemplate.template_json;
+
+  return renderReceiptDocument(receiptData, templateJson, normTemplate.paper_size, templateJson);
 }
 

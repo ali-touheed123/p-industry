@@ -241,12 +241,13 @@ export default function SpecialReceiptSettings({
       {
         invoice_no: 'SR-TEST-001',
         date: new Date().toLocaleDateString('en-GB') + ' 03:30 PM',
-        client_name: 'Walk-in Customer',
+        client_name: 'Test Customer (WI)',
         printed_total: 10200,
         master_total: 10200,
         delivery_charge: 0,
+        show_sales_return: true,
         items: [
-          { item_name: 'Weather Shield Matt Finish (Off-White)', qty: 2, unit_price: 4200, total_price: 8400, receipt_name: 'Weather Shield Matt Finish (Off-White)' },
+          { item_name: 'Weather Shield Matt Finish (Off-White)', qty: 2, unit_price: 4200, total_price: 7560, receipt_name: 'Weather Shield Matt Finish (Off-White)' },
           { item_name: 'Wall Primer Undercoat 4L', qty: 1, unit_price: 1800, total_price: 1800, receipt_name: 'Wall Primer Undercoat 4L' },
         ],
       },
