@@ -26,6 +26,7 @@ import {
   Coins,
 } from 'lucide-react';
 import TokenRedemption from './TokenRedemption';
+import { formatWalkInName, stripWalkInSuffix, isPlaceholderWalkInName } from '@/utils/customerName';
 
 interface Props {
   items: Item[];
@@ -136,7 +137,11 @@ export default function PosBilling({
   // Customer & details
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
-  const [customerSearch, setCustomerSearch] = useState<string>('Walk-in Customer');
+  const customerInputRef = useRef<HTMLInputElement>(null);
+  const skipCustomerModalOnFocus = useRef(false);
+  const [customerSearch, setCustomerSearch] = useState<string>('');
+  // Walk-in rule: until a registered customer is picked, a real walk-in name must be typed
+  const needsCustomerName = !selectedClient && (isPlaceholderWalkInName(customerSearch) || customerSearch.trim().length < 2);
   const [showCustomerModal, setShowCustomerModal] = useState<boolean>(false);
   const [clientSearchQuery, setClientSearchQuery] = useState<string>('');
   const [newClientName, setNewClientName] = useState<string>('');
@@ -564,7 +569,7 @@ export default function PosBilling({
       }
 
       if (restoringHeldOrder.client_name) {
-        setCustomerSearch(restoringHeldOrder.client_name);
+        setCustomerSearch(stripWalkInSuffix(restoringHeldOrder.client_name));
       }
       if (restoringHeldOrder.client_id && clients.length > 0) {
         const found = clients.find((c) => c.id === restoringHeldOrder.client_id);
@@ -608,7 +613,7 @@ export default function PosBilling({
         setInvoiceDate(editingInvoice.date.split('T')[0]);
       }
       if (editingInvoice.client_name) {
-        setCustomerSearch(editingInvoice.client_name);
+        setCustomerSearch(stripWalkInSuffix(editingInvoice.client_name));
       }
       if (editingInvoice.client_id && clients.length > 0) {
         const found = clients.find((c) => c.id === editingInvoice.client_id);
@@ -684,7 +689,16 @@ export default function PosBilling({
   };
 
   // Add Item to table with stock validation and immutable state updates
+  // Walk-in rule: nothing proceeds until a customer is picked or a walk-in name is typed
+  const blockForCustomerName = (): boolean => {
+    if (!needsCustomerName) return false;
+    showFeedback('Pehle customer select karein ya walk-in customer ka naam likhein.');
+    customerInputRef.current?.focus();
+    return true;
+  };
+
   const handleAddItem = (specificItem?: Item, overrideRate?: number, skipCheck: boolean = false, overrideDiscount?: number) => {
+    if (blockForCustomerName()) return;
     const prod = specificItem || selectedProduct;
     if (!prod) {
       if (filteredCatalog.length === 1) {
@@ -821,9 +835,10 @@ export default function PosBilling({
       showFeedback('Cart is empty. Add products before placing on hold.');
       return;
     }
+    if (blockForCustomerName()) return;
 
     const holdNo = `HOLD-${Date.now().toString().slice(-4)}`;
-    const customerDisplayName = selectedClient?.name || customerSearch || 'Walk-in Customer';
+    const customerDisplayName = selectedClient?.name || formatWalkInName(customerSearch);
 
     try {
       const res = await fetch('/api/held-invoices', {
@@ -899,7 +914,7 @@ export default function PosBilling({
 
     setLineItems(restoredItems);
     setSelectedClient(order.selectedClient);
-    setCustomerSearch(order.customerName);
+    setCustomerSearch(stripWalkInSuffix(order.customerName));
     setInvoiceType(order.invoiceType);
     setInvoiceDiscount(Number(order.discount) || 0);
     setDeliveryCharge(Number(order.delivery_charge) || 0);
@@ -951,6 +966,9 @@ export default function PosBilling({
       showFeedback('Please add at least one item before checkout.');
       return;
     }
+    if (blockForCustomerName()) {
+      return;
+    }
     if (lineItems.some((li) => li.specialRate && li.specialRate > 0)) {
       showFeedback('Cart mein Special Rate lagi hui hai. Is sale ke liye "Special Save & Print (F6)" use karein, ya Special Rate hata dein.');
       return;
@@ -998,7 +1016,7 @@ export default function PosBilling({
       }
     }
 
-    const customerDisplayName = selectedClient ? selectedClient.name : customerSearch || 'Walk-in Customer';
+    const customerDisplayName = selectedClient ? selectedClient.name : formatWalkInName(customerSearch);
 
     // Determine clean payment_type
     let determinedPaymentType = 'cash';
@@ -1177,7 +1195,7 @@ export default function PosBilling({
         // Reset state for next customer
         setLineItems([]);
         setSelectedClient(null);
-        setCustomerSearch('Walk-in Customer');
+        setCustomerSearch('');
         setCashPayment(0);
         setIsCashManuallyEdited(false);
         setCardPayment(0);
@@ -1213,6 +1231,7 @@ export default function PosBilling({
   // Receipt prints the cart `rate` (original); customer is charged the Special Rate (per unit) minus Disc %.
   const handleSpecialDirect = async () => {
     if (!canUseSpecialReceipt || submitting) return;
+    if (blockForCustomerName()) return;
     if (lineItems.length === 0) {
       showFeedback('Please add at least one item before checkout.');
       return;
@@ -1273,7 +1292,7 @@ export default function PosBilling({
       }
     }
 
-    const customerDisplayName = selectedClient ? selectedClient.name : customerSearch || 'Walk-in Customer';
+    const customerDisplayName = selectedClient ? selectedClient.name : formatWalkInName(customerSearch);
     const modesUsed =
       (actualCashRetained > 0 ? 1 : 0) + (cardPayment > 0 ? 1 : 0) + (bankPayment > 0 ? 1 : 0) + (othersPayment > 0 ? 1 : 0);
     let resolvedPaymentType = 'cash';
@@ -1657,16 +1676,23 @@ export default function PosBilling({
               </label>
               <div className="pos-input-wrapper">
                 <input
+                  ref={customerInputRef}
                   type="text"
                   value={selectedClient ? `${selectedClient.name} (${selectedClient.phone || 'Account'})` : customerSearch}
                   onChange={(e) => {
                     setSelectedClient(null);
                     setCustomerSearch(e.target.value);
                   }}
-                  onFocus={() => setShowCustomerModal(true)}
-                  placeholder="Search customer name or phone..."
+                  onFocus={() => {
+                    if (skipCustomerModalOnFocus.current) {
+                      skipCustomerModalOnFocus.current = false;
+                      return;
+                    }
+                    setShowCustomerModal(true);
+                  }}
+                  placeholder="Walk-in customer ka naam likhein, ya account search karein..."
                   className="pos-text-input"
-                  style={{ paddingRight: '32px', fontWeight: 500 }}
+                  style={{ paddingRight: '32px', fontWeight: 500, ...(needsCustomerName ? { borderColor: '#F87171', background: '#FEF2F2' } : {}) }}
                 />
                 <Search
                   onClick={() => setShowCustomerModal(true)}
@@ -1733,7 +1759,12 @@ export default function PosBilling({
                   ref={searchInputRef}
                   type="text"
                   value={productQuery}
+                  readOnly={needsCustomerName}
                   onFocus={() => {
+                    if (needsCustomerName) {
+                      blockForCustomerName();
+                      return;
+                    }
                     setShowProductDropdown(true);
                     setActiveProductIndex(0);
                   }}
@@ -2690,13 +2721,18 @@ export default function PosBilling({
                             if (target) {
                               if (target.isWalkIn) {
                                 setSelectedClient(null);
-                                setCustomerSearch('Walk-in Customer');
+                                setCustomerSearch('');
                               } else if (target.client) {
                                 setSelectedClient(target.client);
                                 setCustomerSearch(target.client.name);
                               }
                               setShowCustomerModal(false);
-                              setTimeout(() => searchInputRef.current?.focus(), 60);
+                              if (target.isWalkIn) {
+                                skipCustomerModalOnFocus.current = true;
+                                setTimeout(() => customerInputRef.current?.focus(), 60);
+                              } else {
+                                setTimeout(() => searchInputRef.current?.focus(), 60);
+                              }
                             }
                           } else if (e.key === 'Escape') {
                             setShowCustomerModal(false);
@@ -2720,9 +2756,10 @@ export default function PosBilling({
                               onMouseEnter={() => setActiveClientIndex(idx)}
                               onClick={() => {
                                 setSelectedClient(null);
-                                setCustomerSearch('Walk-in Customer');
+                                setCustomerSearch('');
                                 setShowCustomerModal(false);
-                                setTimeout(() => searchInputRef.current?.focus(), 60);
+                                skipCustomerModalOnFocus.current = true;
+                                setTimeout(() => customerInputRef.current?.focus(), 60);
                               }}
                               style={{
                                 padding: '10px 12px',

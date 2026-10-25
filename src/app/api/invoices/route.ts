@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
 import { sanitizePostgRESTLike } from '@/lib/utils';
 import { validateLockedRates } from '@/lib/rate-lock';
+import { isPlaceholderWalkInName } from '@/utils/customerName';
 
 // GET: Fetch invoices for a tenant / branch or shift with date filtering and search
 export async function GET(req: NextRequest) {
@@ -216,6 +217,14 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
+    }
+
+    // Walk-in rule: a sale without a customer account must carry a real walk-in name
+    if (invoice_type !== 'return' && !client_id && isPlaceholderWalkInName(client_name)) {
+      return NextResponse.json(
+        { success: false, error: 'Walk-in customer ka naam zaroori hai. Customer select karein ya naam likhein.', code: 'WALK_IN_NAME_REQUIRED' },
+        { status: 400 }
+      );
     }
 
     // 0.05 Rate lock: sale rates must match the catalog retail price (returns exempt)

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
 import { validateLockedRates } from '@/lib/rate-lock';
+import { isPlaceholderWalkInName } from '@/utils/customerName';
 
 export async function POST(req: NextRequest) {
   try {
@@ -41,6 +42,14 @@ export async function POST(req: NextRequest) {
     const auth = await requireTenantAuth(req, tenant_id);
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
+    // Walk-in rule: a sale without a customer account must carry a real walk-in name
+    if (!client_id && isPlaceholderWalkInName(client_name)) {
+      return NextResponse.json(
+        { success: false, error: 'Walk-in customer ka naam zaroori hai. Customer select karein ya naam likhein.', code: 'WALK_IN_NAME_REQUIRED' },
+        { status: 400 }
+      );
     }
 
     // Rate lock: printed rate on a special sale is the catalog retail price
