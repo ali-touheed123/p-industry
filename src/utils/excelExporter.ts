@@ -27,7 +27,9 @@ export async function exportToXlsx<T>(
   filename: string,
   data: T[],
   columns: ExportColumnDef<T>[],
-  sheetName = 'Sheet1'
+  sheetName = 'Sheet1',
+  /** Optional bold footer row, one entry per column (string label, number total, or null). */
+  footerValues?: Array<string | number | null>
 ): Promise<void> {
   // 1. Header row
   const headerRow: Row = columns.map((col) => ({
@@ -79,7 +81,28 @@ export async function exportToXlsx<T>(
     });
   });
 
-  const sheetData: SheetData = [headerRow, ...dataRows];
+  const footerRows: Row[] = [];
+  if (footerValues && footerValues.length > 0) {
+    footerRows.push(
+      columns.map((col, idx): Cell => {
+        const v = footerValues[idx];
+        if (v === null || v === undefined) return { value: '', type: String, backgroundColor: '#E2E8F0' };
+        if (typeof v === 'number' && Number.isFinite(v)) {
+          return {
+            value: v,
+            type: Number,
+            format: col.format || '#,##0.00',
+            align: 'right',
+            fontWeight: 'bold',
+            backgroundColor: '#E2E8F0',
+          };
+        }
+        return { value: String(v), type: String, align: 'left', fontWeight: 'bold', backgroundColor: '#E2E8F0' };
+      })
+    );
+  }
+
+  const sheetData: SheetData = [headerRow, ...dataRows, ...footerRows];
 
   const columnWidths = columns.map((col) => ({
     width: col.width || 18,

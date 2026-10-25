@@ -1314,6 +1314,20 @@ export default function StockInventory({
   const [exportingExcel, setExportingExcel] = useState(false);
 
   // Workstream C: Export to Excel (.xlsx) using sortedProducts
+  // Stock worth totals follow the currently filtered list (sortedProducts)
+  const inventoryWorth = (list: Item[]) => {
+    let qty = 0;
+    let cost = 0;
+    let retail = 0;
+    for (const i of list) {
+      const q = Number(i.stock_qty) || 0;
+      qty += q;
+      cost += q * (Number(i.cost_price) || 0);
+      retail += q * (Number(i.retail_price) || 0);
+    }
+    return { qty, cost, retail };
+  };
+
   const handleExportExcel = async () => {
     setShowExportMenu(false);
     if (sortedProducts.length === 0) {
@@ -1335,9 +1349,14 @@ export default function StockInventory({
           { header: 'Stock Qty', type: 'Number', width: 14, format: '#,##0', getValue: (i) => i.stock_qty },
           { header: 'Cost Price (PKR)', type: 'Number', width: 16, format: '#,##0.00', getValue: (i) => i.cost_price || 0 },
           { header: 'Retail Price (PKR)', type: 'Number', width: 16, format: '#,##0.00', getValue: (i) => i.retail_price || 0 },
-          { header: 'Stock Valuation (PKR)', type: 'Number', width: 20, format: '#,##0.00', getValue: (i) => (i.stock_qty || 0) * (i.cost_price || 0) },
+          { header: 'Stock Worth @ Cost (PKR)', type: 'Number', width: 22, format: '#,##0.00', getValue: (i) => (i.stock_qty || 0) * (i.cost_price || 0) },
+          { header: 'Stock Worth @ Retail (PKR)', type: 'Number', width: 24, format: '#,##0.00', getValue: (i) => (i.stock_qty || 0) * (i.retail_price || 0) },
         ],
-        'Inventory'
+        'Inventory',
+        (() => {
+          const t = inventoryWorth(sortedProducts);
+          return ['TOTAL', null, null, null, null, null, t.qty, null, null, t.cost, t.retail];
+        })()
       );
       showToast(`Exported ${sortedProducts.length} inventory items to Excel!`);
     } catch (err: any) {
@@ -1363,9 +1382,22 @@ export default function StockInventory({
         <td style="padding: 6px 8px;">${i.category || 'General'}</td>
         <td style="padding: 6px 8px;">${i.pack_size || i.unit || '—'}</td>
         <td style="padding: 6px 8px; text-align: center; font-weight: 700;">${i.stock_qty}</td>
+        <td style="padding: 6px 8px; text-align: right;">Rs. ${(i.cost_price || 0).toLocaleString()}</td>
         <td style="padding: 6px 8px; text-align: right;">Rs. ${(i.retail_price || 0).toLocaleString()}</td>
+        <td style="padding: 6px 8px; text-align: right; font-weight: 600;">Rs. ${((Number(i.stock_qty) || 0) * (Number(i.cost_price) || 0)).toLocaleString()}</td>
+        <td style="padding: 6px 8px; text-align: right; font-weight: 600;">Rs. ${((Number(i.stock_qty) || 0) * (Number(i.retail_price) || 0)).toLocaleString()}</td>
       </tr>
     `).join('');
+    const worth = inventoryWorth(sortedProducts);
+    const totalsHtml = `
+      <tr style="border-top: 2px solid #0F172A; background: #E2E8F0; font-weight: 800;">
+        <td colspan="4" style="padding: 8px; text-align: right;">TOTAL</td>
+        <td style="padding: 8px; text-align: center;">${worth.qty.toLocaleString()}</td>
+        <td></td>
+        <td></td>
+        <td style="padding: 8px; text-align: right;">Rs. ${worth.cost.toLocaleString()}</td>
+        <td style="padding: 8px; text-align: right;">Rs. ${worth.retail.toLocaleString()}</td>
+      </tr>`;
 
     const printHtml = `<!DOCTYPE html>
 <html>
@@ -1373,7 +1405,7 @@ export default function StockInventory({
   <meta charset="UTF-8">
   <title>Inventory Manifest — ${tenantName}</title>
   <style>
-    @page { size: A4 portrait; margin: 12mm; }
+    @page { size: A4 landscape; margin: 12mm; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #0F172A; padding: 10px; }
     .header { margin-bottom: 16px; border-bottom: 2px solid #0F172A; padding-bottom: 8px; display: flex; justify-content: space-between; align-items: flex-end; }
@@ -1394,16 +1426,20 @@ export default function StockInventory({
   <table>
     <thead>
       <tr>
-        <th style="width: 15%;">Code</th>
-        <th style="width: 35%;">Product Name</th>
-        <th style="width: 20%;">Category</th>
-        <th style="width: 12%;">Pack / Unit</th>
-        <th style="width: 8%; text-align: center;">Qty</th>
-        <th style="width: 10%; text-align: right;">Retail</th>
+        <th style="width: 10%;">Code</th>
+        <th style="width: 24%;">Product Name</th>
+        <th style="width: 12%;">Category</th>
+        <th style="width: 8%;">Pack / Unit</th>
+        <th style="width: 6%; text-align: center;">Qty</th>
+        <th style="width: 9%; text-align: right;">Cost</th>
+        <th style="width: 9%; text-align: right;">Retail</th>
+        <th style="width: 11%; text-align: right;">Worth @ Cost</th>
+        <th style="width: 11%; text-align: right;">Worth @ Retail</th>
       </tr>
     </thead>
     <tbody>
       ${rowsHtml}
+      ${totalsHtml}
     </tbody>
   </table>
 </body>
