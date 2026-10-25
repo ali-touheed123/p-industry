@@ -139,6 +139,21 @@ export function buildSalesHistoryThermalHtml(
 }
 
 /**
+ * "Sales Return" line cutoff: special sales created on/after this date show the line on
+ * reprints too. Older special receipts reprint exactly as they were first printed.
+ * Set NEXT_PUBLIC_SALES_RETURN_START (YYYY-MM-DD) to the day this feature went live.
+ */
+export const SALES_RETURN_LINE_START: string =
+  process.env.NEXT_PUBLIC_SALES_RETURN_START || '2026-10-26';
+
+export function isSalesReturnLineEnabled(saleDate: string | null | undefined): boolean {
+  if (!saleDate) return false;
+  const t = new Date(saleDate).getTime();
+  const start = new Date(`${SALES_RETURN_LINE_START}T00:00:00`).getTime();
+  return Number.isFinite(t) && Number.isFinite(start) && t >= start;
+}
+
+/**
  * TASK-SR-08 / B7:
  * Renders a Special Receipt from a server-verified JSON snapshot and template snapshot.
  * Option A Content Rule: zero branding defaults, derived printed total, no discount display.

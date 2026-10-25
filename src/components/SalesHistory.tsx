@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Invoice, InvoiceItem } from '@/types';
 import { printViaIframe } from '@/utils/iframePrint';
 import { escapeHtml } from '@/utils/receiptRenderCore';
-import { buildSalesHistoryThermalHtml, buildSpecialReceiptHtml } from '@/utils/receiptAdapters';
+import { buildSalesHistoryThermalHtml, buildSpecialReceiptHtml, isSalesReturnLineEnabled } from '@/utils/receiptAdapters';
 import { serializeCsv, downloadCsv } from '@/utils/csvSerializer';
 import { ReceiptTemplate } from '@/types/receipt';
 import SpecialReturnModal from './SpecialReturnModal';
@@ -207,7 +207,11 @@ export default function SalesHistory({
       }
 
       if (data.snapshot) {
-        const specialHtml = buildSpecialReceiptHtml(data.snapshot, data.template, true);
+        const specialHtml = buildSpecialReceiptHtml(
+          { ...data.snapshot, show_sales_return: isSalesReturnLineEnabled((inv as any).created_at || inv.date) },
+          data.template,
+          true
+        );
         printViaIframe(specialHtml);
       }
     } catch (err: any) {
