@@ -75,7 +75,7 @@ interface Props {
   canUseSpecialReceipt?: boolean;
   userRole?: string;
   onNavigateToPos?: () => void;
-  onEditInvoiceInPos?: (invoice: Invoice) => void;
+  onEditInvoiceInPos?: (invoice: Invoice, reason: string) => void;
 }
 
 export default function SalesHistory({
@@ -141,6 +141,21 @@ export default function SalesHistory({
 
   // Selected Invoice Modal / Print
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  // Edit-in-POS needs a reason first
+  const [editReasonInvoice, setEditReasonInvoice] = useState<Invoice | null>(null);
+  const [editReasonText, setEditReasonText] = useState('');
+  const requestEditReason = (inv: Invoice) => {
+    setEditReasonText('');
+    setEditReasonInvoice(inv);
+  };
+  const confirmEditReason = () => {
+    const reason = editReasonText.trim();
+    if (reason.length < 3 || !editReasonInvoice || !onEditInvoiceInPos) return;
+    const inv = editReasonInvoice;
+    setEditReasonInvoice(null);
+    setEditReasonText('');
+    onEditInvoiceInPos(inv, reason);
+  };
   const [thermalPrintInvoice, setThermalPrintInvoice] = useState<Invoice | null>(null);
 
   // Registered Clients Directory (for WhatsApp Phone Resolution)
@@ -996,6 +1011,46 @@ export default function SalesHistory({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#F8FAFC', overflowY: 'auto' }}>
+
+      {editReasonInvoice && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: '#fff', borderRadius: '14px', width: '100%', maxWidth: '420px', boxShadow: '0 20px 50px rgba(0,0,0,0.3)', overflow: 'hidden' }}>
+            <div style={{ padding: '14px 16px', borderBottom: '1px solid #E2E8F0', background: '#FFFBEB', fontWeight: 700, fontSize: '14px', color: '#92400E' }}>
+              Edit Sale #{editReasonInvoice.invoice_no}
+            </div>
+            <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <label style={{ fontSize: '12px', color: '#475569', fontWeight: 600 }}>
+                Is sale ko edit kyun kar rahe hain? (wajah likhna zaroori hai)
+              </label>
+              <textarea
+                autoFocus
+                rows={3}
+                value={editReasonText}
+                onChange={(e) => setEditReasonText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setEditReasonInvoice(null);
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) confirmEditReason();
+                }}
+                placeholder="Masalan: customer ne 2 item aur mangwaye / qty galat likhi gayi thi..."
+                style={{ width: '100%', padding: '10px 12px', border: '1px solid #CBD5E1', borderRadius: '8px', fontSize: '13px', outline: 'none', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit' }}
+              />
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                <button type="button" onClick={() => setEditReasonInvoice(null)} style={{ padding: '8px 14px', border: '1px solid #CBD5E1', background: '#fff', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: '#334155' }}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmEditReason}
+                  disabled={editReasonText.trim().length < 3}
+                  style={{ padding: '8px 14px', border: 'none', background: editReasonText.trim().length < 3 ? '#FCD34D' : '#D97706', color: '#fff', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: editReasonText.trim().length < 3 ? 'not-allowed' : 'pointer' }}
+                >
+                  Continue to POS
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {/* ── Top Header Bar ── */}
       <div
         style={{
@@ -2198,7 +2253,7 @@ export default function SalesHistory({
                               {onEditInvoiceInPos && !isReturn && inv.printed_as !== 'special' && (
                                 <button
                                   type="button"
-                                  onClick={() => onEditInvoiceInPos(inv)}
+                                  onClick={() => requestEditReason(inv)}
                                   title="Open in POS & Add More Items"
                                   style={{
                                     padding: '4px 8px',
@@ -2705,7 +2760,7 @@ export default function SalesHistory({
                     onClick={() => {
                       const invToEdit = selectedInvoice;
                       setSelectedInvoice(null);
-                      onEditInvoiceInPos(invToEdit);
+                      requestEditReason(invToEdit);
                     }}
                     style={{
                       display: 'flex',

@@ -1124,7 +1124,7 @@ export default function PosBilling({
       const apiEndpoint = '/api/invoices';
       const apiMethod = isEditingExisting ? 'PATCH' : 'POST';
       const payloadToSend = isEditingExisting
-        ? { id: editingInvoice.id, ...invoicePayload }
+        ? { id: editingInvoice.id, edit_reason: editingInvoice.edit_reason || '', ...invoicePayload }
         : invoicePayload;
 
       const res = await fetch(apiEndpoint, {

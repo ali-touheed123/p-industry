@@ -473,6 +473,15 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
+    // Edit reason is mandatory when a saved sale is edited from POS
+    const editReason = String(body.edit_reason ?? '').trim();
+    if (auth.session.role !== 'developer' && editReason.length < 3) {
+      return NextResponse.json(
+        { success: false, error: 'Edit karne ki wajah (reason) likhna zaroori hai.', code: 'EDIT_REASON_REQUIRED' },
+        { status: 400 }
+      );
+    }
+
     // Rate lock: lines must match catalog retail price, or the rate the line already had on this invoice
     if (auth.session.role !== 'developer') {
       const { data: existingLineRows } = await supabaseAdmin
@@ -556,6 +565,21 @@ export async function PATCH(req: NextRequest) {
     });
 
     if (rpcErr) throw rpcErr;
+
+    // Audit: who edited the sale and why (the RPC's own log has no reason)
+    try {
+      await supabaseAdmin.from('audit_logs').insert({
+        tenant_id,
+        user_name: auth.session.username,
+        action: `Invoice Edit ${(existingInv as any)?.invoice_no || id} — Reason: ${editReason || 'n/a'}`,
+        action_type: 'update',
+        entity_type: 'invoice',
+        entity_id: id,
+        details: { reason: editReason || null, invoice_no: (existingInv as any)?.invoice_no || null },
+      });
+    } catch (auditErr) {
+      console.warn('[Invoices PATCH] edit-reason audit log failed', auditErr);
+    }
 
     return NextResponse.json({
       success: true,
