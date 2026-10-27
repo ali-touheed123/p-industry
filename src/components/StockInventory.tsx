@@ -100,6 +100,74 @@ export default function StockInventory({
   const [notification, setNotification] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
+  // ── Server-side Pagination & Stats State (25 items per page) ──────────────
+  const [pagedItems, setPagedItems] = useState<Item[]>([]);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [totalPages, setTotalPages] = useState<number>(1);
+  const [totalCount, setTotalCount] = useState<number>(0);
+  const [isLoadingItems, setIsLoadingItems] = useState<boolean>(false);
+  const [serverStats, setServerStats] = useState<{
+    totalSKUs: number;
+    totalStockUnits: number;
+    totalValuation: number;
+    lowStockCount: number;
+  } | null>(null);
+
+  const fetchPaginatedItems = useCallback(async (
+    targetPage = 1,
+    search = tableSearch,
+    cat = selectedCategory,
+    status = stockStatus,
+    sField = sortField,
+    sAsc = sortAsc
+  ) => {
+    if (!tenantId) return;
+    setIsLoadingItems(true);
+    try {
+      const params = new URLSearchParams({
+        tenant_id: tenantId,
+        page: String(targetPage),
+        limit: '25',
+        sort_by: String(sField),
+        sort_asc: String(sAsc),
+      });
+      if (search.trim()) params.set('search', search.trim());
+      if (cat !== 'All') params.set('category', cat);
+      if (status !== 'all') params.set('stock_status', status);
+
+      const res = await fetch(`/api/items?${params.toString()}`);
+      const data = await res.json();
+      if (data.success) {
+        setPagedItems(data.items || []);
+        setCurrentPage(data.page || 1);
+        setTotalPages(data.totalPages || 1);
+        setTotalCount(data.total || 0);
+        if (data.stats) {
+          setServerStats(data.stats);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch paginated items:', err);
+    } finally {
+      setIsLoadingItems(false);
+    }
+  }, [tenantId, tableSearch, selectedCategory, stockStatus, sortField, sortAsc]);
+
+  const goToPage = (page: number) => {
+    const clamped = Math.max(1, Math.min(page, totalPages));
+    if (clamped === currentPage && pagedItems.length > 0) return;
+    fetchPaginatedItems(clamped, tableSearch, selectedCategory, stockStatus, sortField, sortAsc);
+  };
+
+  // Debounce search and filter updates to trigger server-side query on page 1
+  useEffect(() => {
+    if (!tenantId) return;
+    const timer = setTimeout(() => {
+      fetchPaginatedItems(1, tableSearch, selectedCategory, stockStatus, sortField, sortAsc);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [tenantId, tableSearch, selectedCategory, stockStatus, sortField, sortAsc]);
+
   // ── Brand / Series catalog (loaded once) ─────────────────────────────────
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const [allSeries, setAllSeries] = useState<SeriesOption[]>([]);
@@ -229,6 +297,9 @@ export default function StockInventory({
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     try {
+      if (tenantId) {
+        await fetchPaginatedItems(currentPage, tableSearch, selectedCategory, stockStatus, sortField, sortAsc);
+      }
       if (onStockUpdated) {
         await onStockUpdated();
       }
@@ -774,16 +845,16 @@ export default function StockInventory({
     }
   };
 
-  // Inventory stats calculations (Matching painterp top row)
-  const totalSKUs = items.length;
-  const totalStockUnits = items.reduce((acc, p) => acc + (Number(p.stock_qty) || 0), 0);
-  const lowStockCount = items.filter((p) => (p.stock_qty || 0) <= (p.min_stock_alert || 5)).length;
-  const totalValuation = items.reduce(
+  // Inventory stats calculations (Uses instant server-calculated stats when available)
+  const totalSKUs = serverStats ? serverStats.totalSKUs : items.length;
+  const totalStockUnits = serverStats ? serverStats.totalStockUnits : items.reduce((acc, p) => acc + (Number(p.stock_qty) || 0), 0);
+  const lowStockCount = serverStats ? serverStats.lowStockCount : items.filter((p) => (p.stock_qty || 0) <= (p.min_stock_alert || 5)).length;
+  const totalValuation = serverStats ? serverStats.totalValuation : items.reduce(
     (acc, p) => acc + (Number(p.stock_qty) || 0) * (Number(p.cost_price) || 0),
     0
   );
 
-  // Filter products: Universal Inventory Search (7 fields with whitespace trimming & case-insensitivity)
+  // Filter products: Universal Inventory Search (client-side fallback if no tenant)
   const filteredProducts = items.filter((p) => {
     if (selectedCategory !== 'All' && p.category !== selectedCategory) return false;
 
@@ -815,7 +886,7 @@ export default function StockInventory({
     return true;
   });
 
-  // Sort products
+  // Sort products (client fallback)
   const sortedProducts = [...filteredProducts].sort((a, b) => {
     const valA = (a as any)[sortField];
     const valB = (b as any)[sortField];
@@ -828,12 +899,15 @@ export default function StockInventory({
     return 0;
   });
 
+  const isServerPaged = Boolean(tenantId);
+  const itemsToRender = isServerPaged ? pagedItems : sortedProducts;
+
   const handleSort = (field: keyof Item) => {
-    if (sortField === field) {
-      setSortAsc(!sortAsc);
-    } else {
-      setSortField(field);
-      setSortAsc(true);
+    const newAsc = sortField === field ? !sortAsc : true;
+    setSortField(field);
+    setSortAsc(newAsc);
+    if (tenantId) {
+      fetchPaginatedItems(currentPage, tableSearch, selectedCategory, stockStatus, field, newAsc);
     }
   };
 
@@ -1256,6 +1330,7 @@ export default function StockInventory({
         if (data.success) {
           showToast(`Product "${formName}" updated successfully!`);
           setShowAddProductModal(false);
+          fetchPaginatedItems(currentPage, tableSearch, selectedCategory, stockStatus, sortField, sortAsc);
           onStockUpdated?.();
         } else {
           // FIX FINDING-INV-004: Display server-side duplicate SKU / validation errors in modal
@@ -1272,6 +1347,7 @@ export default function StockInventory({
         if (data.success) {
           showToast(`New Product "${formName}" added to catalog!`);
           setShowAddProductModal(false);
+          fetchPaginatedItems(1, tableSearch, selectedCategory, stockStatus, sortField, sortAsc);
           onStockUpdated?.();
         } else {
           // FIX FINDING-INV-004: Display server-side duplicate SKU / validation errors in modal
@@ -1298,6 +1374,7 @@ export default function StockInventory({
       const data = await res.json();
       if (data.success) {
         showToast(`Product "${name}" deleted successfully!`);
+        fetchPaginatedItems(currentPage, tableSearch, selectedCategory, stockStatus, sortField, sortAsc);
         onStockUpdated?.();
       } else {
         alert(`Failed to delete: ${data.error}`);
@@ -1330,7 +1407,7 @@ export default function StockInventory({
 
   const handleExportExcel = async () => {
     setShowExportMenu(false);
-    if (sortedProducts.length === 0) {
+    if (itemsToRender.length === 0) {
       showToast('No inventory records to export for the current filters.');
       return;
     }
@@ -1338,7 +1415,7 @@ export default function StockInventory({
     try {
       await exportToXlsx(
         `Inventory_${tenantName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`,
-        sortedProducts,
+        itemsToRender,
         [
           { header: 'Product Code', type: 'String', width: 14, getValue: (i) => i.code || '—' },
           { header: 'Product Name', type: 'String', width: 30, getValue: (i) => i.name },
@@ -1354,11 +1431,11 @@ export default function StockInventory({
         ],
         'Inventory',
         (() => {
-          const t = inventoryWorth(sortedProducts);
+          const t = inventoryWorth(itemsToRender);
           return ['TOTAL', null, null, null, null, null, t.qty, null, null, t.cost, t.retail];
         })()
       );
-      showToast(`Exported ${sortedProducts.length} inventory items to Excel!`);
+      showToast(`Exported ${itemsToRender.length} inventory items to Excel!`);
     } catch (err: any) {
       console.error('Failed to export inventory to Excel:', err);
       showToast('Failed to generate Excel file.');
@@ -1370,12 +1447,12 @@ export default function StockInventory({
   // Workstream C: Print Inventory Report (isolated printable report, NOT whole ERP shell)
   const handlePrintInventory = () => {
     setShowExportMenu(false);
-    if (sortedProducts.length === 0) {
+    if (itemsToRender.length === 0) {
       showToast('No inventory records to print.');
       return;
     }
 
-    const rowsHtml = sortedProducts.map((i, idx) => `
+    const rowsHtml = itemsToRender.map((i, idx) => `
       <tr style="border-bottom: 1px solid #E2E8F0; ${idx % 2 === 1 ? 'background: #F8FAFC;' : ''}">
         <td style="padding: 6px 8px; font-family: monospace; font-size: 11px;">${i.code || '—'}</td>
         <td style="padding: 6px 8px; font-weight: 600;">${i.name}</td>
@@ -1388,7 +1465,7 @@ export default function StockInventory({
         <td style="padding: 6px 8px; text-align: right; font-weight: 600;">Rs. ${((Number(i.stock_qty) || 0) * (Number(i.retail_price) || 0)).toLocaleString()}</td>
       </tr>
     `).join('');
-    const worth = inventoryWorth(sortedProducts);
+    const worth = inventoryWorth(itemsToRender);
     const totalsHtml = `
       <tr style="border-top: 2px solid #0F172A; background: #E2E8F0; font-weight: 800;">
         <td colspan="4" style="padding: 8px; text-align: right;">TOTAL</td>
@@ -1420,7 +1497,7 @@ export default function StockInventory({
   <div class="header">
     <div>
       <div class="title">${tenantName} — Inventory Manifest</div>
-      <div class="sub">Generated on ${new Date().toLocaleString()} · Filtered records: ${sortedProducts.length} items</div>
+      <div class="sub">Generated on ${new Date().toLocaleString()} · Filtered records: ${itemsToRender.length} items</div>
     </div>
   </div>
   <table>
@@ -1604,9 +1681,29 @@ export default function StockInventory({
                 type="text"
                 value={tableSearch}
                 onChange={(e) => setTableSearch(e.target.value)}
-                placeholder="Filter by SKU, product name, shade or category..."
-                style={{ width: '100%', fontSize: '12px', background: '#F8FAFC', border: '1px solid #E2E8F0', padding: '7px 10px 7px 32px', color: '#0F172A', borderRadius: '8px', outline: 'none' }}
+                placeholder="Search products by SKU, name, shade, brand..."
+                style={{ width: '100%', fontSize: '12px', background: '#F8FAFC', border: '1px solid #E2E8F0', padding: '7px 28px 7px 32px', color: '#0F172A', borderRadius: '8px', outline: 'none' }}
               />
+              {tableSearch && (
+                <button
+                  type="button"
+                  onClick={() => setTableSearch('')}
+                  style={{
+                    position: 'absolute',
+                    right: '8px',
+                    background: 'none',
+                    border: 'none',
+                    color: '#94A3B8',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    lineHeight: 1,
+                    padding: '2px',
+                  }}
+                  title="Clear search"
+                >
+                  ✕
+                </button>
+              )}
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
@@ -1831,43 +1928,57 @@ export default function StockInventory({
                 </tr>
               </thead>
               <tbody>
-                {sortedProducts.length === 0 ? (
+                {itemsToRender.length === 0 ? (
                   <tr>
                     <td colSpan={8} style={{ padding: '3.5rem 1rem', textAlign: 'center', color: '#64748B', fontSize: '12px' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-                        <span>
-                          {selectedCategory !== 'All'
-                            ? `No products found in "${selectedCategory}" matching your criteria.`
-                            : 'No products found. Click "+ Add Product" above.'}
-                        </span>
-                        {selectedCategory !== 'All' && (
-                          <button
-                            type="button"
-                            onClick={() => setSelectedCategory('All')}
-                            className="inv-btn-secondary"
-                            style={{
-                              marginTop: '4px',
-                              padding: '6px 14px',
-                              fontSize: '12px',
-                              color: '#2563EB',
-                              borderColor: '#BFDBFE',
-                              background: '#EFF6FF',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '6px',
-                              cursor: 'pointer',
-                              fontWeight: 600,
-                            }}
-                          >
-                            <Filter style={{ width: 13, height: 13 }} />
-                            Search across All Categories
-                          </button>
+                        {isLoadingItems ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#F97316', fontWeight: 600 }}>
+                            <RefreshCw style={{ width: 16, height: 16, animation: 'spin 1s linear infinite' }} />
+                            <span>Loading products from server...</span>
+                          </div>
+                        ) : (
+                          <>
+                            <span>
+                              {selectedCategory !== 'All'
+                                ? `No products found in "${selectedCategory}" matching your criteria.`
+                                : tableSearch.trim()
+                                ? `No products found matching "${tableSearch}".`
+                                : 'No products found. Click "+ Add Product" above.'}
+                            </span>
+                            {(selectedCategory !== 'All' || tableSearch.trim()) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedCategory('All');
+                                  setTableSearch('');
+                                }}
+                                className="inv-btn-secondary"
+                                style={{
+                                  marginTop: '4px',
+                                  padding: '6px 14px',
+                                  fontSize: '12px',
+                                  color: '#2563EB',
+                                  borderColor: '#BFDBFE',
+                                  background: '#EFF6FF',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  cursor: 'pointer',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                <Filter style={{ width: 13, height: 13 }} />
+                                Reset Filters &amp; Search
+                              </button>
+                            )}
+                          </>
                         )}
                       </div>
                     </td>
                   </tr>
                 ) : (
-                  sortedProducts.map((prod) => {
+                  itemsToRender.map((prod) => {
                     const minAlert = prod.min_stock_alert || 5;
                     const isCritical = prod.stock_qty <= minAlert;
                     return (
@@ -1978,6 +2089,108 @@ export default function StockInventory({
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Pagination Toolbar (25 Products per page) */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px 16px',
+            background: '#FFFFFF',
+            border: '1px solid #E2E8F0',
+            borderTop: 'none',
+            borderRadius: '0 0 8px 8px',
+            fontSize: '12px',
+            color: '#475569',
+            flexWrap: 'wrap',
+            gap: '12px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>
+                Showing <strong style={{ color: '#0F172A' }}>{totalCount === 0 ? 0 : (currentPage - 1) * 25 + 1}</strong> – <strong style={{ color: '#0F172A' }}>{Math.min(currentPage * 25, totalCount)}</strong> of <strong style={{ color: '#0F172A' }}>{totalCount.toLocaleString()}</strong> products
+              </span>
+              {isLoadingItems && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#F97316', fontWeight: 600 }}>
+                  <RefreshCw style={{ width: 12, height: 12, animation: 'spin 1s linear infinite' }} />
+                  Loading...
+                </span>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <button
+                type="button"
+                onClick={() => goToPage(1)}
+                disabled={currentPage <= 1 || isLoadingItems}
+                className="inv-btn-secondary"
+                style={{
+                  padding: '5px 10px',
+                  fontSize: '11px',
+                  opacity: currentPage <= 1 ? 0.5 : 1,
+                  cursor: currentPage <= 1 ? 'not-allowed' : 'pointer'
+                }}
+                title="First Page"
+              >
+                « First
+              </button>
+              <button
+                type="button"
+                onClick={() => goToPage(currentPage - 1)}
+                disabled={currentPage <= 1 || isLoadingItems}
+                className="inv-btn-secondary"
+                style={{
+                  padding: '5px 12px',
+                  fontSize: '11px',
+                  opacity: currentPage <= 1 ? 0.5 : 1,
+                  cursor: currentPage <= 1 ? 'not-allowed' : 'pointer'
+                }}
+              >
+                ‹ Prev
+              </button>
+
+              <span style={{
+                padding: '4px 10px',
+                fontWeight: 700,
+                color: '#0F172A',
+                background: '#F1F5F9',
+                borderRadius: '6px',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontSize: '11px'
+              }}>
+                Page {currentPage} of {Math.max(1, totalPages)}
+              </span>
+
+              <button
+                type="button"
+                onClick={() => goToPage(currentPage + 1)}
+                disabled={currentPage >= totalPages || isLoadingItems}
+                className="inv-btn-secondary"
+                style={{
+                  padding: '5px 12px',
+                  fontSize: '11px',
+                  opacity: currentPage >= totalPages ? 0.5 : 1,
+                  cursor: currentPage >= totalPages ? 'not-allowed' : 'pointer'
+                }}
+              >
+                Next ›
+              </button>
+              <button
+                type="button"
+                onClick={() => goToPage(totalPages)}
+                disabled={currentPage >= totalPages || isLoadingItems}
+                className="inv-btn-secondary"
+                style={{
+                  padding: '5px 10px',
+                  fontSize: '11px',
+                  opacity: currentPage >= totalPages ? 0.5 : 1,
+                  cursor: currentPage >= totalPages ? 'not-allowed' : 'pointer'
+                }}
+                title="Last Page"
+              >
+                Last »
+              </button>
+            </div>
           </div>
         </div>
       </div>
