@@ -138,7 +138,7 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { id, credit_limit, name, phone, address, city, reference } = body;
+    const { id, credit_limit, name, phone, address, city, reference, opening_balance } = body;
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Client ID is required' }, { status: 400 });
@@ -167,6 +167,59 @@ export async function PATCH(req: NextRequest) {
     if (address !== undefined) updates.address = address || null;
     if (city !== undefined) updates.city = city || null;
     if (reference !== undefined) updates.reference = reference || null;
+
+    // Handle opening_balance update (previous/pehla udhar set karna baad mein)
+    if (opening_balance !== undefined && opening_balance !== null) {
+      const obAmount = Number(opening_balance);
+      if (!isNaN(obAmount) && obAmount >= 0) {
+        // Fetch existing client to know current opening_balance
+        const { data: currentClient } = await supabaseAdmin
+          .from('clients')
+          .select('opening_balance, current_balance, code, name')
+          .eq('id', id)
+          .single();
+
+        const oldOB = Number(currentClient?.opening_balance ?? 0);
+        const diff = obAmount - oldOB;  // positive = increase, negative = decrease
+
+        // Update/insert opening balance voucher
+        const voucherNo = `OB-${currentClient?.code}`;
+        const { data: existingVoucher } = await supabaseAdmin
+          .from('vouchers')
+          .select('id')
+          .eq('tenant_id', existingClient.tenant_id)
+          .eq('voucher_no', voucherNo)
+          .maybeSingle();
+
+        const today = new Date().toISOString().split('T')[0];
+        if (existingVoucher) {
+          // Update existing OB voucher amount
+          await supabaseAdmin
+            .from('vouchers')
+            .update({ amount: obAmount })
+            .eq('id', existingVoucher.id);
+        } else {
+          // Create new OB voucher
+          await supabaseAdmin.from('vouchers').insert({
+            tenant_id: existingClient.tenant_id,
+            voucher_no: voucherNo,
+            voucher_type: 'opening_balance',
+            party_type: 'client',
+            party_id: id,
+            party_name: currentClient?.name,
+            party_code: currentClient?.code,
+            date: today,
+            amount: obAmount,
+            remarks: 'Previous Balance (Baad mein set kiya gaya)',
+            created_by: 'System',
+          });
+        }
+
+        // Update client record: opening_balance + adjust current_balance by diff
+        updates.opening_balance = obAmount;
+        updates.current_balance = Math.max(0, Number(currentClient?.current_balance ?? 0) + diff);
+      }
+    }
 
     // Scope update to tenant as defence-in-depth
     const { data: client, error } = await supabaseAdmin

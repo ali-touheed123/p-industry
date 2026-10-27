@@ -127,6 +127,7 @@ export default function FinancialLedgers({
   const [editPartyAddress, setEditPartyAddress] = useState('');
   const [editPartyReference, setEditPartyReference] = useState('');
   const [editPartyLimit, setEditPartyLimit] = useState('50000');
+  const [editPartyOpeningBalance, setEditPartyOpeningBalance] = useState('');
   const [submittingEditParty, setSubmittingEditParty] = useState(false);
   const [editPartyError, setEditPartyError] = useState('');
 
@@ -493,6 +494,8 @@ export default function FinancialLedgers({
     setEditPartyAddress(party.address || party.city || '');
     setEditPartyReference(party.reference || '');
     setEditPartyLimit(party.credit_limit !== undefined ? String(party.credit_limit) : '50000');
+    // Pre-fill opening balance only if it hasn't been set yet (so user can fix it)
+    setEditPartyOpeningBalance('');
     setEditPartyError('');
     setShowEditPartyModal(true);
   };
@@ -522,6 +525,11 @@ export default function FinancialLedgers({
       if (activeTab === 'clients') {
         payload.reference = editPartyReference.trim() || null;
         payload.credit_limit = parseFloat(editPartyLimit) || 0;
+        // Only send opening_balance if user typed a value (to avoid overwriting existing)
+        const ob = parseFloat(editPartyOpeningBalance);
+        if (!isNaN(ob) && editPartyOpeningBalance.trim() !== '') {
+          payload.opening_balance = ob;
+        }
       }
 
       const res = await fetch(endpoint, {
@@ -2009,6 +2017,25 @@ export default function FinancialLedgers({
                       onChange={e => setEditPartyLimit(e.target.value)}
                       style={{ width: '100%', height: '36px', fontSize: '13px', fontFamily: 'JetBrains Mono, monospace' }}
                     />
+                  </div>
+                  <div style={{ background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: '8px', padding: '0.75rem' }}>
+                    <label className="form-label" style={{ fontSize: '12px', fontWeight: 700, marginBottom: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#92400E' }}>
+                      <span>⚠ Previous Balance / Pehla Udhar (PKR)</span>
+                      <span style={{ fontSize: '10px', fontWeight: 500, color: '#B45309' }}>Baad mein bhi set karen</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      className="form-input"
+                      placeholder="0.00 — khali chhoren agar change nahi karna"
+                      value={editPartyOpeningBalance}
+                      onChange={e => setEditPartyOpeningBalance(e.target.value)}
+                      style={{ width: '100%', height: '36px', fontSize: '13px', fontFamily: 'JetBrains Mono, monospace', borderColor: editPartyOpeningBalance ? '#F59E0B' : undefined }}
+                    />
+                    <p style={{ fontSize: '11px', color: '#92400E', marginTop: '4px', marginBottom: 0 }}>
+                      Agar pehle balance bhuul gaye thay — yahan likhein. Sirf ek baar set hoga (dobara set karne se voucher add hoga).
+                    </p>
                   </div>
                 </>
               )}
