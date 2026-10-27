@@ -318,7 +318,7 @@ export default function PurchasesView({
   const projectedBalance =
     purchaseType === 'purchase'
       ? currentSupplierBalance + netBillValue - paidAmount
-      : Math.max(0, currentSupplierBalance - netBillValue);
+      : currentSupplierBalance - (netBillValue - paidAmount);
 
   // Handler: Add Item
   const handleAddItem = () => {

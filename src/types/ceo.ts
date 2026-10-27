@@ -101,6 +101,7 @@ export interface DayCloseRecord {
     cashSales: number;
     creditSales: number;
     bankCardSales: number;
+    othersSales?: number;
     pettyExpenses: number;
     tokenPayouts: number;
     expectedCash: number;

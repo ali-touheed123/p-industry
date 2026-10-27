@@ -2,7 +2,11 @@
  * PyntFlow Standardized Sales Math Utility
  * Implements authoritative sales metric formulas across CEO panels, SalesHistory, and Reporting.
  * Task 9.5 (FINDING-REP-005)
+ *
+ * Payment split identity (B8):
+ *   physicalCash + digitalPaid + othersPaid + creditAmount = gross forward net_total
  */
+
 
 export interface InvoiceLike {
   id?: string;
@@ -77,19 +81,38 @@ export function calculateSalesReturns(invoices: InvoiceLike[]): number {
 }
 
 /**
- * Net Sales: Gross Sales - Discounts + Delivery Charges - Sales Returns
- * Calculated as sum(forward net_total) - sum(return net_total).
+ * Net Sales: sum(forward net_total) - sum(return net_total). No Math.max clamp — N1 DB function mirrors this.
  */
 export function calculateNetSales(invoices: InvoiceLike[]): number {
   const forwardNet = invoices
     .filter(isForwardSale)
     .reduce((sum, inv) => sum + Number(inv.net_total || 0), 0);
   const returns = calculateSalesReturns(invoices);
-  return Math.max(0, forwardNet - returns);
+  return forwardNet - returns;
 }
 
 /**
- * Complete Sales Summary Metrics
+ * Others paid amount for a single invoice (B8).
+ * Captures others_paid field OR payment_type cheque/others when split columns are absent.
+ */
+export function calculateOthersPaid(inv: InvoiceLike): number {
+  const invOthers = Number(inv.others_paid || 0);
+  if (invOthers > 0) return invOthers;
+  // fallback: legacy single-column invoices where payment_type signals the mode
+  const cash = Number(inv.cash_paid || 0);
+  const card = Number(inv.card_paid || 0);
+  const bank = Number(inv.bank_paid || 0);
+  if (cash === 0 && card === 0 && bank === 0) {
+    const pt = (inv.payment_type || '').toLowerCase();
+    if (pt === 'cheque' || pt === 'others') {
+      return Number(inv.paid_amount || 0);
+    }
+  }
+  return 0;
+}
+
+/**
+ * Complete Sales Summary Metrics (B8 — physicalCash + digitalPaid + othersPaid + creditAmount = grossForwardNetTotal)
  */
 export function calculateSalesSummary(invoices: InvoiceLike[]) {
   const activeInvoices = invoices.filter(inv => !isCancelledInvoice(inv));
@@ -99,11 +122,12 @@ export function calculateSalesSummary(invoices: InvoiceLike[]) {
   const grossSales = calculateGrossSales(forward);
   const totalDiscounts = calculateDiscounts(forward);
   const returnsTotal = calculateSalesReturns(returns);
-  const netSales = Math.max(0, forward.reduce((s, i) => s + Number(i.net_total || 0), 0) - returnsTotal);
+  const grossForwardNetTotal = forward.reduce((s, i) => s + Number(i.net_total || 0), 0);
+  const netSales = grossForwardNetTotal - returnsTotal; // N1: No Math.max clamp — preserves negative net sales
 
   let physicalCash = 0;
   let digitalPaid = 0;
-  let tokensOtherPaid = 0;
+  let othersPaid = 0;  // B8: others/cheque column — separate from tokens
   let creditAmount = 0;
   let totalItemsCount = 0;
 
@@ -125,7 +149,7 @@ export function calculateSalesSummary(invoices: InvoiceLike[]) {
 
     physicalCash += invCash;
     digitalPaid += (invCard + invBank);
-    tokensOtherPaid += invOthers;
+    othersPaid += invOthers;
     creditAmount += due;
 
     const rawItems = inv.invoice_items || inv.items;
@@ -158,12 +182,15 @@ export function calculateSalesSummary(invoices: InvoiceLike[]) {
 
   return {
     grossSales,
+    grossForwardNetTotal,
     totalDiscounts,
     returnsTotal,
     netSales,
     physicalCash,
     digitalPaid,
-    tokensOtherPaid,
+    othersPaid,
+    /** @deprecated use othersPaid — kept for backwards compat */
+    tokensOtherPaid: othersPaid,
     creditAmount,
     totalItemsCount,
     completedCount,

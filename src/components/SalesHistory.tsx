@@ -839,6 +839,10 @@ export default function SalesHistory({
       <div class="kpi-val" style="color:#2563eb;">Rs. ${summaryMetrics.digitalPaid.toLocaleString()}</div>
     </div>
     <div class="kpi">
+      <div class="kpi-title">Others / Cheque</div>
+      <div class="kpi-val" style="color:#7c3aed;">Rs. ${(summaryMetrics.othersPaid || 0).toLocaleString()}</div>
+    </div>
+    <div class="kpi">
       <div class="kpi-title">Credit / On Account</div>
       <div class="kpi-val" style="color:#d97706;">Rs. ${summaryMetrics.creditAmount.toLocaleString()}</div>
     </div>
@@ -1277,6 +1281,32 @@ export default function SalesHistory({
             </div>
             <div style={{ fontSize: '11px', color: '#059669', fontWeight: 600, marginTop: '4px' }}>
               Card &amp; online transfers
+            </div>
+          </div>
+
+          {/* Others / Cheque (B8) */}
+          <div
+            style={{
+              background: '#FFFFFF',
+              border: '1px solid #E2E8F0',
+              borderRadius: '10px',
+              padding: '1rem',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', fontFamily: 'JetBrains Mono, monospace' }}>
+                Others (Cheque)
+              </span>
+              <div style={{ width: 28, height: 28, borderRadius: '6px', background: '#F5F3FF', color: '#7C3AED', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Ticket style={{ width: 16, height: 16 }} />
+              </div>
+            </div>
+            <div style={{ fontSize: '20px', fontWeight: 900, color: '#0F172A', fontFamily: 'JetBrains Mono, monospace', letterSpacing: '-0.02em' }}>
+              Rs. {(summaryMetrics.othersPaid || 0).toLocaleString()}
+            </div>
+            <div style={{ fontSize: '11px', color: '#7C3AED', fontWeight: 600, marginTop: '4px' }}>
+              Cheque &amp; others tender
             </div>
           </div>
 

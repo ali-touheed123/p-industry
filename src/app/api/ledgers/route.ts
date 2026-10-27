@@ -49,15 +49,25 @@ export async function GET(req: NextRequest) {
         }));
 
         if (isReturn) {
+          // B4: credit = items-returned net_total MINUS cash already received back from supplier.
+          // Cash received on return: cash_paid if > 0, else paid_amount if payment_type is cash/empty.
+          const cashReceived =
+            Number(p.cash_paid || 0) > 0
+              ? Number(p.cash_paid)
+              : (!p.payment_type || p.payment_type === 'cash')
+                ? paidAmt
+                : 0;
+          const returnCredit = netTotal - cashReceived;
+          const cashNote = cashReceived > 0 ? ` · Cash received: Rs. ${cashReceived.toLocaleString()}` : '';
           return {
             id: p.id,
             date: p.date || new Date(p.created_at).toISOString().split('T')[0],
             timestamp: new Date(p.created_at).getTime(),
             type: 'RET',
             typeClass: 'badge-credit',
-            desc: `${p.purchase_no} (PURCHASE RETURN) — Rs. ${netTotal.toLocaleString()}`,
+            desc: `${p.purchase_no} (PURCHASE RETURN) — Rs. ${netTotal.toLocaleString()}${cashNote}`,
             debit: 0,
-            credit: netTotal,
+            credit: returnCredit,
             items: mappedItems,
           };
         }
@@ -100,15 +110,25 @@ export async function GET(req: NextRequest) {
         }));
 
         if (isReturn) {
+          // B4: credit = items-returned net_total MINUS cash already refunded to customer.
+          // Cash refunded: cash_paid if > 0, else paid_amount if payment_type is cash/refund/empty.
+          const cashRefunded =
+            Number(inv.cash_paid || 0) > 0
+              ? Number(inv.cash_paid)
+              : (!inv.payment_type || inv.payment_type === 'cash' || inv.payment_type === 'refund')
+                ? paidAmt
+                : 0;
+          const returnCredit = netTotal - cashRefunded;
+          const cashNote = cashRefunded > 0 ? ` · Cash refunded: Rs. ${cashRefunded.toLocaleString()}` : '';
           return {
             id: inv.id,
             date: inv.date || new Date(inv.created_at).toISOString().split('T')[0],
             timestamp: new Date(inv.created_at).getTime(),
             type: 'RET',
             typeClass: 'badge-credit',
-            desc: `${inv.invoice_no} (SALES RETURN) — Rs. ${netTotal.toLocaleString()}`,
+            desc: `${inv.invoice_no} (SALES RETURN) — Rs. ${netTotal.toLocaleString()}${cashNote}`,
             debit: 0,
-            credit: netTotal,
+            credit: returnCredit,
             items: mappedItems,
           };
         }
@@ -253,12 +273,48 @@ export async function GET(req: NextRequest) {
       };
     });
 
+    // B4: Read-only balance mismatch warning
+    // Fetch stored current_balance from the party table and compare.
+    let storedBalance: number | null = null;
+    try {
+      if (partyType === 'supplier') {
+        const { data: sup } = await supabaseAdmin
+          .from('suppliers')
+          .select('current_balance')
+          .eq('id', partyId)
+          .eq('tenant_id', tenantId)
+          .maybeSingle();
+        storedBalance = sup ? Number(sup.current_balance ?? null) : null;
+      } else if (partyType === 'client') {
+        const { data: cli } = await supabaseAdmin
+          .from('clients')
+          .select('current_balance')
+          .eq('id', partyId)
+          .eq('tenant_id', tenantId)
+          .maybeSingle();
+        storedBalance = cli ? Number(cli.current_balance ?? null) : null;
+      }
+    } catch {
+      // Non-fatal: mismatch check is advisory only
+    }
+
+    const balanceMismatch =
+      storedBalance !== null && Math.abs(runningBalance - storedBalance) > 0.5
+        ? {
+            statementBalance: runningBalance,
+            storedBalance,
+            diff: runningBalance - storedBalance,
+            warning: `Statement balance (${runningBalance.toFixed(2)}) differs from party record (${storedBalance.toFixed(2)}) by ${(runningBalance - storedBalance).toFixed(2)}.`,
+          }
+        : null;
+
     return NextResponse.json({
       success: true,
       statement: computedStatement,
       totalDebit: transactions.reduce((s, t) => s + t.debit, 0),
       totalCredit: transactions.reduce((s, t) => s + t.credit, 0),
       finalBalance: runningBalance,
+      ...(balanceMismatch ? { balanceMismatch } : {}),
     });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

@@ -192,8 +192,21 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
             const bankSales = salesInvs.reduce((sum: number, i: any) => {
               const bp = Number(i.bank_paid || 0) + Number(i.card_paid || 0);
               if (bp > 0) return sum + bp;
-              if (i.payment_type === 'bank' || i.payment_type === 'card' || i.payment_type === 'cheque') {
+              if (i.payment_type === 'bank' || i.payment_type === 'card') {
                 return sum + Number(i.paid_amount || i.net_total || 0);
+              }
+              return sum;
+            }, 0);
+
+            // B8: Others / Cheque tender bucket
+            const othersSales = salesInvs.reduce((sum: number, i: any) => {
+              const op = Number(i.others_paid || 0);
+              if (op > 0) return sum + op;
+              const cp = Number(i.cash_paid || 0);
+              const bp = Number(i.bank_paid || 0) + Number(i.card_paid || 0);
+              if (cp === 0 && bp === 0) {
+                const pt = (i.payment_type || '').toLowerCase();
+                if (pt === 'cheque' || pt === 'others') return sum + Number(i.paid_amount || 0);
               }
               return sum;
             }, 0);
@@ -282,6 +295,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
                 cashSales,
                 creditSales,
                 bankCardSales: bankSales,
+                othersSales,
                 pettyExpenses: totalExpensesAmt,
                 tokenPayouts: tokensRedeemedAmt,
                 expectedCash: expCash,
@@ -631,6 +645,13 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
                 <span>Sales (Bank / Card)</span>
                 <span className="ceo-font-mono">{formatCurrency(financialSummary.bankCardSales)}</span>
               </div>
+
+              {(financialSummary.othersSales ?? 0) > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94A3B8', fontSize: '11px' }}>
+                  <span>Sales (Others / Cheque)</span>
+                  <span className="ceo-font-mono">{formatCurrency(financialSummary.othersSales!)}</span>
+                </div>
+              )}
 
               <div style={{ paddingTop: '12px', borderTop: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: '12px', fontWeight: 700, color: '#0F172A', textTransform: 'uppercase' }}>Expected Cash</span>

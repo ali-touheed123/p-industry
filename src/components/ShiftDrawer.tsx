@@ -27,6 +27,7 @@ export interface ShiftClosingSnapshot {
   openingCash: number;
   cashSales: number;
   bankSales: number;
+  othersSales?: number;  // B8: cheque / others tender
   creditSales: number;
   grossSales: number;
   netSales: number;
@@ -294,6 +295,19 @@ export default function ShiftDrawer({
     return s;
   }, 0);
 
+  // B8: Others / Cheque tender — separate bucket so Cash+Bank+Others+Credit = gross forward net
+  const othersSales = salesInvoices.reduce((s, i) => {
+    const op = Number(i.others_paid || 0);
+    if (op > 0) return s + op;
+    const cp = Number(i.cash_paid || 0);
+    const bp = Number(i.bank_paid || 0) + Number(i.card_paid || 0);
+    if (cp === 0 && bp === 0) {
+      const pt = (i.payment_type || '').toLowerCase();
+      if (pt === 'cheque' || pt === 'others') return s + Number(i.paid_amount || 0);
+    }
+    return s;
+  }, 0);
+
   // Dynamic Purchases breakdown
   const regularPurchases = purchases.filter(p => (p.purchase_type || 'purchase') !== 'return');
   const purchaseReturns = purchases.filter(p => (p.purchase_type || 'purchase') === 'return');
@@ -476,6 +490,7 @@ export default function ShiftDrawer({
       openingCash,
       cashSales,
       bankSales,
+      othersSales,
       creditSales,
       grossSales,
       netSales,
@@ -888,6 +903,13 @@ export default function ShiftDrawer({
           <div style={{ fontSize: '18px', fontWeight: 800, color: '#0F172A', fontFamily: 'JetBrains Mono, monospace' }}>
             Rs. {totalPurchases.toLocaleString()}
           </div>
+          {/* B5: Show returns subtracted and net paid cash */}
+          {totalPurchaseReturns > 0 && (
+            <div style={{ fontSize: '10.5px', color: '#16A34A' }}>
+              Returns: <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>-Rs. {totalPurchaseReturns.toLocaleString()}</span>
+              {' '}· Net: <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700 }}>Rs. {(totalPurchases - totalPurchaseReturns).toLocaleString()}</span>
+            </div>
+          )}
           <div style={{ fontSize: '10.5px', color: '#64748B' }}>
             Paid Cash: <strong style={{ color: '#EA580C', fontFamily: 'JetBrains Mono, monospace' }}>Rs. {supplierCashPaid.toLocaleString()}</strong>
           </div>
@@ -1249,6 +1271,12 @@ export default function ShiftDrawer({
                 <span style={{ color: '#64748B' }}>Bank / Online</span>
                 <span className="font-mono" style={{ fontWeight: 600 }}>Rs. {bankSales.toLocaleString()}</span>
               </div>
+              {othersSales > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748B' }}>Others (Cheque)</span>
+                  <span className="font-mono" style={{ fontWeight: 600 }}>Rs. {othersSales.toLocaleString()}</span>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #F1F5F9', paddingTop: '4px' }}>
                 <span style={{ color: '#64748B' }}>Gross Total Sales</span>
                 <span className="font-mono font-bold" style={{ color: '#0F172A' }}>Rs. {grossSales.toLocaleString()}</span>
@@ -1584,6 +1612,7 @@ export default function ShiftDrawer({
           openingCash,
           cashSales,
           bankSales,
+          othersSales: othersSales || 0,
           creditSales,
           grossSales,
           netSales,
@@ -1627,6 +1656,12 @@ export default function ShiftDrawer({
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#0284c7' }}>
                     <span>Bank / Card Sales:</span>
                     <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {snap.bankSales.toLocaleString()}</span>
+                  </div>
+                )}
+                {(snap.othersSales ?? 0) > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#7c3aed' }}>
+                    <span>Others / Cheque Sales:</span>
+                    <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {(snap.othersSales ?? 0).toLocaleString()}</span>
                   </div>
                 )}
                 {snap.creditSales > 0 && (

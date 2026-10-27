@@ -67,6 +67,12 @@ export default function FinancialLedgers({
   const [branches, setBranches] = useState<any[]>([]);
   const [selectedParty, setSelectedParty] = useState<any | null>(null);
   const [statement, setStatement] = useState<LedgerTransaction[]>([]);
+  const [balanceMismatch, setBalanceMismatch] = useState<{
+    statementBalance: number;
+    storedBalance: number;
+    diff: number;
+    warning: string;
+  } | null>(null);
   const [loadingLedger, setLoadingLedger] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   // Date Range Filter State
@@ -218,12 +224,15 @@ export default function FinancialLedgers({
       const data = await res.json();
       if (data.success) {
         setStatement(data.statement || []);
+        setBalanceMismatch(data.balanceMismatch || null);
       } else {
         setStatement([]);
+        setBalanceMismatch(null);
       }
     } catch (err) {
       console.error(err);
       setStatement([]);
+      setBalanceMismatch(null);
     } finally {
       setLoadingLedger(false);
     }
@@ -1034,6 +1043,29 @@ export default function FinancialLedgers({
                 )}
               </div>
             </div>
+
+            {/* Balance Mismatch Warning Banner (B4) */}
+            {balanceMismatch && (
+              <div
+                style={{
+                  margin: '0.75rem 1.25rem 0',
+                  padding: '0.625rem 0.875rem',
+                  background: '#FEF3C7',
+                  border: '1px solid #F59E0B',
+                  borderRadius: '6px',
+                  color: '#92400E',
+                  fontSize: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <AlertTriangle size={16} style={{ flexShrink: 0, color: '#D97706' }} />
+                <span>
+                  <strong>Balance Advisory:</strong> {balanceMismatch.warning}
+                </span>
+              </div>
+            )}
 
             {/* Table Area */}
             <div style={{ flex: 1, overflowY: 'auto' }}>
