@@ -164,6 +164,137 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Server-Side N4 & N3 Validations for Purchases & Returns
+    const parsedSubtotal = Number(subtotal) || 0;
+    const parsedDiscount = Number(discount) || 0;
+    const parsedNetTotal = Number(net_total) || 0;
+    const parsedPaid = Number(paid_amount) || 0;
+    const parsedDue = Number(due_amount) || 0;
+
+    if (parsedSubtotal < 0 || parsedDiscount < 0 || parsedNetTotal < 0 || parsedPaid < 0 || parsedDue < 0) {
+      return NextResponse.json(
+        { success: false, error: 'Purchase subtotal, discount, net total, paid, and due amounts cannot be negative.' },
+        { status: 400 }
+      );
+    }
+
+    if (Math.abs(parsedNetTotal - (parsedSubtotal - parsedDiscount)) > 1.00) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Formula error: Net total (Rs. ${parsedNetTotal}) does not match Subtotal (${parsedSubtotal}) - Discount (${parsedDiscount})`,
+          code: 'INVALID_NET_TOTAL'
+        },
+        { status: 400 }
+      );
+    }
+
+    if (Math.abs((parsedPaid + parsedDue) - parsedNetTotal) > 1.00) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Payment error: Paid (Rs. ${parsedPaid}) + Due (Rs. ${parsedDue}) does not equal Net Total (Rs. ${parsedNetTotal})`,
+          code: 'INVALID_PAID_DUE_SUM'
+        },
+        { status: 400 }
+      );
+    }
+
+    let calculatedLineItemsTotal = 0;
+    for (const it of items) {
+      const lineQty = Number(it.qty) || 0;
+      const linePrice = Number(it.rate ?? it.unit_price ?? it.price ?? 0);
+      const lineTotal = Number(it.total_price ?? (lineQty * linePrice));
+
+      if (lineQty <= 0) {
+        return NextResponse.json(
+          { success: false, error: `Invalid quantity for item "${it.productName || it.item_name || 'Product'}": must be greater than zero` },
+          { status: 400 }
+        );
+      }
+      if (linePrice < 0) {
+        return NextResponse.json(
+          { success: false, error: `Invalid unit price for item "${it.productName || it.item_name || 'Product'}": cannot be negative` },
+          { status: 400 }
+        );
+      }
+      calculatedLineItemsTotal += lineTotal;
+    }
+
+    if (Math.abs(parsedSubtotal - calculatedLineItemsTotal) > 1.00) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Item total error: Subtotal (Rs. ${parsedSubtotal}) does not match sum of line item totals (Rs. ${calculatedLineItemsTotal})`,
+          code: 'INVALID_LINE_ITEMS_SUBTOTAL'
+        },
+        { status: 400 }
+      );
+    }
+
+    // N3: Purchase Return stock checks & shift assignment
+    let resolvedShiftId = shift_id;
+    if (purchase_type === 'return') {
+      if (!supplier_id) {
+        return NextResponse.json(
+          { success: false, error: 'Supplier is required for purchase returns to adjust supplier balance.', code: 'SUPPLIER_REQUIRED' },
+          { status: 400 }
+        );
+      }
+
+      for (const it of items) {
+        const itemId = it.itemId || it.item_id;
+        const itemCode = it.code || it.item_code;
+        if (itemId || itemCode) {
+          let stockCheckQuery = supabaseAdmin
+            .from('items')
+            .select('id, name, stock_qty')
+            .eq('tenant_id', tenant_id);
+
+          if (itemId) stockCheckQuery = stockCheckQuery.eq('id', itemId);
+          else stockCheckQuery = stockCheckQuery.eq('code', itemCode);
+
+          const { data: dbItem } = await stockCheckQuery.maybeSingle();
+          if (dbItem) {
+            const availStock = Number(dbItem.stock_qty || 0);
+            const reqReturnQty = Number(it.qty || 0);
+            if (reqReturnQty > availStock) {
+              return NextResponse.json(
+                {
+                  success: false,
+                  error: `Cannot return item "${dbItem.name}": return quantity (${reqReturnQty}) exceeds available warehouse stock (${availStock}).`,
+                  code: 'INSUFFICIENT_STOCK_FOR_RETURN'
+                },
+                { status: 400 }
+              );
+            }
+          }
+        }
+      }
+
+      // If supplier gave cash refund, ensure open shift exists to record cash in
+      if (parsedPaid > 0 && (payment_type || '').toLowerCase() === 'cash') {
+        if (!resolvedShiftId) {
+          const { data: openShift } = await supabaseAdmin
+            .from('shifts')
+            .select('id')
+            .eq('tenant_id', tenant_id)
+            .eq('status', 'open')
+            .order('start_time', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (!openShift) {
+            return NextResponse.json(
+              { success: false, error: 'Cannot record cash refund from supplier return without an active open register shift.', code: 'NO_OPEN_SHIFT' },
+              { status: 400 }
+            );
+          }
+          resolvedShiftId = openShift.id;
+        }
+      }
+    }
+
     // Build the purchase_data JSONB and items JSONB for the atomic RPC
     const purchaseData = {
       purchase_no,
@@ -171,14 +302,14 @@ export async function POST(req: NextRequest) {
       supplier_id: supplier_id || null,
       supplier_name,
       date,
-      subtotal: Number(subtotal) || 0,
-      discount: Number(discount) || 0,
-      net_total: Number(net_total) || 0,
-      paid_amount: Number(paid_amount) || 0,
-      due_amount: Number(due_amount) || 0,
+      subtotal: parsedSubtotal,
+      discount: parsedDiscount,
+      net_total: parsedNetTotal,
+      paid_amount: parsedPaid,
+      due_amount: parsedDue,
       payment_type,
       created_by: created_by || null,
-      shift_id: shift_id || null,
+      shift_id: resolvedShiftId || shift_id || null,
     };
 
     const lineItems = items.map((it: any) => ({

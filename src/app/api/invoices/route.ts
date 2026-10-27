@@ -269,13 +269,173 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 0.3 Server-Side N4 Math & Equality Validations (1-Rupee Tolerance)
+    const expectedNetTotal = parsedSubtotal - parsedDiscount + parsedDelivery;
+    if (Math.abs(parsedNetTotal - expectedNetTotal) > 1.00) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Formula error: Net total (Rs. ${parsedNetTotal}) does not match Subtotal (${parsedSubtotal}) - Discount (${parsedDiscount}) + Delivery (${parsedDelivery})`,
+          code: 'INVALID_NET_TOTAL'
+        },
+        { status: 400 }
+      );
+    }
+
+    if (Math.abs((parsedPaid + parsedDue) - parsedNetTotal) > 1.00) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Payment error: Paid (Rs. ${parsedPaid}) + Due (Rs. ${parsedDue}) does not equal Net Total (Rs. ${parsedNetTotal})`,
+          code: 'INVALID_PAID_DUE_SUM'
+        },
+        { status: 400 }
+      );
+    }
+
+    const parsedCashPaid = Number(cash_paid) || 0;
+    const parsedCardPaid = Number(card_paid) || 0;
+    const parsedBankPaid = Number(bank_paid) || 0;
+    const parsedOthersPaid = Number(others_paid) || 0;
+    const tenderSum = parsedCashPaid + parsedCardPaid + parsedBankPaid + parsedOthersPaid;
+    if (Math.abs(tenderSum - parsedPaid) > 1.00) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Tender error: Sum of payments (Cash ${parsedCashPaid} + Card ${parsedCardPaid} + Bank ${parsedBankPaid} + Others ${parsedOthersPaid} = ${tenderSum}) does not match Paid Amount (${parsedPaid})`,
+          code: 'INVALID_TENDER_SUM'
+        },
+        { status: 400 }
+      );
+    }
+
+    let calculatedLineItemsTotal = 0;
+    for (const it of items) {
+      const lineQty = Number(it.qty) || 0;
+      const linePrice = Number(it.unit_price ?? it.rate ?? it.price ?? 0);
+      const lineDiscVal = Number(it.discount ?? 0);
+      const lineTotal = Number(it.total_price ?? (lineQty * linePrice - lineDiscVal));
+      calculatedLineItemsTotal += lineTotal;
+    }
+
+    if (Math.abs(parsedSubtotal - calculatedLineItemsTotal) > 1.00) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Item total error: Subtotal (Rs. ${parsedSubtotal}) does not match sum of line item totals (Rs. ${calculatedLineItemsTotal})`,
+          code: 'INVALID_LINE_ITEMS_SUBTOTAL'
+        },
+        { status: 400 }
+      );
+    }
+
+    // 0.4 Server-Side N3 Return Limits & Validation
+    let resolvedShiftId = shift_id;
+    if (invoice_type === 'return') {
+      const originalInvoiceId = body.original_invoice_id;
+      if (originalInvoiceId) {
+        const { data: origInv, error: origErr } = await supabaseAdmin
+          .from('invoices')
+          .select('id, invoice_no, tenant_id, status, net_total, invoice_type, invoice_items(*)')
+          .eq('id', originalInvoiceId)
+          .eq('tenant_id', tenant_id)
+          .maybeSingle();
+
+        if (origErr || !origInv) {
+          return NextResponse.json(
+            { success: false, error: 'Original invoice not found for this return', code: 'ORIGINAL_INVOICE_NOT_FOUND' },
+            { status: 400 }
+          );
+        }
+
+        if (origInv.status === 'cancelled' || origInv.status === 'void') {
+          return NextResponse.json(
+            { success: false, error: `Cannot return items against ${origInv.status} invoice #${origInv.invoice_no}`, code: 'INVOICE_CANCELLED' },
+            { status: 400 }
+          );
+        }
+
+        // Fetch all prior non-cancelled returns against this invoice
+        const { data: priorReturns } = await supabaseAdmin
+          .from('invoices')
+          .select('id, invoice_items(item_id, item_code, qty)')
+          .eq('original_invoice_id', originalInvoiceId)
+          .eq('tenant_id', tenant_id)
+          .eq('invoice_type', 'return')
+          .not('status', 'in', '(cancelled,void)');
+
+        const returnedQtyMap = new Map<string, number>();
+        (priorReturns || []).forEach((ret: any) => {
+          (ret.invoice_items || []).forEach((it: any) => {
+            const key = it.item_id || it.item_code;
+            if (key) {
+              returnedQtyMap.set(key, (returnedQtyMap.get(key) || 0) + Number(it.qty || 0));
+            }
+          });
+        });
+
+        // Validate each return item against original invoice item quantity
+        for (const it of items) {
+          const key = it.item_id || it.item_code;
+          const origLine = (origInv.invoice_items || []).find((ol: any) =>
+            (ol.item_id && ol.item_id === it.item_id) || (ol.item_code && ol.item_code === it.item_code)
+          );
+
+          if (!origLine) {
+            return NextResponse.json(
+              { success: false, error: `Item "${it.item_name || it.item_code}" was not found on original invoice #${origInv.invoice_no}`, code: 'ITEM_NOT_ON_INVOICE' },
+              { status: 400 }
+            );
+          }
+
+          const alreadyReturned = returnedQtyMap.get(key) || 0;
+          const returnQty = Number(it.qty) || 0;
+          const maxAllowed = Number(origLine.qty) - alreadyReturned;
+
+          if (returnQty > maxAllowed + 0.0001) {
+            return NextResponse.json(
+              {
+                success: false,
+                error: `Return quantity (${returnQty}) for item "${it.item_name}" exceeds remaining returnable quantity (${maxAllowed}). Already returned: ${alreadyReturned}, Original: ${origLine.qty}`,
+                code: 'RETURN_QUANTITY_EXCEEDED'
+              },
+              { status: 400 }
+            );
+          }
+        }
+      }
+
+      // If returning for cash refund, ensure an active open shift exists
+      if (parsedCashPaid > 0 || (payment_type || '').toLowerCase() === 'cash') {
+        if (!resolvedShiftId) {
+          const { data: openShift } = await supabaseAdmin
+            .from('shifts')
+            .select('id')
+            .eq('tenant_id', tenant_id)
+            .eq('status', 'open')
+            .order('start_time', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (!openShift) {
+            return NextResponse.json(
+              { success: false, error: 'Cannot process a cash sales refund without an active open register shift.', code: 'NO_OPEN_SHIFT' },
+              { status: 400 }
+            );
+          }
+          resolvedShiftId = openShift.id;
+        }
+      }
+    }
+
     // 1. Prepare Atomic Invoice Data
     const invoiceData = {
       tenant_id,
       invoice_no: String(invoice_no).trim(),
       client_id: client_id || null,
       client_name,
-      shift_id: shift_id || null,
+      shift_id: resolvedShiftId || shift_id || null,
+      original_invoice_id: body.original_invoice_id || null,
       date,
       subtotal: parsedSubtotal,
       discount: parsedDiscount,
@@ -613,19 +773,59 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    // TASK-FIX-02 (R2, D5): Block cancellation of special return invoices
+    // N5 & Special Return Checks
     const { data: targetInv } = await supabaseAdmin
       .from('invoices')
-      .select('invoice_type, printed_as')
+      .select('invoice_type, printed_as, cash_paid, payment_type, shift_id, status')
       .eq('id', id)
       .eq('tenant_id', tenantId)
       .maybeSingle();
 
-    if (targetInv && targetInv.invoice_type === 'return' && targetInv.printed_as === 'special') {
+    if (!targetInv) {
+      return NextResponse.json({ success: false, error: 'Invoice not found.' }, { status: 404 });
+    }
+
+    if (targetInv.status === 'cancelled' || targetInv.status === 'void') {
+      return NextResponse.json({ success: false, error: 'Invoice is already cancelled or void.' }, { status: 400 });
+    }
+
+    // Block cancellation of special return invoices
+    if (targetInv.invoice_type === 'return' && targetInv.printed_as === 'special') {
       return NextResponse.json(
         { success: false, error: 'Special return invoices cannot be cancelled.' },
         { status: 400 }
       );
+    }
+
+    // N5 Guard: If invoice had cash received and its shift is closed,
+    // ensure an open shift exists to record the cash refund petty expense.
+    if (Number(targetInv.cash_paid || 0) > 0 && targetInv.shift_id) {
+      const { data: shiftRecord } = await supabaseAdmin
+        .from('shifts')
+        .select('status')
+        .eq('id', targetInv.shift_id)
+        .maybeSingle();
+
+      if (shiftRecord && shiftRecord.status === 'closed') {
+        const { data: openShift } = await supabaseAdmin
+          .from('shifts')
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'open')
+          .limit(1)
+          .maybeSingle();
+
+        if (!openShift) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: 'Cannot cancel an invoice with cash paid from a closed shift without an active open register shift to disburse and record the cash refund.',
+              code: 'OPEN_SHIFT_REQUIRED_FOR_CASH_REFUND'
+            },
+            { status: 400 }
+          );
+        }
+      }
     }
 
     const { data: cancelRes, error: cancelErr } = await supabaseAdmin.rpc('cancel_invoice_atomic', {
