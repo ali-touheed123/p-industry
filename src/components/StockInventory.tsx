@@ -1389,9 +1389,35 @@ export default function StockInventory({
   // State for Export dropdown menu (Requirement A: Exactly Excel and Print)
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [exportingExcel, setExportingExcel] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
 
-  // Workstream C: Export to Excel (.xlsx) using sortedProducts
-  // Stock worth totals follow the currently filtered list (sortedProducts)
+  // Helper to fetch ALL items matching current filters (bypassing 25/page limit for full export/print)
+  const fetchAllMatchingItems = async (): Promise<Item[]> => {
+    if (!tenantId) return itemsToRender;
+    try {
+      const params = new URLSearchParams({
+        tenant_id: tenantId,
+        export: 'true',
+        sort_by: String(sortField),
+        sort_asc: String(sortAsc),
+      });
+      if (tableSearch.trim()) params.set('search', tableSearch.trim());
+      if (selectedCategory !== 'All') params.set('category', selectedCategory);
+      if (stockStatus !== 'all') params.set('stock_status', stockStatus);
+
+      const res = await fetch(`/api/items?${params.toString()}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.items)) {
+        return data.items;
+      }
+    } catch (e) {
+      console.error('Failed to fetch full export items:', e);
+    }
+    return itemsToRender;
+  };
+
+  // Workstream C: Export to Excel (.xlsx) using full matching inventory
+  // Stock worth totals follow the currently filtered list
   const inventoryWorth = (list: Item[]) => {
     let qty = 0;
     let cost = 0;
@@ -1407,15 +1433,17 @@ export default function StockInventory({
 
   const handleExportExcel = async () => {
     setShowExportMenu(false);
-    if (itemsToRender.length === 0) {
-      showToast('No inventory records to export for the current filters.');
-      return;
-    }
     setExportingExcel(true);
+    showToast('Preparing full Excel export...');
     try {
+      const fullList = await fetchAllMatchingItems();
+      if (fullList.length === 0) {
+        showToast('No inventory records to export for the current filters.');
+        return;
+      }
       await exportToXlsx(
         `Inventory_${tenantName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`,
-        itemsToRender,
+        fullList,
         [
           { header: 'Product Code', type: 'String', width: 14, getValue: (i) => i.code || '—' },
           { header: 'Product Name', type: 'String', width: 30, getValue: (i) => i.name },
@@ -1431,11 +1459,11 @@ export default function StockInventory({
         ],
         'Inventory',
         (() => {
-          const t = inventoryWorth(itemsToRender);
+          const t = inventoryWorth(fullList);
           return ['TOTAL', null, null, null, null, null, t.qty, null, null, t.cost, t.retail];
         })()
       );
-      showToast(`Exported ${itemsToRender.length} inventory items to Excel!`);
+      showToast(`Exported all ${fullList.length} inventory items to Excel!`);
     } catch (err: any) {
       console.error('Failed to export inventory to Excel:', err);
       showToast('Failed to generate Excel file.');
@@ -1444,39 +1472,43 @@ export default function StockInventory({
     }
   };
 
-  // Workstream C: Print Inventory Report (isolated printable report, NOT whole ERP shell)
-  const handlePrintInventory = () => {
+  // Workstream C: Print Inventory Report (isolated printable report of all matching items)
+  const handlePrintInventory = async () => {
     setShowExportMenu(false);
-    if (itemsToRender.length === 0) {
-      showToast('No inventory records to print.');
-      return;
-    }
+    setIsPrinting(true);
+    showToast('Preparing full printable report...');
+    try {
+      const fullList = await fetchAllMatchingItems();
+      if (fullList.length === 0) {
+        showToast('No inventory records to print.');
+        return;
+      }
 
-    const rowsHtml = itemsToRender.map((i, idx) => `
-      <tr style="border-bottom: 1px solid #E2E8F0; ${idx % 2 === 1 ? 'background: #F8FAFC;' : ''}">
-        <td style="padding: 6px 8px; font-family: monospace; font-size: 11px;">${i.code || '—'}</td>
-        <td style="padding: 6px 8px; font-weight: 600;">${i.name}</td>
-        <td style="padding: 6px 8px;">${i.category || 'General'}</td>
-        <td style="padding: 6px 8px;">${i.pack_size || i.unit || '—'}</td>
-        <td style="padding: 6px 8px; text-align: center; font-weight: 700;">${i.stock_qty}</td>
-        <td style="padding: 6px 8px; text-align: right;">Rs. ${(i.cost_price || 0).toLocaleString()}</td>
-        <td style="padding: 6px 8px; text-align: right;">Rs. ${(i.retail_price || 0).toLocaleString()}</td>
-        <td style="padding: 6px 8px; text-align: right; font-weight: 600;">Rs. ${((Number(i.stock_qty) || 0) * (Number(i.cost_price) || 0)).toLocaleString()}</td>
-        <td style="padding: 6px 8px; text-align: right; font-weight: 600;">Rs. ${((Number(i.stock_qty) || 0) * (Number(i.retail_price) || 0)).toLocaleString()}</td>
-      </tr>
-    `).join('');
-    const worth = inventoryWorth(itemsToRender);
-    const totalsHtml = `
-      <tr style="border-top: 2px solid #0F172A; background: #E2E8F0; font-weight: 800;">
-        <td colspan="4" style="padding: 8px; text-align: right;">TOTAL</td>
-        <td style="padding: 8px; text-align: center;">${worth.qty.toLocaleString()}</td>
-        <td></td>
-        <td></td>
-        <td style="padding: 8px; text-align: right;">Rs. ${worth.cost.toLocaleString()}</td>
-        <td style="padding: 8px; text-align: right;">Rs. ${worth.retail.toLocaleString()}</td>
-      </tr>`;
+      const rowsHtml = fullList.map((i, idx) => `
+        <tr style="border-bottom: 1px solid #E2E8F0; ${idx % 2 === 1 ? 'background: #F8FAFC;' : ''}">
+          <td style="padding: 6px 8px; font-family: monospace; font-size: 11px;">${i.code || '—'}</td>
+          <td style="padding: 6px 8px; font-weight: 600;">${i.name}</td>
+          <td style="padding: 6px 8px;">${i.category || 'General'}</td>
+          <td style="padding: 6px 8px;">${i.pack_size || i.unit || '—'}</td>
+          <td style="padding: 6px 8px; text-align: center; font-weight: 700;">${i.stock_qty}</td>
+          <td style="padding: 6px 8px; text-align: right;">Rs. ${(i.cost_price || 0).toLocaleString()}</td>
+          <td style="padding: 6px 8px; text-align: right;">Rs. ${(i.retail_price || 0).toLocaleString()}</td>
+          <td style="padding: 6px 8px; text-align: right; font-weight: 600;">Rs. ${((Number(i.stock_qty) || 0) * (Number(i.cost_price) || 0)).toLocaleString()}</td>
+          <td style="padding: 6px 8px; text-align: right; font-weight: 600;">Rs. ${((Number(i.stock_qty) || 0) * (Number(i.retail_price) || 0)).toLocaleString()}</td>
+        </tr>
+      `).join('');
+      const worth = inventoryWorth(fullList);
+      const totalsHtml = `
+        <tr style="border-top: 2px solid #0F172A; background: #E2E8F0; font-weight: 800;">
+          <td colspan="4" style="padding: 8px; text-align: right;">TOTAL</td>
+          <td style="padding: 8px; text-align: center;">${worth.qty.toLocaleString()}</td>
+          <td></td>
+          <td></td>
+          <td style="padding: 8px; text-align: right;">Rs. ${worth.cost.toLocaleString()}</td>
+          <td style="padding: 8px; text-align: right;">Rs. ${worth.retail.toLocaleString()}</td>
+        </tr>`;
 
-    const printHtml = `<!DOCTYPE html>
+      const printHtml = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
@@ -1497,7 +1529,7 @@ export default function StockInventory({
   <div class="header">
     <div>
       <div class="title">${tenantName} — Inventory Manifest</div>
-      <div class="sub">Generated on ${new Date().toLocaleString()} · Filtered records: ${itemsToRender.length} items</div>
+      <div class="sub">Generated on ${new Date().toLocaleString()} · Filtered records: ${fullList.length} items</div>
     </div>
   </div>
   <table>
@@ -1522,9 +1554,15 @@ export default function StockInventory({
 </body>
 </html>`;
 
-    const printOk = printViaIframe(printHtml);
-    if (!printOk) {
-      showToast('Could not open print window. Please check permissions.');
+      const printOk = printViaIframe(printHtml);
+      if (!printOk) {
+        showToast('Could not open print window. Please check permissions.');
+      }
+    } catch (err: any) {
+      console.error('Failed to print inventory:', err);
+      showToast('Failed to generate print report.');
+    } finally {
+      setIsPrinting(false);
     }
   };
 
@@ -1731,13 +1769,13 @@ export default function StockInventory({
                 <button
                   type="button"
                   onClick={() => setShowExportMenu(!showExportMenu)}
-                  disabled={exportingExcel}
+                  disabled={exportingExcel || isPrinting}
                   className="inv-btn-secondary"
                   title="Export inventory data"
                   style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                 >
                   <Download style={{ width: 14, height: 14, color: '#38BDF8' }} />
-                  {exportingExcel ? 'Exporting...' : 'Export'}
+                  {exportingExcel ? 'Exporting...' : isPrinting ? 'Printing...' : 'Export'}
                 </button>
 
                 {showExportMenu && (

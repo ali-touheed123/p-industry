@@ -148,8 +148,111 @@ export async function GET(req: NextRequest) {
     const stockStatusParam = searchParams.get('stock_status');
     const sortBy = searchParams.get('sort_by') || 'name';
     const sortAsc = searchParams.get('sort_asc') === 'true';
+    const isExport = searchParams.get('export') === 'true' || pageParam === 'all';
 
-    // ── OPTION A: Paginated items query (e.g. for Inventory view with 25/page) ──
+    // ── OPTION A: Full filtered query for Export / Print (all pages matching filters) ──
+    if (isExport) {
+      let exportItems: any[] = [];
+      let from = 0;
+      const CHUNK_SIZE = 1000;
+      while (true) {
+        let q = supabaseAdmin
+          .from('items')
+          .select('*')
+          .eq('tenant_id', tenantId);
+
+        if (searchParam) {
+          q = q.or(`name.ilike.%${searchParam}%,code.ilike.%${searchParam}%,brand.ilike.%${searchParam}%,shade_code.ilike.%${searchParam}%`);
+        }
+
+        if (categoryParam && categoryParam !== 'All') {
+          q = q.eq('category', categoryParam);
+        }
+
+        if (stockStatusParam === 'in_stock') {
+          q = q.gt('stock_qty', 5);
+        } else if (stockStatusParam === 'low_stock') {
+          q = q.lte('stock_qty', 5);
+        } else if (stockStatusParam === 'out_of_stock') {
+          q = q.lte('stock_qty', 0);
+        }
+
+        const validSortFields: Record<string, string> = {
+          name: 'name',
+          code: 'code',
+          stock_qty: 'stock_qty',
+          retail_price: 'retail_price',
+          category: 'category',
+          created_at: 'created_at',
+        };
+        const sortColumn = validSortFields[sortBy] || 'name';
+        q = q.order(sortColumn, { ascending: sortAsc }).range(from, from + CHUNK_SIZE - 1);
+
+        const { data: chunk, error: chunkErr } = await q;
+        if (chunkErr) throw chunkErr;
+        if (!chunk || chunk.length === 0) break;
+        exportItems = exportItems.concat(chunk);
+        if (chunk.length < CHUNK_SIZE) break;
+        from += CHUNK_SIZE;
+      }
+
+      // Fetch series configs for token enrichment
+      const [configsRes, seriesRes] = await Promise.all([
+        supabaseAdmin
+          .from('series_token_configs')
+          .select('series_id, unit_name, is_enabled, token_value')
+          .eq('tenant_id', tenantId),
+        supabaseAdmin
+          .from('brand_series')
+          .select('id, name')
+          .eq('tenant_id', tenantId),
+      ]);
+
+      const configs = configsRes.data || [];
+      const seriesList = seriesRes.data || [];
+      const seriesMap = new Map(seriesList.map((s: any) => [s.id, s.name]));
+
+      const configsBySeries = new Map<string, typeof configs>();
+      for (const c of configs) {
+        if (!c.series_id) continue;
+        const group = configsBySeries.get(c.series_id);
+        if (group) group.push(c);
+        else configsBySeries.set(c.series_id, [c]);
+      }
+
+      const enrichedItems = exportItems.map((item: any) => {
+        let hasToken = false;
+        let tokenValue = 0;
+        const seriesName = item.series_id ? seriesMap.get(item.series_id) : undefined;
+
+        if (item.series_id) {
+          const seriesConfigs = configsBySeries.get(item.series_id);
+          if (seriesConfigs && seriesConfigs.length > 0) {
+            const itemUnit = item.pack_size || item.unit || '';
+            const matched = seriesConfigs.find((c: any) => matchUnitToConfig(itemUnit, c.unit_name));
+            if (matched && matched.is_enabled && Number(matched.token_value) > 0) {
+              hasToken = true;
+              tokenValue = Number(matched.token_value);
+            }
+          }
+        }
+
+        return {
+          ...item,
+          series_name: seriesName,
+          has_token: hasToken,
+          token_value: tokenValue,
+        };
+      });
+
+      return NextResponse.json({
+        success: true,
+        items: enrichedItems,
+        total: enrichedItems.length,
+      });
+    }
+
+    // ── OPTION B: Paginated items query (e.g. for Inventory view with 25/page) ──
     if (pageParam !== null) {
       const page = Math.max(1, parseInt(pageParam, 10) || 1);
       const limit = Math.max(1, Math.min(100, parseInt(limitParam || '25', 10) || 25));
@@ -860,7 +963,7 @@ export async function DELETE(req: NextRequest) {
       try {
         const body = await req.json();
         id = body.id;
-      } catch {}
+      } catch { }
     }
 
     if (!id) {
