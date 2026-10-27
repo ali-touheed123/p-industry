@@ -369,9 +369,13 @@ export default function TokenLedger({
     }
   };
 
-  // ── Global Filtered Transactions ───────────────────────────────────────────
   const filteredTransactions = useMemo(() => {
     return transactions.filter((t) => {
+      // B7: Exclude reversed rows and reversal types from all token aggregations
+      const uStatus = (t.usage_status || '').toLowerCase();
+      const tType = (t.type || t.transaction_type || '').toLowerCase();
+      if (uStatus === 'reversed' || tType === 'reversal') return false;
+
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchClient = t.client_name?.toLowerCase().includes(q);
@@ -428,7 +432,8 @@ export default function TokenLedger({
         customerRedeemedValue += redeemedAmt;
         customerRedeemedCount += count;
       } else if (txType === 'issued') {
-        customerIssuedValue += val;
+        const itemVal = Number(t.total_amount ?? (count * Number(t.token_value ?? 0)));
+        customerIssuedValue += itemVal;
         customerIssuedCount += count;
       }
     });

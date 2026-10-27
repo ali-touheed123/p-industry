@@ -164,6 +164,7 @@ export interface InvoiceItem {
   unit?: string;
   qty: number;
   unit_price: number;
+  cost_price?: number;
   discount: number;
   discount_percent?: number;
   total_price: number;

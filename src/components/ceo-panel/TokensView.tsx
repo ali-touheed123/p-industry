@@ -111,6 +111,11 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
   // We now filter locally using the local ISO date string comparison.
   const filteredTransactions = useMemo(() => {
     return transactions.filter((t) => {
+      // B7: Exclude reversed rows and reversal types from all token aggregations
+      const uStatus = (t.usage_status || '').toLowerCase();
+      const tType = (t.type || t.transaction_type || '').toLowerCase();
+      if (uStatus === 'reversed' || tType === 'reversal') return false;
+
       // Date boundary: compare local YYYY-MM-DD from created_at
       if (activeDatePreset !== 'all' && (startDate || endDate)) {
         const txLocalDate = t.created_at
@@ -162,7 +167,10 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
 
     // Physical safe balance: iterate over ALL transactions (not just the date-filtered set)
     transactions.forEach((t) => {
-      const txType = t.type || t.transaction_type;
+      const uStatus = (t.usage_status || '').toLowerCase();
+      const txType = (t.type || t.transaction_type || '').toLowerCase();
+      if (uStatus === 'reversed' || txType === 'reversal') return;
+
       const val = Number(t.total_amount ?? t.token_value ?? 0);
       const isUsed = t.usage_status === 'used' || t.usage_status === 'settled' || Boolean(t.used_against_purchase_id) || Boolean(t.used_against_voucher_id);
       const isWrittenOff = t.usage_status === 'written_off';
@@ -214,10 +222,11 @@ export const TokensView: React.FC<TokensViewProps> = ({ branch }) => {
 
       if (txType === 'redeemed') {
         customerRedeemedValue += Number(t.total_amount ?? t.redeemed_amount ?? val);
-        customerRedeemedCount += 1;
+        customerRedeemedCount += Number(t.quantity ?? t.token_count ?? 1);
       } else if (txType === 'issued') {
-        customerIssuedValue += val;
-        customerIssuedCount += 1;
+        const qty = Number(t.quantity ?? t.token_count ?? 1);
+        customerIssuedValue += Number(t.total_amount ?? (qty * Number(t.token_value ?? 0)));
+        customerIssuedCount += qty;
       }
     });
 

@@ -229,16 +229,24 @@ export default function ShiftDrawer({
   const salesInvoices = activeNonCancelledInvoices.filter(i => !isReturnInvoice(i));
   const returnInvoices = activeNonCancelledInvoices.filter(i => isReturnInvoice(i));
 
-  // Token metrics (excluding reversed rows)
-  const activeTokens = tokenTransactions.filter(t => {
+  // Token metrics (excluding reversed rows and reversal types - B7)
+  const notReversalType = tokenTransactions.filter(t => {
     const uStatus = (t.usage_status || '').toLowerCase();
-    return uStatus !== 'reversed';
+    const tType = (t.type || t.transaction_type || '').toLowerCase();
+    return uStatus !== 'reversed' && tType !== 'reversal';
   });
-  const notReversalType = activeTokens.filter(t => (t.type || t.transaction_type || '').toLowerCase() !== 'reversal');
+
+  const tokensIssuedCount = notReversalType
+    .filter((t) => (t.type || t.transaction_type) === 'issued')
+    .reduce((sum, t) => sum + Number(t.quantity || t.token_count || 1), 0);
 
   const tokensIssued = notReversalType
     .filter((t) => (t.type || t.transaction_type) === 'issued')
-    .reduce((sum, t) => sum + Number(t.total_amount || t.token_value || 0), 0);
+    .reduce((sum, t) => {
+      const qty = Number(t.quantity || t.token_count || 1);
+      const val = t.total_amount != null ? Number(t.total_amount) : (qty * Number(t.token_value || 0));
+      return sum + val;
+    }, 0);
 
   const tokensRedeemed = notReversalType
     .filter((t) => (t.type || t.transaction_type) === 'redeemed')
@@ -246,7 +254,7 @@ export default function ShiftDrawer({
 
   const tokenLiability = Math.max(0, tokensIssued - tokensRedeemed);
 
-  const retainedTransactions = tokenTransactions.filter(
+  const retainedTransactions = notReversalType.filter(
     (t) => (t.type || t.transaction_type) === 'shop_retained'
   );
   const retainedTotal = retainedTransactions.reduce(
@@ -1393,7 +1401,9 @@ export default function ShiftDrawer({
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: '#64748B' }}>Tokens Issued to Customers:</span>
-              <span className="font-mono font-bold" style={{ color: '#0F172A' }}>Rs. {tokensIssued.toLocaleString()}</span>
+              <span className="font-mono font-bold" style={{ color: '#0F172A' }}>
+                {tokensIssuedCount > 0 ? `${tokensIssuedCount} tokens · ` : ''}Rs. {tokensIssued.toLocaleString()}
+              </span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: '#DC2626' }}>Tokens Redeemed (Cash Paid Out):</span>

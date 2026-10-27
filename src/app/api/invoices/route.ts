@@ -465,6 +465,7 @@ export async function POST(req: NextRequest) {
       unit: it.unit || it.item?.unit || 'PCS',
       qty: Number(it.qty) || 1,
       unit_price: Number(it.unit_price ?? it.rate ?? it.price ?? 0),
+      cost_price: Number(it.cost_price ?? it.costPrice ?? it.item?.cost_price ?? 0) || null,
       discount: Number(it.discount ?? 0),
       discount_percent: Number(it.discount_percent ?? it.discountPercent ?? 0),
       total_price: Number(it.total_price ?? (Number(it.qty || 1) * Number(it.unit_price ?? it.rate ?? 0))),

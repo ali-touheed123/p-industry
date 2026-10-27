@@ -41,6 +41,7 @@ interface DailyFinancialPoint {
   netProfit: number;
   marginPct: number;
   invoiceCount: number;
+  hasEstimatedCogs: boolean;
 }
 
 export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
@@ -68,10 +69,10 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
       setLoading(true);
 
       try {
-        // 1. Fetch Invoices — Task 9.7: bound to the visible date window
+        // 1. Fetch Invoices — B6: request with include_items=true for real item costs
         try {
           const invRes = await fetch(
-            `/api/invoices?tenant_id=${tenantId}&start_date=${fromDate}&end_date=${toDate}&limit=5000`
+            `/api/invoices?tenant_id=${tenantId}&start_date=${fromDate}&end_date=${toDate}&include_items=true&limit=5000`
           );
           const invData = await invRes.json();
           if (isMounted && invData.success && invData.invoices) {
@@ -175,25 +176,36 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
         const discounts = calculateDiscounts(dayInvs);
         const netSales = calculateNetSales(dayInvs);
 
-        // Real COGS calculation based on items sold
+        // Real COGS calculation based on items sold (B6)
+        // Order of precedence:
+        // 1. invoice_items.cost_price (historical recorded cost)
+        // 2. itemsCostMap (live catalogue cost_price)
+        // 3. 60% fallback estimate (flags hasEstimatedCogs)
         let calculatedCogs = 0;
+        let dayHasEstimatedCogs = false;
+
         salesInvs.forEach((inv) => {
           const rawItems = inv.invoice_items || inv.items || [];
           if (Array.isArray(rawItems) && rawItems.length > 0) {
             rawItems.forEach((it: any) => {
               const qty = Number(it.qty || 1);
-              const recordedCost = itemsCostMap[it.item_id] || itemsCostMap[it.item_code] || 0;
-              // FIX CEO-02: only use fallback when no cost_price exists in the catalogue.
-              // Use a conservative 60% benchmark (not 70%) to avoid COGS inflation on
-              // heavily-discounted items; prefer real cost data whenever available.
-              const cost = recordedCost > 0
-                ? recordedCost
-                : Number(it.unit_price || it.rate || 0) * 0.60;
+              const invItemCost = Number(it.cost_price || 0);
+              const liveCost = itemsCostMap[it.item_id] || itemsCostMap[it.item_code] || 0;
+              let cost = 0;
+              if (invItemCost > 0) {
+                cost = invItemCost;
+              } else if (liveCost > 0) {
+                cost = liveCost;
+              } else {
+                cost = Number(it.unit_price || it.rate || 0) * 0.60;
+                dayHasEstimatedCogs = true;
+              }
               calculatedCogs += cost * qty;
             });
           } else {
             // No line-items embedded — fall back to invoice-level estimate at 60%
             calculatedCogs += Number(inv.net_total || 0) * 0.60;
+            dayHasEstimatedCogs = true;
           }
         });
 
@@ -203,22 +215,30 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
           if (Array.isArray(rawItems) && rawItems.length > 0) {
             rawItems.forEach((it: any) => {
               const qty = Number(it.qty || 1);
-              const recordedCost = itemsCostMap[it.item_id] || itemsCostMap[it.item_code] || 0;
-              const cost = recordedCost > 0
-                ? recordedCost
-                : Number(it.unit_price || it.rate || 0) * 0.60;
-              calculatedCogs = Math.max(0, calculatedCogs - (cost * qty));
+              const invItemCost = Number(it.cost_price || 0);
+              const liveCost = itemsCostMap[it.item_id] || itemsCostMap[it.item_code] || 0;
+              let cost = 0;
+              if (invItemCost > 0) {
+                cost = invItemCost;
+              } else if (liveCost > 0) {
+                cost = liveCost;
+              } else {
+                cost = Number(it.unit_price || it.rate || 0) * 0.60;
+                dayHasEstimatedCogs = true;
+              }
+              calculatedCogs -= (cost * qty);
             });
           }
         });
 
         const cogs = Math.round(calculatedCogs);
-        const grossProfit = Math.max(0, netSales - cogs);
+        // B6: Remove Math.max(0, netSales - cogs): losses must show as negative
+        const grossProfit = netSales - cogs;
         const commission = commissionConfig.enabled ? Math.round(netSales * (commissionConfig.rate / 100)) : 0;
         const pettyCash = Math.round(expensesByDate[dateStr] || 0);
         const expenses = pettyCash + commission;
         const netProfit = grossProfit - expenses;
-        const marginPct = netSales > 0 ? Number(((netProfit / netSales) * 100).toFixed(1)) : 0;
+        const marginPct = netSales !== 0 ? Number(((netProfit / netSales) * 100).toFixed(1)) : 0;
 
         return {
           date: dateStr,
@@ -235,6 +255,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
           netProfit,
           marginPct,
           invoiceCount: salesInvs.length,
+          hasEstimatedCogs: dayHasEstimatedCogs,
         };
       });
 
@@ -273,6 +294,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
       grossMarginPct,
       invoiceCount,
       daysCount: filteredRecords.length,
+      hasEstimatedCogs: filteredRecords.some((r) => r.hasEstimatedCogs),
     };
   }, [filteredRecords]);
 
@@ -384,12 +406,19 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
 
         {/* Cost of Goods Sold */}
         <div className="ceo-card">
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Cost of Goods Sold (COGS)</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Cost of Goods Sold (COGS)</div>
+            {totals.hasEstimatedCogs && (
+              <span style={{ fontSize: '9px', fontWeight: 700, color: '#D97706', backgroundColor: '#FEF3C7', padding: '1px 6px', borderRadius: '4px', textTransform: 'uppercase' }}>
+                Estimated
+              </span>
+            )}
+          </div>
           <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#0F172A', marginTop: '6px' }}>
             {formatCurrency(totals.cogs)}
           </div>
           <div style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
-            Inventory product baseline cost
+            {totals.hasEstimatedCogs ? 'Includes 60% fallback estimates' : 'Real historical item unit cost'}
           </div>
         </div>
 
@@ -407,10 +436,10 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
         {/* Net Profit */}
         <div className="ceo-card">
           <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Net Profit &amp; Margin</div>
-          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: '#34D399', marginTop: '6px' }}>
+          <div className="ceo-font-mono" style={{ fontSize: '22px', fontWeight: 700, color: totals.netProfit < 0 ? '#EF4444' : '#10B981', marginTop: '6px' }}>
             {formatCurrency(totals.netProfit)}
           </div>
-          <div style={{ fontSize: '11px', color: '#34D399', fontWeight: 600, marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: totals.netProfit < 0 ? '#EF4444' : '#10B981', fontWeight: 600, marginTop: '4px' }}>
             {totals.netMarginPct}% Net Profit Margin
           </div>
         </div>
@@ -454,9 +483,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ branch }) => {
                   <td style={{ textAlign: 'right', color: '#64748B' }} className="ceo-font-mono">{formatCurrency(rec.cogs)}</td>
                   <td style={{ textAlign: 'right', color: '#0F172A' }} className="ceo-font-mono">{formatCurrency(rec.grossProfit)}</td>
                   <td style={{ textAlign: 'right', color: '#F87171' }} className="ceo-font-mono">-{formatCurrency(rec.expenses)}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: '#34D399' }} className="ceo-font-mono">{formatCurrency(rec.netProfit)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: rec.netProfit < 0 ? '#EF4444' : '#10B981' }} className="ceo-font-mono">{formatCurrency(rec.netProfit)}</td>
                   <td style={{ textAlign: 'center' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#34D399', backgroundColor: 'rgba(52, 211, 153, 0.15)', padding: '2px 8px', borderRadius: '9999px' }} className="ceo-font-mono">
+                    <span style={{ fontSize: '11px', fontWeight: 700, color: rec.netProfit < 0 ? '#EF4444' : '#10B981', backgroundColor: rec.netProfit < 0 ? 'rgba(239, 68, 68, 0.15)' : 'rgba(52, 211, 153, 0.15)', padding: '2px 8px', borderRadius: '9999px' }} className="ceo-font-mono">
                       {rec.marginPct}%
                     </span>
                   </td>
