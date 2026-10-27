@@ -5,6 +5,7 @@ export interface Tenant {
   name: string;
   slug: string;
   type: BranchType;
+  owner_id?: string;
   owner_name?: string;
   city?: string;
   address?: string;
@@ -26,6 +27,7 @@ export interface UserItem {
   email?: string;
   role: UserRole;
   tenant_id?: string;
+  owner_id?: string;
   is_active: boolean;
   can_use_special_receipt?: boolean;
   created_at: string;

@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, KeyRound, Plus, Trash2, Mail, Phone, MapPin, Building, Globe } from 'lucide-react';
 import { Tenant, BranchType, InitialAccountsData } from '@/types/dev';
+import { Owner } from '@/types';
 
 interface DevBranchModalProps {
   isOpen: boolean;
@@ -12,6 +13,7 @@ interface DevBranchModalProps {
     initialAccounts?: InitialAccountsData
   ) => Promise<boolean>;
   editingBranch?: Tenant | null;
+  owners?: Owner[];
 }
 
 export const DevBranchModal: React.FC<DevBranchModalProps> = ({
@@ -19,6 +21,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
   onClose,
   onSave,
   editingBranch,
+  owners = [],
 }) => {
   const [name, setName] = useState('');
   const [type, setType] = useState<BranchType>('shop');
@@ -28,6 +31,10 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [ownerName, setOwnerName] = useState('');
+
+  // Owner Mode for Branch Expansion
+  const [ownerMode, setOwnerMode] = useState<'existing' | 'new'>('existing');
+  const [selectedOwnerId, setSelectedOwnerId] = useState<string>('');
 
   // Initial Login Accounts fields
   const [ceoUsername, setCeoUsername] = useState('');
@@ -50,6 +57,8 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
       setPhone(editingBranch.phone || '');
       setEmail(editingBranch.email || '');
       setOwnerName(editingBranch.owner_name || '');
+      setOwnerMode('existing');
+      setSelectedOwnerId(editingBranch.owner_id || '');
       setCeoUsername('');
       setCeoPassword('');
       setCounters([{ username: 'counter1', password: '123', name: 'Counter 01 (Main POS)' }]);
@@ -59,9 +68,23 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
       setSlug('');
       setCity('');
       setAddress('');
-      setPhone('');
-      setEmail('');
-      setOwnerName('');
+      
+      const hasOwners = owners && owners.length > 0;
+      if (hasOwners) {
+        const defaultOwner = owners[0];
+        setOwnerMode('existing');
+        setSelectedOwnerId(defaultOwner.id);
+        setOwnerName(defaultOwner.name);
+        setEmail(defaultOwner.email || '');
+        setPhone(defaultOwner.phone || '');
+      } else {
+        setOwnerMode('new');
+        setSelectedOwnerId('');
+        setOwnerName('');
+        setEmail('');
+        setPhone('');
+      }
+
       setCeoUsername('');
       setCeoPassword('');
       setCounters([
@@ -69,7 +92,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
       ]);
     }
     setFormError('');
-  }, [editingBranch, isOpen]);
+  }, [editingBranch, isOpen, owners]);
 
   const handleNameChange = (val: string) => {
     setName(val);
@@ -126,6 +149,8 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
 
     const cleanSlug = slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-');
 
+    const isExistingOwner = !editingBranch && ownerMode === 'existing' && Boolean(selectedOwnerId);
+
     setLoading(true);
     try {
       const success = await onSave(
@@ -139,11 +164,12 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
           phone: phone.trim(),
           email: email.trim(),
           owner_name: ownerName.trim(),
+          owner_id: isExistingOwner ? selectedOwnerId : editingBranch?.owner_id,
         },
         !editingBranch
           ? {
-              ceoUsername: ceoUsername.trim() || undefined,
-              ceoPassword: ceoPassword || undefined,
+              ceoUsername: isExistingOwner ? undefined : (ceoUsername.trim() || undefined),
+              ceoPassword: isExistingOwner ? undefined : (ceoPassword || undefined),
               counters: counters.map(c => ({
                 username: c.username.trim().toLowerCase(),
                 password: c.password,
@@ -201,6 +227,95 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
 
         {/* Form Grid */}
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* Business Ownership Selector for New Branch */}
+          {!editingBranch && owners.length > 0 && (
+            <div style={{ padding: '14px', borderRadius: '14px', backgroundColor: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#D4AF37', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Business Ownership Mode
+                </span>
+                <div style={{ display: 'flex', gap: '4px', background: 'rgba(0,0,0,0.3)', padding: '3px', borderRadius: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOwnerMode('existing');
+                      if (owners.length > 0) {
+                        const o = owners.find(x => x.id === selectedOwnerId) || owners[0];
+                        setSelectedOwnerId(o.id);
+                        setOwnerName(o.name);
+                        setEmail(o.email || '');
+                        setPhone(o.phone || '');
+                      }
+                    }}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      background: ownerMode === 'existing' ? '#D4AF37' : 'transparent',
+                      color: ownerMode === 'existing' ? '#000' : '#9ca3af',
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    Branch Expansion (Existing Owner)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOwnerMode('new');
+                      setSelectedOwnerId('');
+                      setOwnerName('');
+                      setEmail('');
+                      setPhone('');
+                    }}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      background: ownerMode === 'new' ? '#D4AF37' : 'transparent',
+                      color: ownerMode === 'new' ? '#000' : '#9ca3af',
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    + New Business / Owner
+                  </button>
+                </div>
+              </div>
+
+              {ownerMode === 'existing' && (
+                <div>
+                  <label className="aura-form-label" style={{ color: '#F3E5AB' }}>SELECT EXISTING BUSINESS / OWNER *</label>
+                  <select
+                    className="aura-form-input"
+                    value={selectedOwnerId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setSelectedOwnerId(id);
+                      const o = owners.find(x => x.id === id);
+                      if (o) {
+                        setOwnerName(o.name);
+                        setEmail(o.email || '');
+                        setPhone(o.phone || '');
+                      }
+                    }}
+                    style={{ fontFamily: "'JetBrains Mono', monospace", color: '#ffffff', backgroundColor: '#18181b' }}
+                  >
+                    {owners.map(o => (
+                      <option key={o.id} value={o.id} style={{ backgroundColor: '#18181b', color: '#fff' }}>
+                        {o.name} {o.email ? `(${o.email})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             {/* Field 1: Shop Name */}
             <div>
@@ -252,6 +367,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
                 onChange={(e) => setOwnerName(e.target.value)}
                 placeholder="e.g. Hamza Rajput"
                 className="aura-form-input"
+                disabled={ownerMode === 'existing' && !editingBranch && Boolean(selectedOwnerId)}
               />
             </div>
 
@@ -265,6 +381,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
                 placeholder="e.g. owner@hamzapaint.com"
                 className="aura-form-input"
                 style={{ fontFamily: "'JetBrains Mono', monospace" }}
+                disabled={ownerMode === 'existing' && !editingBranch && Boolean(selectedOwnerId)}
               />
             </div>
 
@@ -278,6 +395,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
                 placeholder="0300-1234567"
                 className="aura-form-input"
                 style={{ fontFamily: "'JetBrains Mono', monospace" }}
+                disabled={ownerMode === 'existing' && !editingBranch && Boolean(selectedOwnerId)}
               />
             </div>
 
@@ -297,37 +415,51 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
           {/* New Shop Provisioning: CEO & Multi-Branch Counters Box */}
           {!editingBranch && (
             <div style={{ padding: '16px', borderRadius: '16px', backgroundColor: 'rgba(255, 255, 255, 0.025)', border: '1px solid rgba(255, 255, 255, 0.08)', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {/* CEO Credentials */}
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 700, color: '#F3E5AB', marginBottom: '10px' }}>
-                  <KeyRound style={{ width: '14px', height: '14px', color: '#D4AF37' }} />
-                  <span>Shop CEO Master Account</span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              {/* CEO Account: Reused Banner vs Fresh Input */}
+              {ownerMode === 'existing' && selectedOwnerId ? (
+                <div style={{ padding: '14px 16px', borderRadius: '12px', backgroundColor: 'rgba(212, 175, 55, 0.08)', border: '1px solid rgba(212, 175, 55, 0.25)', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <KeyRound style={{ width: '22px', height: '22px', color: '#D4AF37', flexShrink: 0 }} />
                   <div>
-                    <label className="aura-form-label" style={{ color: '#F3E5AB' }}>CEO Username</label>
-                    <input
-                      type="text"
-                      value={ceoUsername}
-                      onChange={(e) => setCeoUsername(e.target.value)}
-                      placeholder="hamza_ceo"
-                      className="aura-form-input"
-                      style={{ fontFamily: "'JetBrains Mono', monospace" }}
-                    />
-                  </div>
-                  <div>
-                    <label className="aura-form-label" style={{ color: '#F3E5AB' }}>CEO Password</label>
-                    <input
-                      type="password"
-                      value={ceoPassword}
-                      onChange={(e) => setCeoPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="aura-form-input"
-                      style={{ fontFamily: "'JetBrains Mono', monospace" }}
-                    />
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#F3E5AB' }}>
+                      Existing Master CEO Account Reused
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#d1d5db', marginTop: '3px', lineHeight: 1.4 }}>
+                      The CEO of <strong>{ownerName || 'this business'}</strong> will automatically manage this new branch with their existing login credentials. No duplicate CEO account is created.
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 700, color: '#F3E5AB', marginBottom: '10px' }}>
+                    <KeyRound style={{ width: '14px', height: '14px', color: '#D4AF37' }} />
+                    <span>Shop CEO Master Account</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div>
+                      <label className="aura-form-label" style={{ color: '#F3E5AB' }}>CEO Username</label>
+                      <input
+                        type="text"
+                        value={ceoUsername}
+                        onChange={(e) => setCeoUsername(e.target.value)}
+                        placeholder="hamza_ceo"
+                        className="aura-form-input"
+                        style={{ fontFamily: "'JetBrains Mono', monospace" }}
+                      />
+                    </div>
+                    <div>
+                      <label className="aura-form-label" style={{ color: '#F3E5AB' }}>CEO Password</label>
+                      <input
+                        type="password"
+                        value={ceoPassword}
+                        onChange={(e) => setCeoPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="aura-form-input"
+                        style={{ fontFamily: "'JetBrains Mono', monospace" }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* POS Cash Registers Setup */}
               <div style={{ paddingTop: '12px', borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>

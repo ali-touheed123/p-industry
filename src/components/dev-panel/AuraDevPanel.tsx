@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Tenant, UserItem, DevActiveTab, InitialAccountsData } from '@/types/dev';
+import { Owner } from '@/types';
 import { DevNavbar } from './DevNavbar';
 import { DevSidebar } from './DevSidebar';
 import { DevOverviewView } from './DevOverviewView';
@@ -21,6 +22,7 @@ export default function AuraDevPanel() {
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [owners, setOwners] = useState<Owner[]>([]);
   const [users, setUsers] = useState<UserItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<DevActiveTab>('overview');
@@ -96,13 +98,29 @@ export default function AuraDevPanel() {
     }
   }, []);
 
+  // Fetch Owners from real Supabase API
+  const fetchOwners = useCallback(async () => {
+    try {
+      const res = await fetch('/api/owners', {
+        headers: getDevAuthHeaders(),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setOwners(data.owners || []);
+      }
+    } catch {
+      // Non-critical
+    }
+  }, []);
+
   // Load data upon authentication
   useEffect(() => {
     if (isAuthenticated) {
       fetchTenants();
       fetchUsers();
+      fetchOwners();
     }
-  }, [isAuthenticated, fetchTenants, fetchUsers]);
+  }, [isAuthenticated, fetchTenants, fetchUsers, fetchOwners]);
 
   // Lock handler
   const handleLock = async () => {
@@ -156,6 +174,7 @@ export default function AuraDevPanel() {
         );
         fetchTenants();
         fetchUsers();
+        fetchOwners();
         setEditingBranch(null);
         return true;
       } else {
@@ -432,6 +451,7 @@ export default function AuraDevPanel() {
         }}
         onSave={handleSaveBranch}
         editingBranch={editingBranch}
+        owners={owners}
       />
 
       <DevUserModal

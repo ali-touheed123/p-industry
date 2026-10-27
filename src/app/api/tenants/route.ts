@@ -46,42 +46,61 @@ export async function GET(req: NextRequest) {
     if (auth.session.role === 'developer') {
       // Developer can see all tenants
     } else if (auth.session.role === 'ceo') {
-      // CEO can see their own tenant and sister branches matching owner_name or email
-      const { data: callerTenant } = await supabaseAdmin
-        .from('tenants')
-        .select('owner_name, email')
-        .eq('id', auth.session.tenantId)
-        .maybeSingle();
+      // CEO can see their own tenant and sister branches matching owner_id (or fallback owner_name or email)
+      let callerOwnerId = auth.session.ownerId;
+      let callerTenant: any = null;
 
-      if (callerTenant?.owner_name && callerTenant?.email) {
-        // FIX FINDING-API-008: sanitize DB-sourced values before .or() interpolation
-        const safeOwner = sanitizePostgRESTLike(callerTenant.owner_name);
-        const safeEmail = sanitizePostgRESTLike(callerTenant.email);
-        if (safeOwner && safeEmail) {
-          tenantQuery = tenantQuery.or(`id.eq.${auth.session.tenantId},owner_name.eq.${safeOwner},email.eq.${safeEmail}`);
-        } else if (safeOwner) {
-          tenantQuery = tenantQuery.or(`id.eq.${auth.session.tenantId},owner_name.eq.${safeOwner}`);
-        } else if (safeEmail) {
-          tenantQuery = tenantQuery.or(`id.eq.${auth.session.tenantId},email.eq.${safeEmail}`);
-        } else {
-          tenantQuery = tenantQuery.eq('id', auth.session.tenantId);
-        }
-      } else if (callerTenant?.owner_name) {
-        const safeOwner = sanitizePostgRESTLike(callerTenant.owner_name);
-        if (safeOwner) {
-          tenantQuery = tenantQuery.or(`id.eq.${auth.session.tenantId},owner_name.eq.${safeOwner}`);
-        } else {
-          tenantQuery = tenantQuery.eq('id', auth.session.tenantId);
-        }
-      } else if (callerTenant?.email) {
-        const safeEmail = sanitizePostgRESTLike(callerTenant.email);
-        if (safeEmail) {
-          tenantQuery = tenantQuery.or(`id.eq.${auth.session.tenantId},email.eq.${safeEmail}`);
-        } else {
-          tenantQuery = tenantQuery.eq('id', auth.session.tenantId);
-        }
+      if (!callerOwnerId && auth.session.tenantId) {
+        const { data: ct } = await supabaseAdmin
+          .from('tenants')
+          .select('owner_id, owner_name, email')
+          .eq('id', auth.session.tenantId)
+          .maybeSingle();
+        callerTenant = ct;
+        callerOwnerId = ct?.owner_id || undefined;
+      }
+
+      if (callerOwnerId) {
+        tenantQuery = tenantQuery.or(`id.eq.${auth.session.tenantId},owner_id.eq.${callerOwnerId}`);
       } else {
-        tenantQuery = tenantQuery.eq('id', auth.session.tenantId);
+        if (!callerTenant && auth.session.tenantId) {
+          const { data: ct } = await supabaseAdmin
+            .from('tenants')
+            .select('owner_name, email')
+            .eq('id', auth.session.tenantId)
+            .maybeSingle();
+          callerTenant = ct;
+        }
+
+        if (callerTenant?.owner_name && callerTenant?.email) {
+          const safeOwner = sanitizePostgRESTLike(callerTenant.owner_name);
+          const safeEmail = sanitizePostgRESTLike(callerTenant.email);
+          if (safeOwner && safeEmail) {
+            tenantQuery = tenantQuery.or(`id.eq.${auth.session.tenantId},owner_name.eq.${safeOwner},email.eq.${safeEmail}`);
+          } else if (safeOwner) {
+            tenantQuery = tenantQuery.or(`id.eq.${auth.session.tenantId},owner_name.eq.${safeOwner}`);
+          } else if (safeEmail) {
+            tenantQuery = tenantQuery.or(`id.eq.${auth.session.tenantId},email.eq.${safeEmail}`);
+          } else {
+            tenantQuery = tenantQuery.eq('id', auth.session.tenantId);
+          }
+        } else if (callerTenant?.owner_name) {
+          const safeOwner = sanitizePostgRESTLike(callerTenant.owner_name);
+          if (safeOwner) {
+            tenantQuery = tenantQuery.or(`id.eq.${auth.session.tenantId},owner_name.eq.${safeOwner}`);
+          } else {
+            tenantQuery = tenantQuery.eq('id', auth.session.tenantId);
+          }
+        } else if (callerTenant?.email) {
+          const safeEmail = sanitizePostgRESTLike(callerTenant.email);
+          if (safeEmail) {
+            tenantQuery = tenantQuery.or(`id.eq.${auth.session.tenantId},email.eq.${safeEmail}`);
+          } else {
+            tenantQuery = tenantQuery.eq('id', auth.session.tenantId);
+          }
+        } else {
+          tenantQuery = tenantQuery.eq('id', auth.session.tenantId);
+        }
       }
     } else {
       // Staff / other: only their assigned branch
@@ -93,11 +112,15 @@ export async function GET(req: NextRequest) {
 
     // Fetch user counts for the scoped tenants
     const tenantIds = (tenants || []).map(t => t.id);
+    const ownerIds = Array.from(new Set((tenants || []).map(t => t.owner_id).filter(Boolean)));
+
     let usersQuery = supabaseAdmin
       .from('app_users')
-      .select('id, username, full_name, role, tenant_id');
+      .select('id, username, full_name, role, tenant_id, owner_id');
 
-    if (tenantIds.length > 0) {
+    if (tenantIds.length > 0 && ownerIds.length > 0) {
+      usersQuery = usersQuery.or(`tenant_id.in.(${tenantIds.join(',')}),owner_id.in.(${ownerIds.join(',')})`);
+    } else if (tenantIds.length > 0) {
       usersQuery = usersQuery.in('tenant_id', tenantIds);
     } else {
       usersQuery = usersQuery.eq('id', '00000000-0000-0000-0000-000000000000');
@@ -109,7 +132,11 @@ export async function GET(req: NextRequest) {
 
     const tenantsWithDetails = (tenants || []).map(t => {
       const tenantUsers = (users || []).filter(u => u.tenant_id === t.id);
-      const ceoUser = tenantUsers.find(u => u.role === 'ceo');
+      let ceoUser = tenantUsers.find(u => u.role === 'ceo');
+      // If no tenant-specific CEO user row, match CEO by owner_id
+      if (!ceoUser && t.owner_id) {
+        ceoUser = (users || []).find(u => u.role === 'ceo' && u.owner_id === t.owner_id);
+      }
       const staffUsers = tenantUsers.filter(u => u.role === 'staff' || u.role === 'godown_staff');
       return {
         ...t,
@@ -138,6 +165,7 @@ export async function POST(req: NextRequest) {
       name,
       slug,
       type = 'shop',
+      owner_id,
       owner_name,
       phone,
       email,
@@ -156,8 +184,39 @@ export async function POST(req: NextRequest) {
     // Clean slug
     const cleanSlug = slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-');
 
-    // 0. Pre-Flight Unique Username Validation across all proposed user accounts (DEV-02)
-    const valResult = validateAndAssembleAccounts(body);
+    // 0. Resolve or validate Owner
+    let targetOwnerId: string | null = null;
+    let createdOwnerId: string | null = null;
+    let resolvedOwnerName: string | null = owner_name?.trim() || null;
+    let resolvedPhone: string | null = phone?.trim() || null;
+    let resolvedEmail: string | null = email?.trim() || null;
+
+    if (owner_id) {
+      const { data: existingOwner, error: ownerLookupErr } = await supabaseAdmin
+        .from('owners')
+        .select('*')
+        .eq('id', owner_id)
+        .maybeSingle();
+
+      if (ownerLookupErr) throw ownerLookupErr;
+      if (!existingOwner) {
+        return NextResponse.json({ success: false, error: 'Selected business owner not found' }, { status: 400 });
+      }
+
+      targetOwnerId = existingOwner.id;
+      if (!resolvedOwnerName) resolvedOwnerName = existingOwner.name;
+      if (!resolvedPhone) resolvedPhone = existingOwner.phone;
+      if (!resolvedEmail) resolvedEmail = existingOwner.email;
+    }
+
+    // If an existing owner is chosen, do NOT create a CEO user (existing CEO has access).
+    // If it's a new owner, create owner + CEO together.
+    const effectiveBody = owner_id
+      ? { ...body, ceo_username: undefined, ceo_password: undefined }
+      : body;
+
+    // 0a. Pre-Flight Unique Username Validation across all proposed user accounts (DEV-02)
+    const valResult = validateAndAssembleAccounts(effectiveBody);
     if (!valResult.success) {
       return NextResponse.json({
         success: false,
@@ -169,8 +228,6 @@ export async function POST(req: NextRequest) {
     const uniqueUsernames = valResult.uniqueUsernames || [];
 
     // 0b. Pre-Flight Slug Uniqueness Check (DEV-03)
-    // Provides an early 400 before any database writes.
-    // The DB unique constraint on tenants.slug remains the authoritative concurrency boundary.
     {
       const { data: existingSlug, error: slugCheckErr } = await supabaseAdmin
         .from('tenants')
@@ -205,9 +262,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 1. Hash all account passwords BEFORE any database writes (DEV-03).
-    //    If bcrypt throws, no database rows are created.
-    //    Passwords are never logged — only the opaque hash is used downstream.
+    // 1. Hash all account passwords BEFORE any database writes (DEV-03)
     interface HashedAccount {
       username: string;
       passwordHash: string;
@@ -227,18 +282,34 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 2. Insert Tenant
-    // The DB unique constraint on slug is the authoritative concurrency boundary for
-    // simultaneous requests that pass pre-flight. Code 23505 distinguishes slug collisions.
+    // 2. If new owner needed, create owners row
+    if (!targetOwnerId) {
+      const { data: newOwner, error: createOwnerErr } = await supabaseAdmin
+        .from('owners')
+        .insert({
+          name: resolvedOwnerName || `${name.trim()} Owner`,
+          email: resolvedEmail || null,
+          phone: resolvedPhone || null,
+        })
+        .select()
+        .single();
+
+      if (createOwnerErr) throw createOwnerErr;
+      targetOwnerId = newOwner.id;
+      createdOwnerId = newOwner.id;
+    }
+
+    // 3. Insert Tenant
     const { data: tenant, error: tenantErr } = await supabaseAdmin
       .from('tenants')
       .insert({
         name: name.trim(),
         slug: cleanSlug,
         type,
-        owner_name: owner_name?.trim() || null,
-        phone: phone?.trim() || null,
-        email: email?.trim() || null,
+        owner_id: targetOwnerId,
+        owner_name: resolvedOwnerName || null,
+        phone: resolvedPhone || null,
+        email: resolvedEmail || null,
         city: city?.trim() || 'Karachi',
         address: address?.trim() || null,
       })
@@ -246,33 +317,38 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (tenantErr) {
+      // Rollback created owner if tenant insertion failed
+      if (createdOwnerId) {
+        try {
+          await supabaseAdmin.from('owners').delete().eq('id', createdOwnerId);
+        } catch {}
+      }
       if (tenantErr.code === '23505') {
-        // Slug-specific vs other unique violations: slug is the only unique column on tenants.
         return NextResponse.json({ success: false, error: 'A shop or godown with this URL slug already exists!' }, { status: 400 });
       }
       throw tenantErr;
     }
 
     // Track exact records created by THIS request for scoped rollback.
-    // Populated only from successful DB responses; never pre-populated.
     let createdTenantId: string | null = tenant.id;
     const createdUserIds: string[] = [];
 
     // Provision accounts and seed catalog wrapped in tracked rollback
     let provisioningError: Error | null = null;
     try {
-      // 3. Create CEO user if credentials hashed
+      // 4. Create CEO user only if this is a newly created owner (NOT an existing owner)
       const ceoHashed = hashedAccounts.find(a => a.role === 'ceo');
-      if (ceoHashed) {
+      if (ceoHashed && !owner_id) {
         const { data: ceoRow, error: ceoErr } = await supabaseAdmin
           .from('app_users')
           .insert({
             username: ceoHashed.username,
             password_hash: ceoHashed.passwordHash,
             full_name: ceoHashed.fullName,
-            email: email?.trim() || `${ceoHashed.username}@pyntflow.com`,
+            email: resolvedEmail || `${ceoHashed.username}@pyntflow.com`,
             role: 'ceo',
             tenant_id: tenant.id,
+            owner_id: targetOwnerId,
           })
           .select('id')
           .single();
@@ -281,7 +357,7 @@ export async function POST(req: NextRequest) {
         if (ceoRow?.id) createdUserIds.push(ceoRow.id);
       }
 
-      // 4. Create Staff / Counter users from canonical hashed cashier accounts
+      // 5. Create Staff / Counter users from canonical hashed cashier accounts
       const cashierHashed = hashedAccounts.filter(a => a.role === 'staff' || a.role === 'godown_staff');
       for (const counter of cashierHashed) {
         const { data: counterRow, error: counterErr } = await supabaseAdmin
@@ -300,7 +376,7 @@ export async function POST(req: NextRequest) {
         if (counterRow?.id) createdUserIds.push(counterRow.id);
       }
 
-      // 5. Automatically seed existing catalog products into this new branch with stock_qty = 0
+      // 6. Automatically seed existing catalog products into this new branch with stock_qty = 0
       try {
         let query = supabaseAdmin
           .from('tenants')
@@ -308,8 +384,10 @@ export async function POST(req: NextRequest) {
           .neq('id', tenant.id)
           .eq('is_active', true);
 
-        if (owner_name) {
-          query = query.eq('owner_name', owner_name);
+        if (targetOwnerId) {
+          query = query.eq('owner_id', targetOwnerId);
+        } else if (resolvedOwnerName) {
+          query = query.eq('owner_name', resolvedOwnerName);
         }
 
         const { data: sisterTenants } = await query;
@@ -352,16 +430,14 @@ export async function POST(req: NextRequest) {
     }
 
     if (provisioningError) {
-      // Scoped compensating rollback: delete only records demonstrably created by this request.
-      // Each cleanup step is independent — a failure in one does not prevent the others.
-      // NEVER log passwords, hashes, PINs, tokens, or session secrets.
       console.error('Account provisioning failed, attempting scoped rollback:', {
         tenantId: createdTenantId,
         createdUserCount: createdUserIds.length,
+        createdOwnerId,
         error: provisioningError.message,
       });
 
-      // Step R1: Delete exact user records created by this request (by ID).
+      // Step R1: Delete exact user records created by this request (by ID)
       if (createdUserIds.length > 0) {
         try {
           await supabaseAdmin.from('app_users').delete().in('id', createdUserIds);
@@ -373,7 +449,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Step R2: Delete tenant record created by this request (by exact ID).
+      // Step R2: Delete tenant record created by this request (by exact ID)
       if (createdTenantId) {
         try {
           await supabaseAdmin.from('tenants').delete().eq('id', createdTenantId);
@@ -385,7 +461,18 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Return original provisioning error — rollback status is diagnostic-only.
+      // Step R3: Delete owner record created by this request if new owner was created
+      if (createdOwnerId) {
+        try {
+          await supabaseAdmin.from('owners').delete().eq('id', createdOwnerId);
+        } catch (cleanupErr: any) {
+          console.error('[ROLLBACK-R3] Failed to delete created owner row by ID:', {
+            ownerId: createdOwnerId,
+            error: cleanupErr?.message,
+          });
+        }
+      }
+
       return NextResponse.json({
         success: false,
         error: `Failed to provision branch accounts: ${provisioningError.message}. Tenant creation was rolled back.`
@@ -419,6 +506,66 @@ export async function DELETE(req: NextRequest) {
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Tenant ID required' }, { status: 400 });
+    }
+
+    // 0. Handle CEO user reassignment before deleting anything
+    const { data: tenantBeingDeleted } = await supabaseAdmin
+      .from('tenants')
+      .select('id, owner_id')
+      .eq('id', id)
+      .maybeSingle();
+
+    const ownerId = tenantBeingDeleted?.owner_id;
+    let sisterTenantId: string | null = null;
+
+    if (ownerId) {
+      // Find ANY other tenant belonging to the same owner (not filtering by is_active)
+      const { data: sister } = await supabaseAdmin
+        .from('tenants')
+        .select('id')
+        .eq('owner_id', ownerId)
+        .neq('id', id)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (sister) {
+        sisterTenantId = sister.id;
+      }
+    }
+
+    // If CEO user(s) have tenant_id = id, reassign them to a sister branch
+    const { data: ceoUsers } = await supabaseAdmin
+      .from('app_users')
+      .select('id, owner_id')
+      .eq('tenant_id', id)
+      .eq('role', 'ceo');
+
+    if (ceoUsers && ceoUsers.length > 0) {
+      for (const ceo of ceoUsers) {
+        const effectiveOwner = ceo.owner_id || ownerId;
+        let targetSisterId = sisterTenantId;
+
+        if (!targetSisterId && effectiveOwner) {
+          const { data: sister } = await supabaseAdmin
+            .from('tenants')
+            .select('id')
+            .eq('owner_id', effectiveOwner)
+            .neq('id', id)
+            .order('created_at', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          if (sister) targetSisterId = sister.id;
+        }
+
+        if (targetSisterId) {
+          // Reassign CEO to the sister branch BEFORE deleting child records/tenant
+          await supabaseAdmin
+            .from('app_users')
+            .update({ tenant_id: targetSisterId })
+            .eq('id', ceo.id);
+        }
+      }
     }
 
     // 1. Clean up branch orders & branch order items (as sender or receiver)
@@ -498,8 +645,22 @@ export async function DELETE(req: NextRequest) {
       console.error('Error cleaning branch orders on tenant delete:', err);
     }
 
-    // 5. Clean up other child tables (Note: non-existent 'expenses' table reference removed)
-    await supabaseAdmin.from('app_users').delete().eq('tenant_id', id);
+    // 5. Clean up other child tables
+    // Delete non-CEO users (cashiers/staff) of the deleted tenant
+    await supabaseAdmin
+      .from('app_users')
+      .delete()
+      .eq('tenant_id', id)
+      .neq('role', 'ceo');
+
+    // If the owner has NO other branches left, delete the remaining CEO user too
+    if (!sisterTenantId) {
+      await supabaseAdmin
+        .from('app_users')
+        .delete()
+        .eq('tenant_id', id);
+    }
+
     await supabaseAdmin.from('held_invoices').delete().eq('tenant_id', id);
     await supabaseAdmin.from('items').delete().eq('tenant_id', id);
     await supabaseAdmin.from('shifts').delete().eq('tenant_id', id);
@@ -512,6 +673,18 @@ export async function DELETE(req: NextRequest) {
     // 6. Finally delete the tenant
     const { error } = await supabaseAdmin.from('tenants').delete().eq('id', id);
     if (error) throw error;
+
+    // 7. If no other tenants have this owner_id, delete the owners row
+    if (ownerId) {
+      const { count: remainingTenantsCount } = await supabaseAdmin
+        .from('tenants')
+        .select('*', { count: 'exact', head: true })
+        .eq('owner_id', ownerId);
+
+      if (!remainingTenantsCount || remainingTenantsCount === 0) {
+        await supabaseAdmin.from('owners').delete().eq('id', ownerId);
+      }
+    }
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

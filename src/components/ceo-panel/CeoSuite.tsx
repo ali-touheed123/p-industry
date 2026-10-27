@@ -48,13 +48,14 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
         const data = await res.json();
 
         if (data.success && Array.isArray(data.tenants) && data.tenants.length > 0) {
-          // SECURITY: Only include branches the CEO is authorized for — same id, email, or owner_name.
+          // SECURITY: Only include branches the CEO is authorized for — same id, owner_id, or fallback email/owner_name.
           // NEVER fall back to data.tenants (all tenants); that would be a cross-tenant data leak.
           const matchingTenants = data.tenants.filter(
             (t: any) =>
               t.id === tenant.id ||
-              (tenant.email && t.email === tenant.email) ||
-              (tenant.owner_name && t.owner_name === tenant.owner_name)
+              (tenant.owner_id && t.owner_id && t.owner_id === tenant.owner_id) ||
+              (tenant.email && t.email && t.email.trim().toLowerCase() === tenant.email.trim().toLowerCase()) ||
+              (tenant.owner_name && t.owner_name && t.owner_name.trim().toLowerCase() === tenant.owner_name.trim().toLowerCase())
           );
 
           // If the API returned no authorized branches for this CEO, fall through to the

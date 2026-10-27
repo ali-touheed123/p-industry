@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { verifyPassword, hashPassword, isLegacyPasswordHash } from '@/lib/auth-passwords';
 import { createSessionToken, SESSION_COOKIE_NAME } from '@/lib/session';
 import { checkRateLimit, resetRateLimit } from '@/lib/rate-limit';
+import { sanitizePostgRESTLike } from '@/lib/utils';
 
 export async function POST(req: NextRequest) {
   try {
@@ -73,6 +74,7 @@ export async function POST(req: NextRequest) {
       username: user.username,
       full_name: user.full_name,
       role: user.role,
+      owner_id: user.owner_id,
       can_use_special_receipt: Boolean(user.can_use_special_receipt),
     };
 
@@ -95,9 +97,17 @@ export async function POST(req: NextRequest) {
       }
 
       if (user.role === 'ceo') {
-        const isOwnerMatch = user.tenants?.owner_name && targetTenant.owner_name && user.tenants.owner_name === targetTenant.owner_name;
-        const isEmailMatch = user.tenants?.email && targetTenant.email && user.tenants.email === targetTenant.email;
-        if (user.tenant_id !== targetTenant.id && !isOwnerMatch && !isEmailMatch) {
+        // Priority 1: Check owner_id foreign key
+        const isOwnerIdMatch = (user.owner_id && targetTenant.owner_id && user.owner_id === targetTenant.owner_id) ||
+                               (user.tenants?.owner_id && targetTenant.owner_id && user.tenants.owner_id === targetTenant.owner_id);
+
+        // Priority 2: Fallback check by owner_name or email
+        const isOwnerMatch = user.tenants?.owner_name && targetTenant.owner_name &&
+                             user.tenants.owner_name.trim().toLowerCase() === targetTenant.owner_name.trim().toLowerCase();
+        const isEmailMatch = user.tenants?.email && targetTenant.email &&
+                             user.tenants.email.trim().toLowerCase() === targetTenant.email.trim().toLowerCase();
+
+        if (user.tenant_id !== targetTenant.id && !isOwnerIdMatch && !isOwnerMatch && !isEmailMatch) {
           return NextResponse.json({ success: false, error: 'You do not have CEO access to this branch' }, { status: 403 });
         }
       } else {
@@ -120,19 +130,46 @@ export async function POST(req: NextRequest) {
     let ceoTenants: Array<{ id: string; slug: string; name?: string }> | undefined = undefined;
     if (user.role === 'ceo') {
       const activeTenant = sanitizedUser.tenant || user.tenants;
-      if (activeTenant?.owner_name || activeTenant?.email) {
+      const effectiveOwnerId = user.owner_id || activeTenant?.owner_id;
+
+      let sisterBranches: Array<{ id: string; slug: string; name?: string }> | null = null;
+
+      // Priority 1: Query branches by owner_id
+      if (effectiveOwnerId) {
+        const { data } = await supabaseAdmin
+          .from('tenants')
+          .select('id, slug, name')
+          .eq('owner_id', effectiveOwnerId)
+          .eq('is_active', true);
+        sisterBranches = data;
+      }
+
+      // Priority 2: Fallback by owner_name or email if no branches found by owner_id
+      if ((!sisterBranches || sisterBranches.length === 0) && (activeTenant?.owner_name || activeTenant?.email)) {
         let q = supabaseAdmin.from('tenants').select('id, slug, name').eq('is_active', true);
         if (activeTenant.owner_name && activeTenant.email) {
-          q = q.or(`owner_name.eq.${activeTenant.owner_name},email.eq.${activeTenant.email}`);
+          const safeOwner = sanitizePostgRESTLike(activeTenant.owner_name);
+          const safeEmail = sanitizePostgRESTLike(activeTenant.email);
+          if (safeOwner && safeEmail) {
+            q = q.or(`owner_name.eq.${safeOwner},email.eq.${safeEmail}`);
+          } else if (safeOwner) {
+            q = q.eq('owner_name', safeOwner);
+          } else if (safeEmail) {
+            q = q.eq('email', safeEmail);
+          }
         } else if (activeTenant.owner_name) {
-          q = q.eq('owner_name', activeTenant.owner_name);
+          const safeOwner = sanitizePostgRESTLike(activeTenant.owner_name);
+          if (safeOwner) q = q.eq('owner_name', safeOwner);
         } else if (activeTenant.email) {
-          q = q.eq('email', activeTenant.email);
+          const safeEmail = sanitizePostgRESTLike(activeTenant.email);
+          if (safeEmail) q = q.eq('email', safeEmail);
         }
-        const { data: sisterBranches } = await q;
-        if (sisterBranches && sisterBranches.length > 0) {
-          ceoTenants = sisterBranches.map(b => ({ id: b.id, slug: b.slug, name: b.name }));
-        }
+        const { data } = await q;
+        sisterBranches = data;
+      }
+
+      if (sisterBranches && sisterBranches.length > 0) {
+        ceoTenants = sisterBranches.map(b => ({ id: b.id, slug: b.slug, name: b.name }));
       }
     }
 
@@ -143,6 +180,7 @@ export async function POST(req: NextRequest) {
       role: user.role,
       tenantId: sessionTenantId,
       tenantSlug: sessionTenantSlug,
+      ownerId: user.owner_id || sanitizedUser.tenant?.owner_id,
       canUseSpecialReceipt: Boolean(user.can_use_special_receipt),
       ceoTenants,
     });

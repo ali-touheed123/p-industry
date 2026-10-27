@@ -1,11 +1,21 @@
 export type TenantType = 'shop' | 'godown' | 'factory';
 export type UserRole = 'developer' | 'ceo' | 'staff' | 'godown_staff';
 
+export interface Owner {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface Tenant {
   id: string;
   slug: string;
   name: string;
   type: TenantType;
+  owner_id?: string;
   owner_name?: string;
   phone?: string;
   email?: string;
@@ -30,6 +40,7 @@ export interface AppUser {
   email?: string;
   role: UserRole;
   tenant_id?: string;
+  owner_id?: string;
   is_active: boolean;
   can_use_special_receipt?: boolean;
   created_at: string;

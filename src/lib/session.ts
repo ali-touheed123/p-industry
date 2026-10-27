@@ -2,6 +2,8 @@ import { SignJWT, jwtVerify } from 'jose';
 import { NextRequest } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 
+import { sanitizePostgRESTLike } from '@/lib/utils';
+
 export {
   getJwtSecret,
   getDevSecret,
@@ -16,6 +18,7 @@ export interface UserSession {
   role: 'developer' | 'ceo' | 'staff' | 'godown_staff';
   tenantId?: string;
   tenantSlug?: string;
+  ownerId?: string;
   canUseSpecialReceipt?: boolean;
   ceoTenants?: Array<{ id: string; slug: string; name?: string }>;
   jti?: string;
@@ -191,32 +194,55 @@ export async function requireTenantAuth(
         return { authorized: true, session };
       }
 
-      // Check database: verify target tenant shares owner_name or email with the CEO's primary branch
+      // Check database
       try {
-        const { data: primaryTenant } = await supabaseAdmin
+        // Query target tenant
+        const { data: targetTenant } = await supabaseAdmin
           .from('tenants')
-          .select('owner_name, email')
-          .eq('id', session.tenantId)
+          .select('id, slug, owner_id, owner_name, email, is_active')
+          .or(`id.eq.${targetTenantId},slug.eq.${targetTenantId}`)
           .maybeSingle();
 
-        if (primaryTenant && (primaryTenant.owner_name || primaryTenant.email)) {
-          let sisterQuery = supabaseAdmin
-            .from('tenants')
-            .select('id, slug')
-            .or(`id.eq.${targetTenantId},slug.eq.${targetTenantId}`)
-            .eq('is_active', true);
+        if (targetTenant && targetTenant.is_active) {
+          // Priority 1: Check by ownerId (new clean foreign key path)
+          let ceoOwnerId = session.ownerId;
+          let primaryTenant: { owner_id?: string | null; owner_name?: string | null; email?: string | null } | null = null;
 
-          if (primaryTenant.owner_name && primaryTenant.email) {
-            sisterQuery = sisterQuery.or(`owner_name.eq.${primaryTenant.owner_name},email.eq.${primaryTenant.email}`);
-          } else if (primaryTenant.owner_name) {
-            sisterQuery = sisterQuery.eq('owner_name', primaryTenant.owner_name);
-          } else if (primaryTenant.email) {
-            sisterQuery = sisterQuery.eq('email', primaryTenant.email);
+          // Gracefully resolve ownerId for old JWTs where ownerId wasn't embedded
+          if (!ceoOwnerId && session.tenantId) {
+            const { data: pt } = await supabaseAdmin
+              .from('tenants')
+              .select('owner_id, owner_name, email')
+              .eq('id', session.tenantId)
+              .maybeSingle();
+            primaryTenant = pt;
+            ceoOwnerId = pt?.owner_id || undefined;
           }
 
-          const { data: sisterTenant } = await sisterQuery.maybeSingle();
-          if (sisterTenant) {
+          if (ceoOwnerId && targetTenant.owner_id && ceoOwnerId === targetTenant.owner_id) {
             return { authorized: true, session };
+          }
+
+          // Priority 2: Fallback path (owner_name / email match) with sanitized values
+          if (!primaryTenant && session.tenantId) {
+            const { data: pt } = await supabaseAdmin
+              .from('tenants')
+              .select('owner_name, email')
+              .eq('id', session.tenantId)
+              .maybeSingle();
+            primaryTenant = pt;
+          }
+
+          if (primaryTenant) {
+            const safeOwner = sanitizePostgRESTLike(primaryTenant.owner_name);
+            const safeEmail = sanitizePostgRESTLike(primaryTenant.email);
+
+            const isOwnerMatch = safeOwner && targetTenant.owner_name && safeOwner.toLowerCase() === targetTenant.owner_name.toLowerCase();
+            const isEmailMatch = safeEmail && targetTenant.email && safeEmail.toLowerCase() === targetTenant.email.toLowerCase();
+
+            if (isOwnerMatch || isEmailMatch) {
+              return { authorized: true, session };
+            }
           }
         }
       } catch (err) {
