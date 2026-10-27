@@ -264,11 +264,15 @@ export async function PATCH(req: NextRequest) {
           .not('status', 'in', '(cancelled,void,CANCELLED,VOID)');
 
         // Purchases — shift-scoped with time-window fallback for legacy NULL shift_id
-        const { data: shiftPurchases } = await supabaseAdmin
+        const { data: shiftPurchases, error: purchErr } = await supabaseAdmin
           .from('purchases')
-          .select('net_total, paid_amount, cash_paid, payment_type, purchase_type, shift_id, created_at')
+          .select('net_total, paid_amount, payment_type, purchase_type, shift_id, created_at')
           .eq('tenant_id', tenantId)
           .or(`shift_id.eq.${id},and(shift_id.is.null,created_at.gte.${startTime},created_at.lte.${endBound})`);
+
+        if (purchErr) {
+          console.error('Error fetching shift purchases during shift close:', purchErr);
+        }
 
         // Vouchers — shift-scoped only (vouchers without shift_id excluded per spec)
         const { data: shiftVouchers } = await supabaseAdmin

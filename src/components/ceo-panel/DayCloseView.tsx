@@ -35,20 +35,22 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
       if (!tenantId) return;
       setLoading(true);
       try {
-        const [shiftsRes, expensesRes, invoicesRes, tokensRes, vouchersRes] = await Promise.all([
+        const [shiftsRes, expensesRes, invoicesRes, tokensRes, vouchersRes, purchasesRes] = await Promise.all([
           fetch(`/api/shifts?tenant_id=${tenantId}`),
           fetch(`/api/expenses?tenant_id=${tenantId}`),
           fetch(`/api/invoices?tenant_id=${tenantId}`),
           fetch(`/api/tokens?tenant_id=${tenantId}`),
           fetch(`/api/vouchers?tenant_id=${tenantId}`),
+          fetch(`/api/purchases?tenant_id=${tenantId}`),
         ]);
 
-        const [shiftsData, expensesData, invoicesData, tokensData, vouchersData] = await Promise.all([
+        const [shiftsData, expensesData, invoicesData, tokensData, vouchersData, purchasesData] = await Promise.all([
           shiftsRes.json(),
           expensesRes.json(),
           invoicesRes.json(),
           tokensRes.json(),
           vouchersRes.json(),
+          purchasesRes.json(),
         ]);
 
         if (!isMounted) return;
@@ -66,6 +68,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
         const allInvoices: any[] = invoicesData.success ? (invoicesData.invoices || []) : [];
         const allTokens: any[] = tokensData.success && Array.isArray(tokensData.transactions) ? tokensData.transactions : [];
         const allVouchers: any[] = vouchersData.success && Array.isArray(vouchersData.vouchers) ? vouchersData.vouchers : [];
+        const allPurchases: any[] = purchasesData.success && Array.isArray(purchasesData.purchases) ? purchasesData.purchases : [];
 
         const commEnabled = Boolean(currentTenant?.commission_enabled);
         const commRate = Number(currentTenant?.commission_rate || 2.0);
@@ -149,6 +152,12 @@ const toShopLocalDate = (val: string | Date | null | undefined): string => {
             // Match vouchers: prefer shift_id; vouchers without shift_id excluded from cash ledger (Phase 1)
             const shiftVouchers = allVouchers.filter((v: any) => v.shift_id && v.shift_id === s.id);
 
+            // Match purchases: prefer shift_id; date fallback only when sole shift on that day
+            const shiftPurchases = allPurchases.filter((p: any) =>
+              (p.shift_id && p.shift_id === s.id) ||
+              (!p.shift_id && isOnlyShiftOnDay && toShopLocalDate(p.date || p.created_at) === shiftDate)
+            );
+
             const salesInvs = shiftInvoices.filter((i: any) => !isReturnInvoice(i));
             const returnInvs = shiftInvoices.filter((i: any) => isReturnInvoice(i));
 
@@ -177,7 +186,7 @@ const toShopLocalDate = (val: string | Date | null | undefined): string => {
               const bd = computeShiftCash({
                 openingCash: openAmt,
                 invoices: shiftInvoices,
-                purchases: [],
+                purchases: shiftPurchases,
                 vouchers: shiftVouchers,
                 expenses: shiftExpenses,
                 tokens: shiftTokens,
