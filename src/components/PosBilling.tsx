@@ -2712,7 +2712,7 @@ export default function PosBilling({
       {/* ── Customer Directory Modal ── */}
       {showCustomerModal && (
         <div className="pos-modal-overlay">
-          <div className="pos-modal-card">
+          <div className="pos-modal-card" style={{ maxWidth: '680px', width: '95%' }}>
             <div style={{ padding: '1rem', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#F8FAFC' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <User style={{ width: 16, height: 16, color: '#F97316' }} />
@@ -2874,78 +2874,148 @@ export default function PosBilling({
                 );
               })()}
 
-              {/* Quick Add Client */}
-              <div style={{ paddingTop: '8px', borderTop: '1px solid #F1F5F9', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <input
-                  type="text"
-                  value={newClientName}
-                  onChange={(e) => setNewClientName(e.target.value)}
-                  placeholder="New customer name..."
-                  className="pos-text-input"
-                  style={{ flex: 1 }}
-                />
-                <input
-                  type="text"
-                  value={newClientPhone}
-                  onChange={(e) => setNewClientPhone(e.target.value)}
-                  placeholder="Phone number..."
-                  className="pos-text-input"
-                  style={{ width: '130px' }}
-                />
-                <input
-                  type="text"
-                  value={newClientReference}
-                  onChange={(e) => setNewClientReference(e.target.value)}
-                  placeholder="Referrer / Agent..."
-                  className="pos-text-input"
-                  style={{ width: '130px' }}
-                />
-                <input
-                  type="number"
-                  step="any"
-                  value={newClientPreviousBalance}
-                  onChange={(e) => setNewClientPreviousBalance(e.target.value)}
-                  placeholder="Prev. Balance (Rs.)..."
-                  className="pos-text-input"
-                  style={{ width: '140px' }}
-                />
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!newClientName) return;
-                    try {
-                      const res = await fetch('/api/clients', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          tenant_id: tenantId,
-                          name: newClientName,
-                          phone: newClientPhone,
-                          reference: newClientReference || undefined,
-                          credit_limit: 50000,
-                          previous_balance: parseFloat(newClientPreviousBalance) || 0,
-                        }),
-                      });
-                      const data = await res.json();
-                      if (data.success && data.client) {
-                        setClients((prev) => [data.client, ...prev]);
-                        setSelectedClient(data.client);
-                        setCustomerSearch(data.client.name);
-                        setNewClientName('');
-                        setNewClientPhone('');
-                        setNewClientReference('');
-                        setNewClientPreviousBalance('');
-                        setShowCustomerModal(false);
-                        showFeedback(`Customer ${data.client.name} created with balance Rs. ${data.client.current_balance || 0}!`);
+              {/* Quick Add Client Section */}
+              <div style={{
+                marginTop: '6px',
+                padding: '12px 14px',
+                background: '#F8FAFC',
+                border: '1px solid #E2E8F0',
+                borderRadius: '10px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#0F172A' }}>
+                      + Register New Customer
+                    </span>
+                    <span style={{ fontSize: '10px', color: '#F97316', fontWeight: 700, background: '#FFEDD5', padding: '1px 6px', borderRadius: '4px' }}>
+                      Instant Khata
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '11px', color: '#64748B' }}>Save customer &amp; immediately select for billing</span>
+                </div>
+
+                {/* Form Inputs Grid: Row 1 (Name & Phone) */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '10px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#1E293B', marginBottom: '4px' }}>
+                      Customer Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={newClientName}
+                      onChange={(e) => setNewClientName(e.target.value)}
+                      placeholder="e.g. Haji Asif Paint Store"
+                      className="pos-text-input"
+                      style={{ width: '100%', fontSize: '12px', background: '#FFFFFF', padding: '7px 10px' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#1E293B', marginBottom: '4px' }}>
+                      Phone Number
+                    </label>
+                    <input
+                      type="text"
+                      value={newClientPhone}
+                      onChange={(e) => setNewClientPhone(e.target.value)}
+                      placeholder="0300-1234567"
+                      className="pos-text-input"
+                      style={{ width: '100%', fontSize: '12px', background: '#FFFFFF', padding: '7px 10px' }}
+                    />
+                  </div>
+                </div>
+
+                {/* Form Inputs Grid: Row 2 (Referrer, Prev Balance, Register Button) */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr auto', gap: '10px', alignItems: 'flex-end' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#1E293B', marginBottom: '4px' }}>
+                      Referrer / Agent (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={newClientReference}
+                      onChange={(e) => setNewClientReference(e.target.value)}
+                      placeholder="e.g. Master Painter Bilal"
+                      className="pos-text-input"
+                      style={{ width: '100%', fontSize: '12px', background: '#FFFFFF', padding: '7px 10px' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#1E293B', marginBottom: '4px' }}>
+                      Previous Balance (Rs.)
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={newClientPreviousBalance}
+                      onChange={(e) => setNewClientPreviousBalance(e.target.value)}
+                      placeholder="0.00"
+                      className="pos-text-input"
+                      style={{ width: '100%', fontSize: '12px', background: '#FFFFFF', padding: '7px 10px', fontFamily: 'JetBrains Mono, monospace' }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!newClientName.trim()) {
+                        alert('Customer Name is required!');
+                        return;
                       }
-                    } catch (err) {
-                      console.error('Failed to create customer', err);
-                    }
-                  }}
-                  style={{ padding: '8px 14px', background: '#F97316', color: '#ffffff', fontWeight: 700, fontSize: '12px', borderRadius: '8px', border: 'none', cursor: 'pointer' }}
-                >
-                  Create
-                </button>
+                      try {
+                        const res = await fetch('/api/clients', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            tenant_id: tenantId,
+                            name: newClientName.trim(),
+                            phone: newClientPhone.trim(),
+                            reference: newClientReference?.trim() || undefined,
+                            credit_limit: 50000,
+                            previous_balance: parseFloat(newClientPreviousBalance) || 0,
+                          }),
+                        });
+                        const data = await res.json();
+                        if (data.success && data.client) {
+                          setClients((prev) => [data.client, ...prev]);
+                          setSelectedClient(data.client);
+                          setCustomerSearch(data.client.name);
+                          setNewClientName('');
+                          setNewClientPhone('');
+                          setNewClientReference('');
+                          setNewClientPreviousBalance('');
+                          setShowCustomerModal(false);
+                          showFeedback(`Customer ${data.client.name} registered with balance Rs. ${data.client.current_balance || 0}!`);
+                          setTimeout(() => searchInputRef.current?.focus(), 60);
+                        } else {
+                          alert(data.error || 'Failed to create customer');
+                        }
+                      } catch (err) {
+                        console.error('Failed to create customer', err);
+                        alert('Network error registering customer');
+                      }
+                    }}
+                    style={{
+                      height: '35px',
+                      padding: '0 18px',
+                      background: 'linear-gradient(135deg, #F97316 0%, #EA580C 100%)',
+                      color: '#FFFFFF',
+                      fontWeight: 700,
+                      fontSize: '12px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      boxShadow: '0 2px 6px rgba(249, 115, 22, 0.25)'
+                    }}
+                  >
+                    + Register &amp; Select
+                  </button>
+                </div>
               </div>
             </div>
           </div>
