@@ -86,6 +86,8 @@ export async function POST(req: NextRequest) {
     // FIX FINDING-API-013: Use collision-safe unique code generator
     const code = await generateUniqueCode('CL', 'clients', 'code', tenant_id);
 
+    const initialBalance = Number(body.previous_balance ?? body.opening_balance ?? body.current_balance ?? 0);
+
     const { data: client, error } = await supabaseAdmin
       .from('clients')
       .insert({
@@ -97,13 +99,34 @@ export async function POST(req: NextRequest) {
         area: area || null,
         address: address || null,
         credit_limit: Number(credit_limit) || 50000,
-        current_balance: Number(current_balance) || 0,
+        opening_balance: initialBalance,
+        current_balance: initialBalance,
         reference: reference || null,
       })
       .select()
       .single();
 
     if (error) throw error;
+
+    // If client was created with a previous/opening balance, record an opening balance voucher
+    if (initialBalance > 0 && client) {
+      const today = new Date().toISOString().split('T')[0];
+      await supabaseAdmin
+        .from('vouchers')
+        .insert({
+          tenant_id,
+          voucher_no: `OB-${code}`,
+          voucher_type: 'opening_balance',
+          party_type: 'client',
+          party_id: client.id,
+          party_name: client.name,
+          party_code: client.code,
+          date: today,
+          amount: initialBalance,
+          remarks: 'Previous Balance (Legacy / Opening Credit)',
+          created_by: 'System',
+        });
+    }
 
     return NextResponse.json({ success: true, client });
   } catch (error: any) {

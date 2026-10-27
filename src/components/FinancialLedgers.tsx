@@ -116,6 +116,7 @@ export default function FinancialLedgers({
   const [newPartyAddress, setNewPartyAddress] = useState('');
   const [newPartyReference, setNewPartyReference] = useState('');
   const [newPartyLimit, setNewPartyLimit] = useState('50000');
+  const [newPartyPreviousBalance, setNewPartyPreviousBalance] = useState('');
   const [submittingParty, setSubmittingParty] = useState(false);
 
   // Edit Party Modal State
@@ -448,6 +449,7 @@ export default function FinancialLedgers({
             city: newPartyAddress,
             reference: newPartyReference.trim() || undefined,
             credit_limit: parseFloat(newPartyLimit) || 50000,
+            previous_balance: parseFloat(newPartyPreviousBalance) || 0,
           }
         : {
             tenant_id: tenantId,
@@ -470,6 +472,7 @@ export default function FinancialLedgers({
         setNewPartyPhone('');
         setNewPartyAddress('');
         setNewPartyReference('');
+        setNewPartyPreviousBalance('');
         await fetchParties();
         if (data.client) setSelectedParty(data.client);
         if (data.supplier) setSelectedParty(data.supplier);
@@ -1860,6 +1863,23 @@ export default function FinancialLedgers({
                       value={newPartyLimit}
                       onChange={e => setNewPartyLimit(e.target.value)}
                     />
+                  </div>
+                  <div>
+                    <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>Previous Balance / Pehla Udhar (PKR)</span>
+                      <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 500 }}>Optional</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      className="form-input"
+                      placeholder="0.00 (agar pehle se udhar chalta aa raha hai)"
+                      value={newPartyPreviousBalance}
+                      onChange={e => setNewPartyPreviousBalance(e.target.value)}
+                    />
+                    <span style={{ fontSize: '11px', color: '#64748B', marginTop: '3px', display: 'block' }}>
+                      Agar customer ka pehle se koi udhar/credit chal raha tha to yahan darj karein.
+                    </span>
                   </div>
                 </>
               )}

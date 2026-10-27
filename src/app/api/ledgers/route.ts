@@ -210,6 +210,18 @@ export async function GET(req: NextRequest) {
           credit: amt,
           items: transferItemsByOrderNo[v.reference_no] || undefined,
         });
+      } else if (vType === 'opening_balance') {
+        // ── Opening Balance / Previous Credit ───────────────────────────
+        transactions.push({
+          id: v.id,
+          date: v.date || new Date(v.created_at).toISOString().split('T')[0],
+          timestamp: new Date(v.created_at).getTime() - 10000000, // sort at the very top of the day
+          type: 'OB',
+          typeClass: 'badge-target',
+          desc: `${v.voucher_no} — ${v.remarks || 'Previous Balance / Opening Receivable'}`,
+          debit: amt,
+          credit: 0,
+        });
       } else {
         // ── Standard Receipts / Payments / Settlements ──────────────────
         const isReceipt = vType === 'receipt';

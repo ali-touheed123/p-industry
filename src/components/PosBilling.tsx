@@ -147,6 +147,7 @@ export default function PosBilling({
   const [newClientName, setNewClientName] = useState<string>('');
   const [newClientPhone, setNewClientPhone] = useState<string>('');
   const [newClientReference, setNewClientReference] = useState<string>('');
+  const [newClientPreviousBalance, setNewClientPreviousBalance] = useState<string>('');
   const [remarks, setRemarks] = useState<string>('');
 
   // Customer History Real Data State
@@ -2899,6 +2900,15 @@ export default function PosBilling({
                   className="pos-text-input"
                   style={{ width: '130px' }}
                 />
+                <input
+                  type="number"
+                  step="any"
+                  value={newClientPreviousBalance}
+                  onChange={(e) => setNewClientPreviousBalance(e.target.value)}
+                  placeholder="Prev. Balance (Rs.)..."
+                  className="pos-text-input"
+                  style={{ width: '140px' }}
+                />
                 <button
                   type="button"
                   onClick={async () => {
@@ -2913,6 +2923,7 @@ export default function PosBilling({
                           phone: newClientPhone,
                           reference: newClientReference || undefined,
                           credit_limit: 50000,
+                          previous_balance: parseFloat(newClientPreviousBalance) || 0,
                         }),
                       });
                       const data = await res.json();
@@ -2923,8 +2934,9 @@ export default function PosBilling({
                         setNewClientName('');
                         setNewClientPhone('');
                         setNewClientReference('');
+                        setNewClientPreviousBalance('');
                         setShowCustomerModal(false);
-                        showFeedback(`Customer ${data.client.name} created!`);
+                        showFeedback(`Customer ${data.client.name} created with balance Rs. ${data.client.current_balance || 0}!`);
                       }
                     } catch (err) {
                       console.error('Failed to create customer', err);

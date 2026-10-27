@@ -1,0 +1,2016 @@
+From ecb3311c5930e210abcba313d03ac258fcf81ec8 Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Sat, 24 Oct 2026 22:12:47 +0000
+Subject: [PATCH 1/7] feat(security): CEO approval gate for stock adjustment,
+ bulk price edit, product edit and receipt settings
+
+---
+ src/app/[slug]/page.tsx                       |  15 +-
+ src/app/api/auth/verify-ceo/route.ts          | 110 ++++++++++++++
+ src/app/api/items/adjust/route.ts             |   4 +
+ src/app/api/items/route.ts                    |   7 +
+ src/app/api/receipt-templates/branch/route.ts |   7 +
+ src/app/api/special-receipt-brands/route.ts   |   4 +
+ .../api/special-receipt-templates/route.ts    |   7 +
+ src/components/AiInvoiceScan.tsx              |   3 +-
+ src/components/BranchReceiptSettings.tsx      |   5 +-
+ src/components/CeoPasswordModal.tsx           | 137 ++++++++++++++++++
+ src/components/SpecialReceiptSettings.tsx     |   7 +-
+ src/components/StockAdjustmentGrid.tsx        |   3 +-
+ src/components/StockInventory.tsx             |  17 ++-
+ src/lib/ceo-approval.ts                       |  86 +++++++++++
+ src/lib/ceoApprovalClient.ts                  |  79 ++++++++++
+ 15 files changed, 478 insertions(+), 13 deletions(-)
+ create mode 100644 src/app/api/auth/verify-ceo/route.ts
+ create mode 100644 src/components/CeoPasswordModal.tsx
+ create mode 100644 src/lib/ceo-approval.ts
+ create mode 100644 src/lib/ceoApprovalClient.ts
+
+diff --git a/src/app/[slug]/page.tsx b/src/app/[slug]/page.tsx
+index 0834bf7..8d81d9e 100644
+--- a/src/app/[slug]/page.tsx
++++ b/src/app/[slug]/page.tsx
+@@ -26,6 +26,8 @@ const TokenLedger = dynamic(() => import('@/components/TokenLedger'), { loading:
+ const TokenManagementView = dynamic(() => import('@/components/TokenManagementView'), { loading: () => <ViewFallback /> });
+ const BranchReceiptSettings = dynamic(() => import('@/components/BranchReceiptSettings'), { loading: () => <ViewFallback /> });
+ import { clearAllBulkDrafts } from '@/lib/bulkDraftStore';
++import { useCeoApproval } from '@/components/CeoPasswordModal';
++import { clearCeoApproval } from '@/lib/ceoApprovalClient';
+ 
+ import {
+   ShoppingCart,
+@@ -153,6 +155,7 @@ export default function TenantAppPage({ params }: PageProps) {
+       await fetch('/api/auth/logout', { method: 'POST' });
+     } catch {}
+     clearAllBulkDrafts();
++    clearCeoApproval();
+     setCurrentUser(null);
+   };
+ 
+@@ -326,6 +329,8 @@ export default function TenantAppPage({ params }: PageProps) {
+   };
+ 
+   const isCEO = currentUser?.role === 'ceo' || currentUser?.role === 'developer';
++  // Staff must enter the CEO password before protected features (receipt settings, price/stock edits)
++  const { ensure: ensureCeoApproval, modal: ceoApprovalModal } = useCeoApproval(tenant?.id, !isCEO);
+   const totalSales = invoices.reduce((s, i) => s + (i.grandTotal || 0), 0);
+ 
+   // Automatic Redirect for Invalid / Non-existent Shop URL
+@@ -489,6 +494,7 @@ export default function TenantAppPage({ params }: PageProps) {
+ 
+   return (
+     <div className="app-shell">
++      {ceoApprovalModal}
+       {/* ── Collapsible Dark Navy Sidebar ── */}
+       <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
+         {/* Brand Header */}
+@@ -529,7 +535,13 @@ export default function TenantAppPage({ params }: PageProps) {
+             return (
+               <button
+                 key={item.id}
+-                onClick={() => setActiveTab(item.id as any)}
++                onClick={() => {
++                  if (item.id === 'receipt') {
++                    ensureCeoApproval(() => setActiveTab('receipt'));
++                  } else {
++                    setActiveTab(item.id as any);
++                  }
++                }}
+                 title={isSidebarCollapsed ? (hasBadge ? `${item.label} (${item.badgeCount} pending)` : item.label) : undefined}
+                 className={`sidebar-link ${isActive ? 'active' : ''}`}
+                 style={{ position: 'relative' }}
+@@ -784,6 +796,7 @@ export default function TenantAppPage({ params }: PageProps) {
+               tenantId={tenant.id}
+               tenantName={tenant.name}
+               onStockUpdated={refreshItems}
++              requireCeoApproval={!isCEO}
+             />
+           )}
+           {(activeTab === 'customers' || activeTab === 'ledgers') && (
+diff --git a/src/app/api/auth/verify-ceo/route.ts b/src/app/api/auth/verify-ceo/route.ts
+new file mode 100644
+index 0000000..ecb0831
+--- /dev/null
++++ b/src/app/api/auth/verify-ceo/route.ts
+@@ -0,0 +1,110 @@
++import { NextRequest, NextResponse } from 'next/server';
++import { supabaseAdmin } from '@/lib/supabase';
++import { requireTenantAuth } from '@/lib/session';
++import { verifyPassword } from '@/lib/auth-passwords';
++import { checkRateLimit, resetRateLimit } from '@/lib/rate-limit';
++import { createCeoApprovalToken, isCeoLevelRole } from '@/lib/ceo-approval';
++
++/**
++ * POST { tenant_id, password }
++ * A logged-in staff member proves the CEO password. Any active CEO account of the same
++ * owner (this branch or a sister branch sharing owner_name / email) is accepted.
++ * Returns a 1-hour approval token bound to this staff user + tenant.
++ */
++export async function POST(req: NextRequest) {
++  try {
++    const { tenant_id, password } = await req.json();
++    if (!tenant_id || !password || typeof password !== 'string') {
++      return NextResponse.json({ success: false, error: 'CEO password required' }, { status: 400 });
++    }
++
++    const auth = await requireTenantAuth(req, tenant_id);
++    if (!auth.authorized) {
++      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
++    }
++    const session = auth.session;
++
++    // CEO / developer sessions never need approval.
++    if (isCeoLevelRole(session.role)) {
++      return NextResponse.json({ success: true, bypass: true, token: null, expires_at: null });
++    }
++    if (!session.tenantId) {
++      return NextResponse.json({ success: false, error: 'No tenant assigned to this session' }, { status: 403 });
++    }
++
++    const rateKey = `ceo-verify:${session.userId}`;
++    const limit = await checkRateLimit(rateKey, 5, 5 * 60 * 1000);
++    if (!limit.success) {
++      return NextResponse.json(
++        { success: false, error: `Too many attempts. Please wait ${limit.retryAfterSec} seconds.` },
++        { status: 429, headers: { 'Retry-After': String(limit.retryAfterSec) } }
++      );
++    }
++
++    // Collect this branch + sister branches of the same owner.
++    const { data: ownTenant } = await supabaseAdmin
++      .from('tenants')
++      .select('id, owner_name, email')
++      .eq('id', session.tenantId)
++      .maybeSingle();
++
++    const tenantIds = new Set<string>([session.tenantId]);
++    if (ownTenant?.owner_name) {
++      const { data } = await supabaseAdmin
++        .from('tenants').select('id').eq('is_active', true).eq('owner_name', ownTenant.owner_name);
++      (data || []).forEach((t: any) => tenantIds.add(t.id));
++    }
++    if (ownTenant?.email) {
++      const { data } = await supabaseAdmin
++        .from('tenants').select('id').eq('is_active', true).eq('email', ownTenant.email);
++      (data || []).forEach((t: any) => tenantIds.add(t.id));
++    }
++
++    const { data: ceos } = await supabaseAdmin
++      .from('app_users')
++      .select('id, username, password_hash')
++      .eq('role', 'ceo')
++      .eq('is_active', true)
++      .in('tenant_id', Array.from(tenantIds));
++
++    if (!ceos || ceos.length === 0) {
++      return NextResponse.json(
++        { success: false, error: 'No active CEO account found for this shop.' },
++        { status: 404 }
++      );
++    }
++
++    let approvedBy: string | null = null;
++    for (const ceo of ceos) {
++      if (await verifyPassword(password, ceo.password_hash)) {
++        approvedBy = ceo.username;
++        break;
++      }
++    }
++
++    if (!approvedBy) {
++      return NextResponse.json({ success: false, error: 'Incorrect CEO password.' }, { status: 401 });
++    }
++
++    await resetRateLimit(rateKey);
++    const { token, expiresAt } = await createCeoApprovalToken(session);
++
++    try {
++      await supabaseAdmin.from('audit_logs').insert({
++        tenant_id: session.tenantId,
++        user_name: session.username,
++        action: 'CEO Approval Granted',
++        action_type: 'update',
++        entity_type: 'security',
++        entity_id: session.userId,
++        details: { approved_by: approvedBy, valid_minutes: 60 },
++      });
++    } catch (logErr) {
++      console.warn('[CeoApproval] audit log write failed', logErr);
++    }
++
++    return NextResponse.json({ success: true, token, expires_at: expiresAt });
++  } catch (error: any) {
++    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
++  }
++}
+diff --git a/src/app/api/items/adjust/route.ts b/src/app/api/items/adjust/route.ts
+index 673aca0..001b312 100644
+--- a/src/app/api/items/adjust/route.ts
++++ b/src/app/api/items/adjust/route.ts
+@@ -1,6 +1,7 @@
+ import { NextRequest, NextResponse } from 'next/server';
+ import { supabaseAdmin } from '@/lib/supabase';
+ import { requireTenantAuth } from '@/lib/session';
++import { requireCeoApproval } from '@/lib/ceo-approval';
+ 
+ // POST: Batch signed stock adjustment (+/-). Each row is applied independently and atomically,
+ // so one failing row never blocks the others. Every row is audit-logged by stock_adjustment_atomic.
+@@ -23,6 +24,9 @@ export async function POST(req: NextRequest) {
+     if (!auth.authorized) {
+       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+     }
++    // CEO approval gate (staff must have entered the CEO password)
++    const ceoGate = await requireCeoApproval(req, auth.session);
++    if (!ceoGate.ok) return ceoGate.response;
+ 
+     const seen = new Set<string>();
+     const results: Array<{
+diff --git a/src/app/api/items/route.ts b/src/app/api/items/route.ts
+index 4eeb0f4..39e1983 100644
+--- a/src/app/api/items/route.ts
++++ b/src/app/api/items/route.ts
+@@ -1,6 +1,7 @@
+ import { NextRequest, NextResponse } from 'next/server';
+ import { supabaseAdmin } from '@/lib/supabase';
+ import { requireTenantAuth } from '@/lib/session';
++import { requireCeoApproval } from '@/lib/ceo-approval';
+ 
+ // Helper: match item unit string to config unit string safely without accidental fuzzy collisions
+ function matchUnitToConfig(itemUnitRaw: string | null | undefined, configUnitRaw: string | null | undefined): boolean {
+@@ -431,6 +432,9 @@ export async function PATCH(req: NextRequest) {
+       if (!auth.authorized) {
+         return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+       }
++      // CEO approval gate: bulk price edit requires the CEO password for staff
++      const ceoGateBatch = await requireCeoApproval(req, auth.session);
++      if (!ceoGateBatch.ok) return ceoGateBatch.response;
+ 
+       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+       const validItemIds = updates.map((u: any) => u.id).filter((id: string) => uuidRegex.test(id));
+@@ -629,6 +633,9 @@ export async function PATCH(req: NextRequest) {
+     if (!auth.authorized) {
+       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+     }
++    // CEO approval gate: editing a product requires the CEO password for staff
++    const ceoGateSingle = await requireCeoApproval(req, auth.session);
++    if (!ceoGateSingle.ok) return ceoGateSingle.response;
+ 
+     // Strip tenant_id from update payload to prevent cross-tenant hijacking or reassignment
+     delete (updateFields as any).tenant_id;
+diff --git a/src/app/api/receipt-templates/branch/route.ts b/src/app/api/receipt-templates/branch/route.ts
+index 6f2995b..90152e0 100644
+--- a/src/app/api/receipt-templates/branch/route.ts
++++ b/src/app/api/receipt-templates/branch/route.ts
+@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
+ import { supabaseAdmin } from '@/lib/supabase';
+ import { DEFAULT_TEMPLATE_JSON, ReceiptTemplate } from '@/types/receipt';
+ import { requireTenantAuth } from '@/lib/session';
++import { requireCeoApproval } from '@/lib/ceo-approval';
+ 
+ export const dynamic = 'force-dynamic';
+ export const revalidate = 0;
+@@ -91,6 +92,9 @@ export async function POST(req: NextRequest) {
+     if (!auth.authorized) {
+       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status, headers: NO_CACHE_HEADERS });
+     }
++    // CEO approval gate (staff must have entered the CEO password)
++    const ceoGate = await requireCeoApproval(req, auth.session);
++    if (!ceoGate.ok) return ceoGate.response;
+ 
+     // Fetch tenant name for clean template identification
+     const { data: tenantData } = await supabaseAdmin
+@@ -219,6 +223,9 @@ export async function DELETE(req: NextRequest) {
+     if (!auth.authorized) {
+       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status, headers: NO_CACHE_HEADERS });
+     }
++    // CEO approval gate (staff must have entered the CEO password)
++    const ceoGate = await requireCeoApproval(req, auth.session);
++    if (!ceoGate.ok) return ceoGate.response;
+ 
+     // Delete assignment for this tenant
+     const { error: delErr } = await supabaseAdmin
+diff --git a/src/app/api/special-receipt-brands/route.ts b/src/app/api/special-receipt-brands/route.ts
+index b186d5a..da10f8a 100644
+--- a/src/app/api/special-receipt-brands/route.ts
++++ b/src/app/api/special-receipt-brands/route.ts
+@@ -1,6 +1,7 @@
+ import { NextRequest, NextResponse } from 'next/server';
+ import { supabaseAdmin } from '@/lib/supabase';
+ import { requireTenantAuth } from '@/lib/session';
++import { requireCeoApproval } from '@/lib/ceo-approval';
+ 
+ async function verifySpecialReceiptPermission(session: any, tenantId: string) {
+   if (session.role === 'developer') {
+@@ -82,6 +83,9 @@ export async function POST(req: NextRequest) {
+     if (!auth.authorized) {
+       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+     }
++    // CEO approval gate (staff must have entered the CEO password)
++    const ceoGate = await requireCeoApproval(req, auth.session);
++    if (!ceoGate.ok) return ceoGate.response;
+ 
+     const perm = await verifySpecialReceiptPermission(auth.session, tenant_id);
+     if (!perm.authorized) {
+diff --git a/src/app/api/special-receipt-templates/route.ts b/src/app/api/special-receipt-templates/route.ts
+index a4b21ec..a1dc583 100644
+--- a/src/app/api/special-receipt-templates/route.ts
++++ b/src/app/api/special-receipt-templates/route.ts
+@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
+ import { supabaseAdmin } from '@/lib/supabase';
+ import { requireTenantAuth } from '@/lib/session';
+ import { BLANK_SPECIAL_TEMPLATE_JSON } from '@/types/receipt';
++import { requireCeoApproval } from '@/lib/ceo-approval';
+ 
+ /**
+  * Helper to authoritatively verify fresh database permission.
+@@ -104,6 +105,9 @@ export async function POST(req: NextRequest) {
+     if (!auth.authorized) {
+       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+     }
++    // CEO approval gate (staff must have entered the CEO password)
++    const ceoGate = await requireCeoApproval(req, auth.session);
++    if (!ceoGate.ok) return ceoGate.response;
+ 
+     // Fresh permission check
+     const perm = await verifySpecialReceiptPermission(auth.session, tenant_id);
+@@ -150,6 +154,9 @@ export async function DELETE(req: NextRequest) {
+     if (!auth.authorized) {
+       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+     }
++    // CEO approval gate (staff must have entered the CEO password)
++    const ceoGate = await requireCeoApproval(req, auth.session);
++    if (!ceoGate.ok) return ceoGate.response;
+ 
+     const perm = await verifySpecialReceiptPermission(auth.session, tenantId);
+     if (!perm.authorized) {
+diff --git a/src/components/AiInvoiceScan.tsx b/src/components/AiInvoiceScan.tsx
+index d51225e..6b1472e 100644
+--- a/src/components/AiInvoiceScan.tsx
++++ b/src/components/AiInvoiceScan.tsx
+@@ -2,6 +2,7 @@
+ 
+ import React, { useState, useRef, useId } from 'react';
+ import { Item, Supplier } from '@/types';
++import { ceoFetch } from '@/lib/ceoApprovalClient';
+ import {
+   Upload,
+   Camera,
+@@ -459,7 +460,7 @@ export default function AiInvoiceScan({
+         const item = finalItems[i];
+         if (item.matched_item_id && item.retail_price > 0) {
+           try {
+-            await fetch('/api/items', {
++            await ceoFetch('/api/items', {
+               method: 'PATCH',
+               headers: { 'Content-Type': 'application/json' },
+               body: JSON.stringify({
+diff --git a/src/components/BranchReceiptSettings.tsx b/src/components/BranchReceiptSettings.tsx
+index c5b4e2b..c796c68 100644
+--- a/src/components/BranchReceiptSettings.tsx
++++ b/src/components/BranchReceiptSettings.tsx
+@@ -39,6 +39,7 @@ import { DevReceiptPreview, ReceiptInvoiceData } from './dev-panel/DevReceiptPre
+ import { renderReceiptDocument, RenderReceiptData } from '@/utils/receiptRenderCore';
+ import { printViaIframe } from '@/utils/iframePrint';
+ import SpecialReceiptSettings from './SpecialReceiptSettings';
++import { ceoFetch } from '@/lib/ceoApprovalClient';
+ 
+ interface BranchReceiptSettingsProps {
+   tenantId: string;
+@@ -148,7 +149,7 @@ export default function BranchReceiptSettings({
+       setSaving(true);
+       setFeedback(null);
+ 
+-      const res = await fetch('/api/receipt-templates/branch', {
++      const res = await ceoFetch('/api/receipt-templates/branch', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({
+@@ -185,7 +186,7 @@ export default function BranchReceiptSettings({
+       setResetting(true);
+       setShowResetModal(false);
+ 
+-      const res = await fetch(`/api/receipt-templates/branch?tenant_id=${tenantId}`, {
++      const res = await ceoFetch(`/api/receipt-templates/branch?tenant_id=${tenantId}`, {
+         method: 'DELETE',
+       });
+       const data = await res.json();
+diff --git a/src/components/CeoPasswordModal.tsx b/src/components/CeoPasswordModal.tsx
+new file mode 100644
+index 0000000..7279555
+--- /dev/null
++++ b/src/components/CeoPasswordModal.tsx
+@@ -0,0 +1,137 @@
++'use client';
++
++import React, { useCallback, useRef, useState } from 'react';
++import { Lock, ShieldCheck, X } from 'lucide-react';
++import { getCeoApproval, setCeoApproval } from '@/lib/ceoApprovalClient';
++
++interface ModalProps {
++  tenantId: string;
++  onApproved: () => void;
++  onCancel: () => void;
++}
++
++export function CeoPasswordModal({ tenantId, onApproved, onCancel }: ModalProps) {
++  const [password, setPassword] = useState('');
++  const [error, setError] = useState<string | null>(null);
++  const [submitting, setSubmitting] = useState(false);
++
++  const submit = async (e?: React.FormEvent) => {
++    e?.preventDefault();
++    if (!password || submitting) return;
++    setSubmitting(true);
++    setError(null);
++    try {
++      const res = await fetch('/api/auth/verify-ceo', {
++        method: 'POST',
++        headers: { 'Content-Type': 'application/json' },
++        body: JSON.stringify({ tenant_id: tenantId, password }),
++      });
++      const data = await res.json();
++      if (!res.ok || !data.success) {
++        setError(data.error || 'Verification failed.');
++        setPassword('');
++        return;
++      }
++      if (data.token && data.expires_at) {
++        setCeoApproval(tenantId, data.token, data.expires_at);
++      }
++      onApproved();
++    } catch {
++      setError('Network error. Please try again.');
++    } finally {
++      setSubmitting(false);
++    }
++  };
++
++  return (
++    <div
++      style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
++      onKeyDown={(e) => { if (e.key === 'Escape') onCancel(); }}
++    >
++      <form
++        onSubmit={submit}
++        style={{ background: '#fff', borderRadius: '14px', width: '100%', maxWidth: '380px', boxShadow: '0 20px 50px rgba(0,0,0,0.3)', overflow: 'hidden' }}
++      >
++        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: '1px solid #E2E8F0', background: '#FFF7ED' }}>
++          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, color: '#9A3412', fontSize: '14px' }}>
++            <Lock style={{ width: 16, height: 16 }} />
++            CEO Approval Required
++          </div>
++          <button type="button" onClick={onCancel} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748B' }} aria-label="Close">
++            <X style={{ width: 16, height: 16 }} />
++          </button>
++        </div>
++        <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
++          <p style={{ margin: 0, fontSize: '12px', color: '#475569', lineHeight: 1.5 }}>
++            Ye kaam sirf CEO ki ijazat se ho sakta hai. CEO ka password likhein. Approval 1 ghante tak chalegi.
++          </p>
++          <input
++            autoFocus
++            type="password"
++            value={password}
++            onChange={(e) => setPassword(e.target.value)}
++            placeholder="CEO password"
++            autoComplete="off"
++            style={{ width: '100%', padding: '10px 12px', border: '1px solid #CBD5E1', borderRadius: '8px', fontSize: '14px', outline: 'none', boxSizing: 'border-box' }}
++          />
++          {error && (
++            <div style={{ fontSize: '12px', color: '#B91C1C', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '6px', padding: '6px 8px' }}>
++              {error}
++            </div>
++          )}
++          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
++            <button type="button" onClick={onCancel} style={{ padding: '8px 14px', border: '1px solid #CBD5E1', background: '#fff', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: '#334155' }}>
++              Cancel
++            </button>
++            <button
++              type="submit"
++              disabled={!password || submitting}
++              style={{ padding: '8px 14px', border: 'none', background: !password || submitting ? '#FDBA74' : '#EA580C', color: '#fff', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: !password || submitting ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
++            >
++              <ShieldCheck style={{ width: 14, height: 14 }} />
++              {submitting ? 'Checking...' : 'Approve'}
++            </button>
++          </div>
++        </div>
++      </form>
++    </div>
++  );
++}
++
++/**
++ * useCeoApproval — wrap a protected action: `ensure(() => doThing())`.
++ * Runs immediately when approval is not required (CEO role) or a valid approval is held,
++ * otherwise opens the CEO password modal first. Render `modal` once in the component tree.
++ */
++export function useCeoApproval(tenantId: string | undefined, required: boolean) {
++  const [open, setOpen] = useState(false);
++  const pending = useRef<(() => void) | null>(null);
++
++  const ensure = useCallback(
++    (action: () => void) => {
++      if (!required || !tenantId || getCeoApproval(tenantId)) {
++        action();
++        return;
++      }
++      pending.current = action;
++      setOpen(true);
++    },
++    [required, tenantId]
++  );
++
++  const modal =
++    open && tenantId ? (
++      <CeoPasswordModal
++        tenantId={tenantId}
++        onCancel={() => { pending.current = null; setOpen(false); }}
++        onApproved={() => {
++          const run = pending.current;
++          pending.current = null;
++          setOpen(false);
++          run?.();
++        }}
++      />
++    ) : null;
++
++  return { ensure, modal };
++}
+diff --git a/src/components/SpecialReceiptSettings.tsx b/src/components/SpecialReceiptSettings.tsx
+index 5ca746b..fa89989 100644
+--- a/src/components/SpecialReceiptSettings.tsx
++++ b/src/components/SpecialReceiptSettings.tsx
+@@ -31,6 +31,7 @@ import {
+ import { DevReceiptPreview, ReceiptInvoiceData } from './dev-panel/DevReceiptPreview';
+ import { printViaIframe } from '@/utils/iframePrint';
+ import { buildSpecialReceiptHtml } from '@/utils/receiptAdapters';
++import { ceoFetch } from '@/lib/ceoApprovalClient';
+ 
+ interface SpecialReceiptSettingsProps {
+   tenantId: string;
+@@ -195,7 +196,7 @@ export default function SpecialReceiptSettings({
+   const handleSaveTemplate = async () => {
+     setSaving(true);
+     try {
+-      const res = await fetch('/api/special-receipt-templates', {
++      const res = await ceoFetch('/api/special-receipt-templates', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({
+@@ -219,7 +220,7 @@ export default function SpecialReceiptSettings({
+     if (!confirm('Are you sure you want to reset the Special Receipt to the default blank canvas?')) return;
+     setSaving(true);
+     try {
+-      const res = await fetch(`/api/special-receipt-templates?tenant_id=${tenantId}`, {
++      const res = await ceoFetch(`/api/special-receipt-templates?tenant_id=${tenantId}`, {
+         method: 'DELETE',
+       });
+       const data = await res.json();
+@@ -269,7 +270,7 @@ export default function SpecialReceiptSettings({
+   const handleSaveBrands = async () => {
+     setSavingBrands(true);
+     try {
+-      const res = await fetch('/api/special-receipt-brands', {
++      const res = await ceoFetch('/api/special-receipt-brands', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({
+diff --git a/src/components/StockAdjustmentGrid.tsx b/src/components/StockAdjustmentGrid.tsx
+index 848f6e7..3e08f55 100644
+--- a/src/components/StockAdjustmentGrid.tsx
++++ b/src/components/StockAdjustmentGrid.tsx
+@@ -2,6 +2,7 @@
+ 
+ import React, { useEffect, useMemo, useRef, useState } from 'react';
+ import type { Item } from '@/types';
++import { ceoFetch } from '@/lib/ceoApprovalClient';
+ 
+ interface Props {
+   items: Item[];
+@@ -156,7 +157,7 @@ export default function StockAdjustmentGrid({ items, tenantId, staffName, onClos
+ 
+     setSaving(true);
+     try {
+-      const res = await fetch('/api/items/adjust', {
++      const res = await ceoFetch('/api/items/adjust', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({
+diff --git a/src/components/StockInventory.tsx b/src/components/StockInventory.tsx
+index 279edd5..03957e0 100644
+--- a/src/components/StockInventory.tsx
++++ b/src/components/StockInventory.tsx
+@@ -29,6 +29,8 @@ import {
+ import AiInvoiceScan from './AiInvoiceScan';
+ import CompanyOrderSheetModal from './inventory/CompanyOrderSheetModal';
+ import { exportToXlsx } from '@/utils/excelExporter';
++import { useCeoApproval } from '@/components/CeoPasswordModal';
++import { ceoFetch } from '@/lib/ceoApprovalClient';
+ import { printViaIframe } from '@/utils/iframePrint';
+ import {
+   getBulkDraft,
+@@ -46,6 +48,8 @@ interface Props {
+   tenantId?: string;
+   tenantName?: string;
+   onStockUpdated?: () => void;
++  /** Staff must enter the CEO password before stock adjustment, bulk price edit and product edit. */
++  requireCeoApproval?: boolean;
+ }
+ 
+ const DEFAULT_CATEGORIES = [
+@@ -76,7 +80,9 @@ export default function StockInventory({
+   tenantId,
+   tenantName = 'PyntFlow Store',
+   onStockUpdated,
++  requireCeoApproval = false,
+ }: Props) {
++  const { ensure: ensureCeoApproval, modal: ceoApprovalModal } = useCeoApproval(tenantId, requireCeoApproval);
+   // Filters state (Matching painterp InventoryView.tsx)
+   const [selectedCategory, setSelectedCategory] = useState<string>('All');
+ 
+@@ -688,7 +694,7 @@ export default function StockInventory({
+         return payloadItem;
+       });
+ 
+-      const res = await fetch('/api/items', {
++      const res = await ceoFetch('/api/items', {
+         method: 'PATCH',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({
+@@ -1241,7 +1247,7 @@ export default function StockInventory({
+     try {
+       if (editingItemId) {
+         // Update existing item
+-        const res = await fetch('/api/items', {
++        const res = await ceoFetch('/api/items', {
+           method: 'PATCH',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ id: editingItemId, ...payload }),
+@@ -1411,6 +1417,7 @@ export default function StockInventory({
+ 
+   return (
+     <section className="inv-screen" style={{ width: '100%', overflowX: 'hidden' }}>
++      {ceoApprovalModal}
+       {/* Toast Notification */}
+       {notification && (
+         <div style={{ position: 'fixed', top: '16px', right: '16px', zIndex: 60, background: '#0F172A', color: '#ffffff', padding: '10px 16px', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', border: '1px solid #334155', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 600 }}>
+@@ -1674,7 +1681,7 @@ export default function StockInventory({
+ 
+               <button
+                 type="button"
+-                onClick={() => setShowReceiveModal(true)}
++                onClick={() => ensureCeoApproval(() => setShowReceiveModal(true))}
+                 className="inv-btn-secondary"
+                 title="Audit stock count correction or damage adjustment"
+               >
+@@ -1714,7 +1721,7 @@ export default function StockInventory({
+ 
+               <button
+                 type="button"
+-                onClick={openBulkPriceModal}
++                onClick={() => ensureCeoApproval(openBulkPriceModal)}
+                 className="inv-btn-secondary"
+                 title="Bulk update cost and retail prices with concurrency safety"
+                 style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#ECFDF5', borderColor: '#A7F3D0', color: '#047857', fontWeight: 600 }}
+@@ -1913,7 +1920,7 @@ export default function StockInventory({
+                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                             <button
+                               type="button"
+-                              onClick={() => handleOpenEditProduct(prod)}
++                              onClick={() => ensureCeoApproval(() => handleOpenEditProduct(prod))}
+                               style={{ padding: '5px', color: '#64748B', background: 'none', border: 'none', cursor: 'pointer', borderRadius: '4px' }}
+                               title="Edit Product Details"
+                             >
+diff --git a/src/lib/ceo-approval.ts b/src/lib/ceo-approval.ts
+new file mode 100644
+index 0000000..97e88cd
+--- /dev/null
++++ b/src/lib/ceo-approval.ts
+@@ -0,0 +1,86 @@
++import { SignJWT, jwtVerify } from 'jose';
++import { NextRequest, NextResponse } from 'next/server';
++import { getJwtSecret } from './jwt-secrets';
++import type { UserSession } from './session';
++
++/**
++ * CEO approval — a short-lived, tenant- and user-bound token that a staff session
++ * receives after entering a CEO password. Protected routes (stock adjustment, price
++ * edits, product edits, receipt settings) require it for staff roles.
++ *
++ * The token is signed with a key DERIVED from the session secret so it can never be
++ * accepted as a normal session cookie, and carries its own audience claim.
++ */
++export const CEO_APPROVAL_HEADER = 'x-ceo-approval';
++export const CEO_APPROVAL_TTL_SEC = 60 * 60; // 1 hour
++const CEO_APPROVAL_AUDIENCE = 'pyntflow-ceo-approval';
++
++function getApprovalKey(): Uint8Array {
++  const base = getJwtSecret();
++  const suffix = new TextEncoder().encode(':ceo-approval:v1');
++  const key = new Uint8Array(base.length + suffix.length);
++  key.set(base, 0);
++  key.set(suffix, base.length);
++  return key;
++}
++
++/** Roles that already are the CEO (or above) and never need the approval token. */
++export function isCeoLevelRole(role?: string | null): boolean {
++  return role === 'ceo' || role === 'developer';
++}
++
++export async function createCeoApprovalToken(
++  session: UserSession
++): Promise<{ token: string; expiresAt: number }> {
++  const expiresAt = Date.now() + CEO_APPROVAL_TTL_SEC * 1000;
++  const token = await new SignJWT({
++    userId: session.userId,
++    tenantId: session.tenantId,
++  })
++    .setProtectedHeader({ alg: 'HS256' })
++    .setAudience(CEO_APPROVAL_AUDIENCE)
++    .setIssuedAt()
++    .setExpirationTime(`${CEO_APPROVAL_TTL_SEC}s`)
++    .sign(getApprovalKey());
++  return { token, expiresAt };
++}
++
++export async function hasValidCeoApproval(
++  req: NextRequest,
++  session: UserSession
++): Promise<boolean> {
++  if (isCeoLevelRole(session.role)) return true;
++  const token = req.headers.get(CEO_APPROVAL_HEADER);
++  if (!token) return false;
++  try {
++    const { payload } = await jwtVerify(token, getApprovalKey(), {
++      audience: CEO_APPROVAL_AUDIENCE,
++    });
++    return payload.userId === session.userId && payload.tenantId === session.tenantId;
++  } catch {
++    return false;
++  }
++}
++
++export type CeoGateResult = { ok: true } | { ok: false; response: NextResponse };
++
++/**
++ * Call AFTER requireTenantAuth succeeded. Staff sessions must present a valid approval token.
++ */
++export async function requireCeoApproval(
++  req: NextRequest,
++  session: UserSession
++): Promise<CeoGateResult> {
++  if (await hasValidCeoApproval(req, session)) return { ok: true };
++  return {
++    ok: false,
++    response: NextResponse.json(
++      {
++        success: false,
++        error: 'CEO approval required. Please enter the CEO password.',
++        code: 'CEO_APPROVAL_REQUIRED',
++      },
++      { status: 403 }
++    ),
++  };
++}
+diff --git a/src/lib/ceoApprovalClient.ts b/src/lib/ceoApprovalClient.ts
+new file mode 100644
+index 0000000..ddabc03
+--- /dev/null
++++ b/src/lib/ceoApprovalClient.ts
+@@ -0,0 +1,79 @@
++/**
++ * Client-side storage + fetch helper for the CEO approval token (1 hour, per browser tab).
++ * The token only unlocks the protected actions for the staff user that earned it;
++ * the server re-validates it on every protected request.
++ */
++const STORAGE_KEY = 'pyntflow_ceo_approval_v1';
++export const CEO_APPROVAL_HEADER = 'x-ceo-approval';
++
++interface StoredApproval {
++  token: string;
++  expiresAt: number;
++  tenantId: string;
++}
++
++let memoryApproval: StoredApproval | null = null;
++
++function readStored(): StoredApproval | null {
++  if (memoryApproval) return memoryApproval;
++  try {
++    if (typeof window === 'undefined') return null;
++    const raw = window.sessionStorage.getItem(STORAGE_KEY);
++    if (!raw) return null;
++    const parsed = JSON.parse(raw) as StoredApproval;
++    if (parsed && parsed.token && parsed.expiresAt) {
++      memoryApproval = parsed;
++      return parsed;
++    }
++  } catch {
++    // storage unavailable — fall through
++  }
++  return null;
++}
++
++export function getCeoApproval(tenantId?: string | null): StoredApproval | null {
++  const a = readStored();
++  if (!a) return null;
++  // 30s safety margin so a token never expires mid-request
++  if (a.expiresAt - 30_000 <= Date.now()) {
++    clearCeoApproval();
++    return null;
++  }
++  if (tenantId && a.tenantId !== tenantId) return null;
++  return a;
++}
++
++export function setCeoApproval(tenantId: string, token: string, expiresAt: number): void {
++  memoryApproval = { token, expiresAt, tenantId };
++  try {
++    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(memoryApproval));
++  } catch {
++    // ignore storage failures; memory copy still works for this page load
++  }
++}
++
++export function clearCeoApproval(): void {
++  memoryApproval = null;
++  try {
++    window.sessionStorage.removeItem(STORAGE_KEY);
++  } catch {
++    // ignore
++  }
++}
++
++/** fetch() that attaches the CEO approval header when one is held; clears it if the server rejects it. */
++export async function ceoFetch(input: string, init: RequestInit = {}, tenantId?: string | null): Promise<Response> {
++  const approval = getCeoApproval(tenantId);
++  const headers = new Headers(init.headers || {});
++  if (approval) headers.set(CEO_APPROVAL_HEADER, approval.token);
++  const res = await fetch(input, { ...init, headers });
++  if (res.status === 403) {
++    try {
++      const body = await res.clone().json();
++      if (body?.code === 'CEO_APPROVAL_REQUIRED') clearCeoApproval();
++    } catch {
++      // not JSON
++    }
++  }
++  return res;
++}
+-- 
+2.43.0
+
+
+From 4a075cbc586ec38a559c81bd249b3c6092a6266a Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Sat, 24 Oct 2026 22:13:48 +0000
+Subject: [PATCH 2/7] feat(pos): lock sale rates (read-only UI + server-side
+ validation, returns exempt)
+
+---
+ src/app/api/invoices/route.ts         |  22 +++++
+ src/app/api/invoices/special/route.ts |   9 ++
+ src/components/PosBilling.tsx         |  33 ++++++--
+ src/lib/rate-lock.ts                  | 114 ++++++++++++++++++++++++++
+ 4 files changed, 172 insertions(+), 6 deletions(-)
+ create mode 100644 src/lib/rate-lock.ts
+
+diff --git a/src/app/api/invoices/route.ts b/src/app/api/invoices/route.ts
+index 2f7c6aa..1643dbd 100644
+--- a/src/app/api/invoices/route.ts
++++ b/src/app/api/invoices/route.ts
+@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
+ import { supabaseAdmin } from '@/lib/supabase';
+ import { requireTenantAuth } from '@/lib/session';
+ import { sanitizePostgRESTLike } from '@/lib/utils';
++import { validateLockedRates } from '@/lib/rate-lock';
+ 
+ // GET: Fetch invoices for a tenant / branch or shift with date filtering and search
+ export async function GET(req: NextRequest) {
+@@ -217,6 +218,14 @@ export async function POST(req: NextRequest) {
+       }
+     }
+ 
++    // 0.05 Rate lock: sale rates must match the catalog retail price (returns exempt)
++    if (auth.session.role !== 'developer') {
++      const rateLockError = await validateLockedRates(tenant_id, items, invoice_type);
++      if (rateLockError) {
++        return NextResponse.json({ success: false, error: rateLockError, code: 'RATE_LOCKED' }, { status: 400 });
++      }
++    }
++
+     // 0.1 Backend Safeguard: Block credit sales for walk-in (no account) customers
+     if (!client_id && parsedDue > 0) {
+       return NextResponse.json(
+@@ -455,6 +464,19 @@ export async function PATCH(req: NextRequest) {
+       );
+     }
+ 
++    // Rate lock: lines must match catalog retail price, or the rate the line already had on this invoice
++    if (auth.session.role !== 'developer') {
++      const { data: existingLineRows } = await supabaseAdmin
++        .from('invoice_items')
++        .select('item_id, item_code, unit_price')
++        .eq('invoice_id', id);
++      const patchInvoiceType = (existingInv as any)?.invoice_type || body.invoice_type || 'sales';
++      const rateLockError = await validateLockedRates(tenant_id, items, patchInvoiceType, existingLineRows || []);
++      if (rateLockError) {
++        return NextResponse.json({ success: false, error: rateLockError, code: 'RATE_LOCKED' }, { status: 400 });
++      }
++    }
++
+     for (const it of items) {
+       const lineQty = Number(it.qty) || 0;
+       const linePrice = Number(it.unit_price ?? it.rate ?? it.price ?? 0);
+diff --git a/src/app/api/invoices/special/route.ts b/src/app/api/invoices/special/route.ts
+index fcb43c7..7b0bf20 100644
+--- a/src/app/api/invoices/special/route.ts
++++ b/src/app/api/invoices/special/route.ts
+@@ -1,6 +1,7 @@
+ import { NextRequest, NextResponse } from 'next/server';
+ import { supabaseAdmin } from '@/lib/supabase';
+ import { requireTenantAuth } from '@/lib/session';
++import { validateLockedRates } from '@/lib/rate-lock';
+ 
+ export async function POST(req: NextRequest) {
+   try {
+@@ -42,6 +43,14 @@ export async function POST(req: NextRequest) {
+       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+     }
+ 
++    // Rate lock: printed rate on a special sale is the catalog retail price
++    if (auth.session.role !== 'developer') {
++      const rateLockError = await validateLockedRates(tenant_id, items, 'sales');
++      if (rateLockError) {
++        return NextResponse.json({ success: false, error: rateLockError, code: 'RATE_LOCKED' }, { status: 400 });
++      }
++    }
++
+     // 2. Role & Database Permission Verification
+     let printedBy = 'Staff';
+     let effectiveUserId: string | null = null;
+diff --git a/src/components/PosBilling.tsx b/src/components/PosBilling.tsx
+index 5af0dcf..e08263e 100644
+--- a/src/components/PosBilling.tsx
++++ b/src/components/PosBilling.tsx
+@@ -519,8 +519,20 @@ export default function PosBilling({
+           packSize: it.packSize || it.pack_size || 'Can',
+           qty: Number(it.qty) || 1,
+           unit: it.unit || 'PCS',
+-          rate: Number(it.rate || it.unit_price) || 0,
+-          originalRate: Number(it.originalRate || it.rate || it.unit_price) || 0,
++          rate: (() => {
++            const heldIsReturn = (restoringHeldOrder.invoice_type || restoringHeldOrder.invoiceType) === 'return';
++            const stored = Number(it.rate || it.unit_price) || 0;
++            if (heldIsReturn || !live) return stored;
++            // Rate lock: held bills re-price to the current catalog rate (token removal keeps its deduction)
++            const base = Number(live.retail_price) || 0;
++            const tokenVal = it.hasToken ?? live.has_token ? (Number(it.tokenValue ?? live.token_value) || 0) : 0;
++            return (it.tokenAction === 'remove') ? Math.max(0, base - tokenVal) : base;
++          })(),
++          originalRate: (() => {
++            const heldIsReturn = (restoringHeldOrder.invoice_type || restoringHeldOrder.invoiceType) === 'return';
++            if (heldIsReturn || !live) return Number(it.originalRate || it.rate || it.unit_price) || 0;
++            return Number(live.retail_price) || 0;
++          })(),
+           discountPercent: Number(it.discountPercent || it.discount_percent) || 0,
+           specialRate: Number(it.specialRate) > 0 ? Number(it.specialRate) : undefined,
+           hasToken: it.hasToken ?? live?.has_token ?? false,
+@@ -682,7 +694,8 @@ export default function PosBilling({
+     }
+ 
+     // Check if registered customer previously bought this product before adding
+-    if (selectedClient && !skipCheck && overrideRate === undefined) {
++    // Rate lock: previous/current rate choice only exists for return bills; sales always use the catalog rate
++    if (invoiceType === 'return' && selectedClient && !skipCheck && overrideRate === undefined) {
+       const prodCodeKey = (prod.code || '').trim().toLowerCase();
+       const prodNameKey = (prod.name || '').trim().toLowerCase();
+       const lastPurch =
+@@ -715,7 +728,10 @@ export default function PosBilling({
+     const hasToken = Boolean(prod.has_token && (Number(prod.token_value) || 0) > 0);
+     const tokenVal = hasToken ? Number(prod.token_value) || 0 : 0;
+     // Use overrideRate if provided; fall back to inputRate (if set by keyboard chain) then retail_price
+-    const itemRate = overrideRate !== undefined ? overrideRate : (inputRate > 0 ? inputRate : (prod.retail_price || 0));
++    const ratesLocked = invoiceType !== 'return';
++    const itemRate = ratesLocked
++      ? (prod.retail_price || 0)
++      : (overrideRate !== undefined ? overrideRate : (inputRate > 0 ? inputRate : (prod.retail_price || 0)));
+     const itemDiscount = overrideDiscount !== undefined ? overrideDiscount : (inputDiscount > 0 ? inputDiscount : 0);
+     const itemSpecialRate = canUseSpecialReceipt && inputSpecialRate > 0 ? inputSpecialRate : undefined;
+     if (itemSpecialRate !== undefined && itemSpecialRate > itemRate) {
+@@ -727,7 +743,7 @@ export default function PosBilling({
+       setLineItems((prev) =>
+         prev.map((li, idx) =>
+           idx === existingIndex
+-            ? { ...li, qty: li.qty + requestedQty, rate: overrideRate !== undefined ? overrideRate : (inputRate > 0 ? inputRate : li.rate), discountPercent: itemDiscount, specialRate: itemSpecialRate }
++            ? { ...li, qty: li.qty + requestedQty, rate: ratesLocked ? li.rate : (overrideRate !== undefined ? overrideRate : (inputRate > 0 ? inputRate : li.rate)), discountPercent: itemDiscount, specialRate: itemSpecialRate }
+             : li
+         )
+       );
+@@ -1868,7 +1884,9 @@ export default function PosBilling({
+                 step="any"
+                 value={inputRate || ''}
+                 placeholder="0"
+-                onChange={(e) => setInputRate(Number(e.target.value) || 0)}
++                readOnly={invoiceType !== 'return'}
++                title={invoiceType !== 'return' ? 'Rate locked — sirf CEO Edit Product / Bulk Edit Prices se badal sakta hai' : undefined}
++                onChange={(e) => { if (invoiceType === 'return') setInputRate(Number(e.target.value) || 0); }}
+                 onKeyDown={(e) => {
+                   if (e.key === 'Enter') { e.preventDefault(); (specialFieldEnabled ? specialRateInputRef : discInputRef).current?.focus(); }
+                   else if (e.key === 'Escape') { searchInputRef.current?.focus(); }
+@@ -2180,7 +2198,10 @@ export default function PosBilling({
+                               step="any"
+                               value={item.rate === 0 ? '' : item.rate}
+                               placeholder="0.00"
++                              readOnly={invoiceType !== 'return'}
++                              title={invoiceType !== 'return' ? 'Rate locked' : undefined}
+                               onChange={(e) => {
++                                if (invoiceType !== 'return') return;
+                                 const val = Math.max(0, parseFloat(e.target.value) || 0);
+                                 setLineItems((prev) =>
+                                   prev.map((li) => li.id === item.id ? { ...li, rate: val, specialRate: li.specialRate && li.specialRate > val ? undefined : li.specialRate } : li)
+diff --git a/src/lib/rate-lock.ts b/src/lib/rate-lock.ts
+new file mode 100644
+index 0000000..c393b22
+--- /dev/null
++++ b/src/lib/rate-lock.ts
+@@ -0,0 +1,114 @@
++import { supabaseAdmin } from '@/lib/supabase';
++
++/**
++ * POS rate lock (server side).
++ * A sale line's unit price must equal the item's current retail price. The only other
++ * accepted values are:
++ *   - retail price minus the item's token value (cart "remove token" action), and
++ *   - on invoice edit, the unit price that line already had on the saved invoice
++ *     (so older invoices stay editable even if the catalog price changed since).
++ * Return invoices are exempt: a return refunds what the customer originally paid.
++ */
++const TOLERANCE = 0.011;
++
++interface LockLine {
++  item_id?: string | null;
++  item?: { id?: string | null } | null;
++  item_code?: string | null;
++  code?: string | null;
++  item_name?: string | null;
++  productName?: string | null;
++  name?: string | null;
++  unit_price?: number | string | null;
++  rate?: number | string | null;
++  price?: number | string | null;
++}
++
++export interface ExistingInvoiceLine {
++  item_id?: string | null;
++  item_code?: string | null;
++  unit_price: number | string | null;
++}
++
++export function isRateLockedInvoiceType(invoiceType?: string | null): boolean {
++  const t = String(invoiceType || 'sales').toLowerCase();
++  return t !== 'return' && t !== 'purchase_return' && t !== 'sales_return';
++}
++
++export async function validateLockedRates(
++  tenantId: string,
++  lines: LockLine[],
++  invoiceType?: string | null,
++  existingLines: ExistingInvoiceLine[] = []
++): Promise<string | null> {
++  if (!isRateLockedInvoiceType(invoiceType)) return null;
++  if (!Array.isArray(lines) || lines.length === 0) return null;
++
++  const ids = Array.from(
++    new Set(lines.map((l) => l.item_id || l.item?.id).filter((v): v is string => Boolean(v)))
++  );
++  const codes = Array.from(
++    new Set(
++      lines
++        .filter((l) => !(l.item_id || l.item?.id))
++        .map((l) => String(l.item_code || l.code || '').trim().toUpperCase())
++        .filter(Boolean)
++    )
++  );
++
++  const byId = new Map<string, { retail_price: number; token_value: number; name: string }>();
++  const byCode = new Map<string, { retail_price: number; token_value: number; name: string }>();
++
++  if (ids.length > 0) {
++    const { data } = await supabaseAdmin
++      .from('items')
++      .select('id, code, name, retail_price, token_value')
++      .eq('tenant_id', tenantId)
++      .in('id', ids);
++    (data || []).forEach((r: any) => {
++      byId.set(r.id, {
++        retail_price: Number(r.retail_price) || 0,
++        token_value: Number(r.token_value) || 0,
++        name: r.name,
++      });
++    });
++  }
++  if (codes.length > 0) {
++    const { data } = await supabaseAdmin
++      .from('items')
++      .select('id, code, name, retail_price, token_value')
++      .eq('tenant_id', tenantId)
++      .in('code', codes);
++    (data || []).forEach((r: any) => {
++      byCode.set(String(r.code).toUpperCase(), {
++        retail_price: Number(r.retail_price) || 0,
++        token_value: Number(r.token_value) || 0,
++        name: r.name,
++      });
++    });
++  }
++
++  for (const line of lines) {
++    const lineId = line.item_id || line.item?.id || null;
++    const lineCode = String(line.item_code || line.code || '').trim().toUpperCase();
++    const catalog = (lineId && byId.get(lineId)) || (lineCode && byCode.get(lineCode)) || null;
++    if (!catalog) continue; // unknown items are rejected by the atomic RPCs themselves
++
++    const price = Number(line.unit_price ?? line.rate ?? line.price ?? 0);
++    const allowed: number[] = [catalog.retail_price];
++    if (catalog.token_value > 0) allowed.push(Math.max(0, catalog.retail_price - catalog.token_value));
++
++    existingLines.forEach((e) => {
++      const sameItem =
++        (lineId && e.item_id && e.item_id === lineId) ||
++        (lineCode && e.item_code && String(e.item_code).trim().toUpperCase() === lineCode);
++      if (sameItem) allowed.push(Number(e.unit_price) || 0);
++    });
++
++    if (!allowed.some((a) => Math.abs(a - price) <= TOLERANCE)) {
++      const label = catalog.name || line.item_name || line.productName || line.name || 'Product';
++      return `Rate locked: "${label}" ka rate Rs. ${price.toLocaleString()} allowed nahi. Current rate Rs. ${catalog.retail_price.toLocaleString()} hai (rate sirf CEO Edit Product / Bulk Edit Prices se badal sakta hai).`;
++    }
++  }
++  return null;
++}
+-- 
+2.43.0
+
+
+From af9eae8b747b50476464e4b2aa23c4b31fbd703d Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Sun, 25 Oct 2026 10:10:19 +0000
+Subject: [PATCH 3/7] feat(pos): mandatory walk-in name stored with (WI) suffix
+
+---
+ src/app/api/invoices/route.ts         |  9 ++++
+ src/app/api/invoices/special/route.ts |  9 ++++
+ src/components/PosBilling.tsx         | 67 +++++++++++++++++++++------
+ src/utils/customerName.ts             | 24 ++++++++++
+ 4 files changed, 94 insertions(+), 15 deletions(-)
+ create mode 100644 src/utils/customerName.ts
+
+diff --git a/src/app/api/invoices/route.ts b/src/app/api/invoices/route.ts
+index 1643dbd..3f685bc 100644
+--- a/src/app/api/invoices/route.ts
++++ b/src/app/api/invoices/route.ts
+@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase';
+ import { requireTenantAuth } from '@/lib/session';
+ import { sanitizePostgRESTLike } from '@/lib/utils';
+ import { validateLockedRates } from '@/lib/rate-lock';
++import { isPlaceholderWalkInName } from '@/utils/customerName';
+ 
+ // GET: Fetch invoices for a tenant / branch or shift with date filtering and search
+ export async function GET(req: NextRequest) {
+@@ -218,6 +219,14 @@ export async function POST(req: NextRequest) {
+       }
+     }
+ 
++    // Walk-in rule: a sale without a customer account must carry a real walk-in name
++    if (invoice_type !== 'return' && !client_id && isPlaceholderWalkInName(client_name)) {
++      return NextResponse.json(
++        { success: false, error: 'Walk-in customer ka naam zaroori hai. Customer select karein ya naam likhein.', code: 'WALK_IN_NAME_REQUIRED' },
++        { status: 400 }
++      );
++    }
++
+     // 0.05 Rate lock: sale rates must match the catalog retail price (returns exempt)
+     if (auth.session.role !== 'developer') {
+       const rateLockError = await validateLockedRates(tenant_id, items, invoice_type);
+diff --git a/src/app/api/invoices/special/route.ts b/src/app/api/invoices/special/route.ts
+index 7b0bf20..8aba466 100644
+--- a/src/app/api/invoices/special/route.ts
++++ b/src/app/api/invoices/special/route.ts
+@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
+ import { supabaseAdmin } from '@/lib/supabase';
+ import { requireTenantAuth } from '@/lib/session';
+ import { validateLockedRates } from '@/lib/rate-lock';
++import { isPlaceholderWalkInName } from '@/utils/customerName';
+ 
+ export async function POST(req: NextRequest) {
+   try {
+@@ -43,6 +44,14 @@ export async function POST(req: NextRequest) {
+       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+     }
+ 
++    // Walk-in rule: a sale without a customer account must carry a real walk-in name
++    if (!client_id && isPlaceholderWalkInName(client_name)) {
++      return NextResponse.json(
++        { success: false, error: 'Walk-in customer ka naam zaroori hai. Customer select karein ya naam likhein.', code: 'WALK_IN_NAME_REQUIRED' },
++        { status: 400 }
++      );
++    }
++
+     // Rate lock: printed rate on a special sale is the catalog retail price
+     if (auth.session.role !== 'developer') {
+       const rateLockError = await validateLockedRates(tenant_id, items, 'sales');
+diff --git a/src/components/PosBilling.tsx b/src/components/PosBilling.tsx
+index e08263e..d30df31 100644
+--- a/src/components/PosBilling.tsx
++++ b/src/components/PosBilling.tsx
+@@ -26,6 +26,7 @@ import {
+   Coins,
+ } from 'lucide-react';
+ import TokenRedemption from './TokenRedemption';
++import { formatWalkInName, stripWalkInSuffix, isPlaceholderWalkInName } from '@/utils/customerName';
+ 
+ interface Props {
+   items: Item[];
+@@ -136,7 +137,11 @@ export default function PosBilling({
+   // Customer & details
+   const [clients, setClients] = useState<Client[]>([]);
+   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+-  const [customerSearch, setCustomerSearch] = useState<string>('Walk-in Customer');
++  const customerInputRef = useRef<HTMLInputElement>(null);
++  const skipCustomerModalOnFocus = useRef(false);
++  const [customerSearch, setCustomerSearch] = useState<string>('');
++  // Walk-in rule: until a registered customer is picked, a real walk-in name must be typed
++  const needsCustomerName = !selectedClient && (isPlaceholderWalkInName(customerSearch) || customerSearch.trim().length < 2);
+   const [showCustomerModal, setShowCustomerModal] = useState<boolean>(false);
+   const [clientSearchQuery, setClientSearchQuery] = useState<string>('');
+   const [newClientName, setNewClientName] = useState<string>('');
+@@ -564,7 +569,7 @@ export default function PosBilling({
+       }
+ 
+       if (restoringHeldOrder.client_name) {
+-        setCustomerSearch(restoringHeldOrder.client_name);
++        setCustomerSearch(stripWalkInSuffix(restoringHeldOrder.client_name));
+       }
+       if (restoringHeldOrder.client_id && clients.length > 0) {
+         const found = clients.find((c) => c.id === restoringHeldOrder.client_id);
+@@ -608,7 +613,7 @@ export default function PosBilling({
+         setInvoiceDate(editingInvoice.date.split('T')[0]);
+       }
+       if (editingInvoice.client_name) {
+-        setCustomerSearch(editingInvoice.client_name);
++        setCustomerSearch(stripWalkInSuffix(editingInvoice.client_name));
+       }
+       if (editingInvoice.client_id && clients.length > 0) {
+         const found = clients.find((c) => c.id === editingInvoice.client_id);
+@@ -684,7 +689,16 @@ export default function PosBilling({
+   };
+ 
+   // Add Item to table with stock validation and immutable state updates
++  // Walk-in rule: nothing proceeds until a customer is picked or a walk-in name is typed
++  const blockForCustomerName = (): boolean => {
++    if (!needsCustomerName) return false;
++    showFeedback('Pehle customer select karein ya walk-in customer ka naam likhein.');
++    customerInputRef.current?.focus();
++    return true;
++  };
++
+   const handleAddItem = (specificItem?: Item, overrideRate?: number, skipCheck: boolean = false, overrideDiscount?: number) => {
++    if (blockForCustomerName()) return;
+     const prod = specificItem || selectedProduct;
+     if (!prod) {
+       if (filteredCatalog.length === 1) {
+@@ -821,9 +835,10 @@ export default function PosBilling({
+       showFeedback('Cart is empty. Add products before placing on hold.');
+       return;
+     }
++    if (blockForCustomerName()) return;
+ 
+     const holdNo = `HOLD-${Date.now().toString().slice(-4)}`;
+-    const customerDisplayName = selectedClient?.name || customerSearch || 'Walk-in Customer';
++    const customerDisplayName = selectedClient?.name || formatWalkInName(customerSearch);
+ 
+     try {
+       const res = await fetch('/api/held-invoices', {
+@@ -899,7 +914,7 @@ export default function PosBilling({
+ 
+     setLineItems(restoredItems);
+     setSelectedClient(order.selectedClient);
+-    setCustomerSearch(order.customerName);
++    setCustomerSearch(stripWalkInSuffix(order.customerName));
+     setInvoiceType(order.invoiceType);
+     setInvoiceDiscount(Number(order.discount) || 0);
+     setDeliveryCharge(Number(order.delivery_charge) || 0);
+@@ -951,6 +966,9 @@ export default function PosBilling({
+       showFeedback('Please add at least one item before checkout.');
+       return;
+     }
++    if (blockForCustomerName()) {
++      return;
++    }
+     if (lineItems.some((li) => li.specialRate && li.specialRate > 0)) {
+       showFeedback('Cart mein Special Rate lagi hui hai. Is sale ke liye "Special Save & Print (F6)" use karein, ya Special Rate hata dein.');
+       return;
+@@ -998,7 +1016,7 @@ export default function PosBilling({
+       }
+     }
+ 
+-    const customerDisplayName = selectedClient ? selectedClient.name : customerSearch || 'Walk-in Customer';
++    const customerDisplayName = selectedClient ? selectedClient.name : formatWalkInName(customerSearch);
+ 
+     // Determine clean payment_type
+     let determinedPaymentType = 'cash';
+@@ -1177,7 +1195,7 @@ export default function PosBilling({
+         // Reset state for next customer
+         setLineItems([]);
+         setSelectedClient(null);
+-        setCustomerSearch('Walk-in Customer');
++        setCustomerSearch('');
+         setCashPayment(0);
+         setIsCashManuallyEdited(false);
+         setCardPayment(0);
+@@ -1213,6 +1231,7 @@ export default function PosBilling({
+   // Receipt prints the cart `rate` (original); customer is charged the Special Rate (per unit) minus Disc %.
+   const handleSpecialDirect = async () => {
+     if (!canUseSpecialReceipt || submitting) return;
++    if (blockForCustomerName()) return;
+     if (lineItems.length === 0) {
+       showFeedback('Please add at least one item before checkout.');
+       return;
+@@ -1273,7 +1292,7 @@ export default function PosBilling({
+       }
+     }
+ 
+-    const customerDisplayName = selectedClient ? selectedClient.name : customerSearch || 'Walk-in Customer';
++    const customerDisplayName = selectedClient ? selectedClient.name : formatWalkInName(customerSearch);
+     const modesUsed =
+       (actualCashRetained > 0 ? 1 : 0) + (cardPayment > 0 ? 1 : 0) + (bankPayment > 0 ? 1 : 0) + (othersPayment > 0 ? 1 : 0);
+     let resolvedPaymentType = 'cash';
+@@ -1657,16 +1676,23 @@ export default function PosBilling({
+               </label>
+               <div className="pos-input-wrapper">
+                 <input
++                  ref={customerInputRef}
+                   type="text"
+                   value={selectedClient ? `${selectedClient.name} (${selectedClient.phone || 'Account'})` : customerSearch}
+                   onChange={(e) => {
+                     setSelectedClient(null);
+                     setCustomerSearch(e.target.value);
+                   }}
+-                  onFocus={() => setShowCustomerModal(true)}
+-                  placeholder="Search customer name or phone..."
++                  onFocus={() => {
++                    if (skipCustomerModalOnFocus.current) {
++                      skipCustomerModalOnFocus.current = false;
++                      return;
++                    }
++                    setShowCustomerModal(true);
++                  }}
++                  placeholder="Walk-in customer ka naam likhein, ya account search karein..."
+                   className="pos-text-input"
+-                  style={{ paddingRight: '32px', fontWeight: 500 }}
++                  style={{ paddingRight: '32px', fontWeight: 500, ...(needsCustomerName ? { borderColor: '#F87171', background: '#FEF2F2' } : {}) }}
+                 />
+                 <Search
+                   onClick={() => setShowCustomerModal(true)}
+@@ -1733,7 +1759,12 @@ export default function PosBilling({
+                   ref={searchInputRef}
+                   type="text"
+                   value={productQuery}
++                  readOnly={needsCustomerName}
+                   onFocus={() => {
++                    if (needsCustomerName) {
++                      blockForCustomerName();
++                      return;
++                    }
+                     setShowProductDropdown(true);
+                     setActiveProductIndex(0);
+                   }}
+@@ -2690,13 +2721,18 @@ export default function PosBilling({
+                             if (target) {
+                               if (target.isWalkIn) {
+                                 setSelectedClient(null);
+-                                setCustomerSearch('Walk-in Customer');
++                                setCustomerSearch('');
+                               } else if (target.client) {
+                                 setSelectedClient(target.client);
+                                 setCustomerSearch(target.client.name);
+                               }
+                               setShowCustomerModal(false);
+-                              setTimeout(() => searchInputRef.current?.focus(), 60);
++                              if (target.isWalkIn) {
++                                skipCustomerModalOnFocus.current = true;
++                                setTimeout(() => customerInputRef.current?.focus(), 60);
++                              } else {
++                                setTimeout(() => searchInputRef.current?.focus(), 60);
++                              }
+                             }
+                           } else if (e.key === 'Escape') {
+                             setShowCustomerModal(false);
+@@ -2720,9 +2756,10 @@ export default function PosBilling({
+                               onMouseEnter={() => setActiveClientIndex(idx)}
+                               onClick={() => {
+                                 setSelectedClient(null);
+-                                setCustomerSearch('Walk-in Customer');
++                                setCustomerSearch('');
+                                 setShowCustomerModal(false);
+-                                setTimeout(() => searchInputRef.current?.focus(), 60);
++                                skipCustomerModalOnFocus.current = true;
++                                setTimeout(() => customerInputRef.current?.focus(), 60);
+                               }}
+                               style={{
+                                 padding: '10px 12px',
+diff --git a/src/utils/customerName.ts b/src/utils/customerName.ts
+new file mode 100644
+index 0000000..32f572f
+--- /dev/null
++++ b/src/utils/customerName.ts
+@@ -0,0 +1,24 @@
++/**
++ * Walk-in customer naming.
++ * A sale without a registered customer account must carry a typed walk-in name, stored as
++ * "<name> (WI)" so receipts, the Sales list and CEO reports all show it is a walk-in.
++ */
++export const WALK_IN_SUFFIX = ' (WI)';
++const SUFFIX_RE = /\s*\(WI\)\s*$/i;
++
++/** Typed walk-in name -> stored/display name. Empty input stays empty. */
++export function formatWalkInName(raw: string | null | undefined): string {
++  const name = String(raw ?? '').replace(SUFFIX_RE, '').trim();
++  return name ? `${name}${WALK_IN_SUFFIX}` : '';
++}
++
++/** Stored name -> editable name (used when loading a saved/held bill back into POS). */
++export function stripWalkInSuffix(raw: string | null | undefined): string {
++  return String(raw ?? '').replace(SUFFIX_RE, '').trim();
++}
++
++/** Legacy placeholder names that must not count as a real walk-in name. */
++export function isPlaceholderWalkInName(raw: string | null | undefined): boolean {
++  const n = stripWalkInSuffix(raw).toLowerCase();
++  return !n || n === 'walk-in customer' || n === 'walk in customer' || n === 'walk-in' || n === 'walkin' || n === 'walk in';
++}
+-- 
+2.43.0
+
+
+From c20de373361767813cd5ccce6d9892e1ecc1b21b Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Sun, 25 Oct 2026 10:11:00 +0000
+Subject: [PATCH 4/7] feat(pos): Special Rate mandatory for special-brand items
+
+---
+ src/components/PosBilling.tsx | 44 ++++++++++++++++++++++++++++++++++-
+ 1 file changed, 43 insertions(+), 1 deletion(-)
+
+diff --git a/src/components/PosBilling.tsx b/src/components/PosBilling.tsx
+index d30df31..bd55769 100644
+--- a/src/components/PosBilling.tsx
++++ b/src/components/PosBilling.tsx
+@@ -697,6 +697,10 @@ export default function PosBilling({
+     return true;
+   };
+ 
++  // Special-brand rule: for users with special receipt access, every special-brand item on a sale needs a Special Rate
++  const isSpecialBrandItem = (it: { brand_id?: string | null } | null | undefined): boolean =>
++    canUseSpecialReceipt && invoiceType === 'sales' && Boolean(it?.brand_id) && specialBrandIds.has(String(it?.brand_id));
++
+   const handleAddItem = (specificItem?: Item, overrideRate?: number, skipCheck: boolean = false, overrideDiscount?: number) => {
+     if (blockForCustomerName()) return;
+     const prod = specificItem || selectedProduct;
+@@ -748,6 +752,15 @@ export default function PosBilling({
+       : (overrideRate !== undefined ? overrideRate : (inputRate > 0 ? inputRate : (prod.retail_price || 0)));
+     const itemDiscount = overrideDiscount !== undefined ? overrideDiscount : (inputDiscount > 0 ? inputDiscount : 0);
+     const itemSpecialRate = canUseSpecialReceipt && inputSpecialRate > 0 ? inputSpecialRate : undefined;
++    if (isSpecialBrandItem(prod) && itemSpecialRate === undefined) {
++      showFeedback('Special brand ka item hai — Special Rate likhna zaroori hai.');
++      setSelectedProduct(prod);
++      setInputRate(prod.retail_price || 0);
++      setProductQuery(`${prod.name}${prod.shade_code ? ` (${prod.shade_code})` : ''}`);
++      setShowProductDropdown(false);
++      setTimeout(() => specialRateInputRef.current?.focus(), 60);
++      return;
++    }
+     if (itemSpecialRate !== undefined && itemSpecialRate > itemRate) {
+       showFeedback('Special Rate, Rate se zyada nahi ho sakta.');
+       return;
+@@ -961,6 +974,10 @@ export default function PosBilling({
+   };
+ 
+   // Checkout and Database Persistence
++  // Cart lines of special brands that still miss a Special Rate (remove and re-add them with a Special Rate)
++  const specialBrandLineMissingRate = () =>
++    editingInvoice ? undefined : lineItems.find((li) => isSpecialBrandItem(li.item || undefined) && !(li.specialRate && li.specialRate > 0));
++
+   const handleCheckout = async (openPrint = true) => {
+     if (lineItems.length === 0 || submitting) {
+       showFeedback('Please add at least one item before checkout.');
+@@ -969,6 +986,13 @@ export default function PosBilling({
+     if (blockForCustomerName()) {
+       return;
+     }
++    {
++      const missingSpecial = specialBrandLineMissingRate();
++      if (missingSpecial) {
++        showFeedback(`"${missingSpecial.productName}" par Special Rate zaroori hai. Item hata kar Special Rate ke saath dobara add karein.`);
++        return;
++      }
++    }
+     if (lineItems.some((li) => li.specialRate && li.specialRate > 0)) {
+       showFeedback('Cart mein Special Rate lagi hui hai. Is sale ke liye "Special Save & Print (F6)" use karein, ya Special Rate hata dein.');
+       return;
+@@ -1232,6 +1256,13 @@ export default function PosBilling({
+   const handleSpecialDirect = async () => {
+     if (!canUseSpecialReceipt || submitting) return;
+     if (blockForCustomerName()) return;
++    {
++      const missingSpecial = specialBrandLineMissingRate();
++      if (missingSpecial) {
++        showFeedback(`"${missingSpecial.productName}" par Special Rate zaroori hai. Item hata kar Special Rate ke saath dobara add karein.`);
++        return;
++      }
++    }
+     if (lineItems.length === 0) {
+       showFeedback('Please add at least one item before checkout.');
+       return;
+@@ -1942,7 +1973,18 @@ export default function PosBilling({
+                   title="Special Rate (final rate per unit customer se liya jayega)"
+                   onChange={(e) => setInputSpecialRate(Math.max(0, Number(e.target.value) || 0))}
+                   onKeyDown={(e) => {
+-                    if (e.key === 'Enter') { e.preventDefault(); discInputRef.current?.focus(); }
++                    if (e.key === 'Enter') {
++                      e.preventDefault();
++                      if (!(inputSpecialRate > 0)) {
++                        showFeedback('Special Rate likhna zaroori hai — iske baghair aage nahi barh sakte.');
++                        return;
++                      }
++                      if (inputSpecialRate > (inputRate || 0)) {
++                        showFeedback('Special Rate, Rate se zyada nahi ho sakta.');
++                        return;
++                      }
++                      discInputRef.current?.focus();
++                    }
+                     else if (e.key === 'Escape') { searchInputRef.current?.focus(); }
+                   }}
+                   style={{ width: '100%', fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#9A3412', background: 'transparent', border: 'none', textAlign: 'center', outline: 'none' }}
+-- 
+2.43.0
+
+
+From e443005a99faabb1243c3da19049c420a9c6dd3c Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Sun, 25 Oct 2026 10:12:01 +0000
+Subject: [PATCH 5/7] feat(sales): mandatory reason before editing a sale in
+ POS, saved to audit log
+
+---
+ src/app/[slug]/page.tsx         |  4 +--
+ src/app/api/invoices/route.ts   | 24 +++++++++++++
+ src/components/PosBilling.tsx   |  2 +-
+ src/components/SalesHistory.tsx | 61 +++++++++++++++++++++++++++++++--
+ 4 files changed, 85 insertions(+), 6 deletions(-)
+
+diff --git a/src/app/[slug]/page.tsx b/src/app/[slug]/page.tsx
+index 8d81d9e..e1ae0cf 100644
+--- a/src/app/[slug]/page.tsx
++++ b/src/app/[slug]/page.tsx
+@@ -755,8 +755,8 @@ export default function TenantAppPage({ params }: PageProps) {
+               userRole={currentUser?.role || 'staff'}
+               canUseSpecialReceipt={Boolean(currentUser?.can_use_special_receipt)}
+               onNavigateToPos={() => setActiveTab('pos')}
+-              onEditInvoiceInPos={(inv) => {
+-                setEditingInvoice(inv);
++              onEditInvoiceInPos={(inv, reason) => {
++                setEditingInvoice({ ...inv, edit_reason: reason });
+                 setActiveTab('pos');
+               }}
+             />
+diff --git a/src/app/api/invoices/route.ts b/src/app/api/invoices/route.ts
+index 3f685bc..ee070bb 100644
+--- a/src/app/api/invoices/route.ts
++++ b/src/app/api/invoices/route.ts
+@@ -473,6 +473,15 @@ export async function PATCH(req: NextRequest) {
+       );
+     }
+ 
++    // Edit reason is mandatory when a saved sale is edited from POS
++    const editReason = String(body.edit_reason ?? '').trim();
++    if (auth.session.role !== 'developer' && editReason.length < 3) {
++      return NextResponse.json(
++        { success: false, error: 'Edit karne ki wajah (reason) likhna zaroori hai.', code: 'EDIT_REASON_REQUIRED' },
++        { status: 400 }
++      );
++    }
++
+     // Rate lock: lines must match catalog retail price, or the rate the line already had on this invoice
+     if (auth.session.role !== 'developer') {
+       const { data: existingLineRows } = await supabaseAdmin
+@@ -557,6 +566,21 @@ export async function PATCH(req: NextRequest) {
+ 
+     if (rpcErr) throw rpcErr;
+ 
++    // Audit: who edited the sale and why (the RPC's own log has no reason)
++    try {
++      await supabaseAdmin.from('audit_logs').insert({
++        tenant_id,
++        user_name: auth.session.username,
++        action: `Invoice Edit ${(existingInv as any)?.invoice_no || id} — Reason: ${editReason || 'n/a'}`,
++        action_type: 'update',
++        entity_type: 'invoice',
++        entity_id: id,
++        details: { reason: editReason || null, invoice_no: (existingInv as any)?.invoice_no || null },
++      });
++    } catch (auditErr) {
++      console.warn('[Invoices PATCH] edit-reason audit log failed', auditErr);
++    }
++
+     return NextResponse.json({
+       success: true,
+       invoice: {
+diff --git a/src/components/PosBilling.tsx b/src/components/PosBilling.tsx
+index bd55769..d19c84a 100644
+--- a/src/components/PosBilling.tsx
++++ b/src/components/PosBilling.tsx
+@@ -1124,7 +1124,7 @@ export default function PosBilling({
+       const apiEndpoint = '/api/invoices';
+       const apiMethod = isEditingExisting ? 'PATCH' : 'POST';
+       const payloadToSend = isEditingExisting
+-        ? { id: editingInvoice.id, ...invoicePayload }
++        ? { id: editingInvoice.id, edit_reason: editingInvoice.edit_reason || '', ...invoicePayload }
+         : invoicePayload;
+ 
+       const res = await fetch(apiEndpoint, {
+diff --git a/src/components/SalesHistory.tsx b/src/components/SalesHistory.tsx
+index b147d4c..c6c3ec8 100644
+--- a/src/components/SalesHistory.tsx
++++ b/src/components/SalesHistory.tsx
+@@ -75,7 +75,7 @@ interface Props {
+   canUseSpecialReceipt?: boolean;
+   userRole?: string;
+   onNavigateToPos?: () => void;
+-  onEditInvoiceInPos?: (invoice: Invoice) => void;
++  onEditInvoiceInPos?: (invoice: Invoice, reason: string) => void;
+ }
+ 
+ export default function SalesHistory({
+@@ -141,6 +141,21 @@ export default function SalesHistory({
+ 
+   // Selected Invoice Modal / Print
+   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
++  // Edit-in-POS needs a reason first
++  const [editReasonInvoice, setEditReasonInvoice] = useState<Invoice | null>(null);
++  const [editReasonText, setEditReasonText] = useState('');
++  const requestEditReason = (inv: Invoice) => {
++    setEditReasonText('');
++    setEditReasonInvoice(inv);
++  };
++  const confirmEditReason = () => {
++    const reason = editReasonText.trim();
++    if (reason.length < 3 || !editReasonInvoice || !onEditInvoiceInPos) return;
++    const inv = editReasonInvoice;
++    setEditReasonInvoice(null);
++    setEditReasonText('');
++    onEditInvoiceInPos(inv, reason);
++  };
+   const [thermalPrintInvoice, setThermalPrintInvoice] = useState<Invoice | null>(null);
+ 
+   // Registered Clients Directory (for WhatsApp Phone Resolution)
+@@ -996,6 +1011,46 @@ export default function SalesHistory({
+ 
+   return (
+     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#F8FAFC', overflowY: 'auto' }}>
++
++      {editReasonInvoice && (
++        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
++          <div style={{ background: '#fff', borderRadius: '14px', width: '100%', maxWidth: '420px', boxShadow: '0 20px 50px rgba(0,0,0,0.3)', overflow: 'hidden' }}>
++            <div style={{ padding: '14px 16px', borderBottom: '1px solid #E2E8F0', background: '#FFFBEB', fontWeight: 700, fontSize: '14px', color: '#92400E' }}>
++              Edit Sale #{editReasonInvoice.invoice_no}
++            </div>
++            <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
++              <label style={{ fontSize: '12px', color: '#475569', fontWeight: 600 }}>
++                Is sale ko edit kyun kar rahe hain? (wajah likhna zaroori hai)
++              </label>
++              <textarea
++                autoFocus
++                rows={3}
++                value={editReasonText}
++                onChange={(e) => setEditReasonText(e.target.value)}
++                onKeyDown={(e) => {
++                  if (e.key === 'Escape') setEditReasonInvoice(null);
++                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) confirmEditReason();
++                }}
++                placeholder="Masalan: customer ne 2 item aur mangwaye / qty galat likhi gayi thi..."
++                style={{ width: '100%', padding: '10px 12px', border: '1px solid #CBD5E1', borderRadius: '8px', fontSize: '13px', outline: 'none', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit' }}
++              />
++              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
++                <button type="button" onClick={() => setEditReasonInvoice(null)} style={{ padding: '8px 14px', border: '1px solid #CBD5E1', background: '#fff', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: '#334155' }}>
++                  Cancel
++                </button>
++                <button
++                  type="button"
++                  onClick={confirmEditReason}
++                  disabled={editReasonText.trim().length < 3}
++                  style={{ padding: '8px 14px', border: 'none', background: editReasonText.trim().length < 3 ? '#FCD34D' : '#D97706', color: '#fff', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: editReasonText.trim().length < 3 ? 'not-allowed' : 'pointer' }}
++                >
++                  Continue to POS
++                </button>
++              </div>
++            </div>
++          </div>
++        </div>
++      )}
+       {/* ── Top Header Bar ── */}
+       <div
+         style={{
+@@ -2198,7 +2253,7 @@ export default function SalesHistory({
+                               {onEditInvoiceInPos && !isReturn && inv.printed_as !== 'special' && (
+                                 <button
+                                   type="button"
+-                                  onClick={() => onEditInvoiceInPos(inv)}
++                                  onClick={() => requestEditReason(inv)}
+                                   title="Open in POS & Add More Items"
+                                   style={{
+                                     padding: '4px 8px',
+@@ -2705,7 +2760,7 @@ export default function SalesHistory({
+                     onClick={() => {
+                       const invToEdit = selectedInvoice;
+                       setSelectedInvoice(null);
+-                      onEditInvoiceInPos(invToEdit);
++                      requestEditReason(invToEdit);
+                     }}
+                     style={{
+                       display: 'flex',
+-- 
+2.43.0
+
+
+From 4ef00e03abbae089016fc76f4e138c40c196e85d Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Sun, 25 Oct 2026 10:13:02 +0000
+Subject: [PATCH 6/7] feat(special-receipt): Sales Return line under subtotal,
+ delivery no longer double counted
+
+---
+ src/components/PosBilling.tsx             |  1 +
+ src/components/SpecialReceiptSettings.tsx |  5 ++--
+ src/utils/receiptAdapters.ts              | 35 +++++++++++++++++++----
+ 3 files changed, 34 insertions(+), 7 deletions(-)
+
+diff --git a/src/components/PosBilling.tsx b/src/components/PosBilling.tsx
+index d19c84a..4ef772d 100644
+--- a/src/components/PosBilling.tsx
++++ b/src/components/PosBilling.tsx
+@@ -1401,6 +1401,7 @@ export default function PosBilling({
+           due_amount: resData.snapshot.due_amount ?? finalDue,
+           client_name: resData.snapshot.client_name || customerDisplayName,
+           invoice_no: resData.snapshot.invoice_no || invoiceNo,
++          show_sales_return: true,
+         };
+         printViaIframe(buildSpecialReceiptHtml(enrichedSnapshot, resData.template));
+       }
+diff --git a/src/components/SpecialReceiptSettings.tsx b/src/components/SpecialReceiptSettings.tsx
+index fa89989..26620d6 100644
+--- a/src/components/SpecialReceiptSettings.tsx
++++ b/src/components/SpecialReceiptSettings.tsx
+@@ -241,12 +241,13 @@ export default function SpecialReceiptSettings({
+       {
+         invoice_no: 'SR-TEST-001',
+         date: new Date().toLocaleDateString('en-GB') + ' 03:30 PM',
+-        client_name: 'Walk-in Customer',
++        client_name: 'Test Customer (WI)',
+         printed_total: 10200,
+         master_total: 10200,
+         delivery_charge: 0,
++        show_sales_return: true,
+         items: [
+-          { item_name: 'Weather Shield Matt Finish (Off-White)', qty: 2, unit_price: 4200, total_price: 8400, receipt_name: 'Weather Shield Matt Finish (Off-White)' },
++          { item_name: 'Weather Shield Matt Finish (Off-White)', qty: 2, unit_price: 4200, total_price: 7560, receipt_name: 'Weather Shield Matt Finish (Off-White)' },
+           { item_name: 'Wall Primer Undercoat 4L', qty: 1, unit_price: 1800, total_price: 1800, receipt_name: 'Wall Primer Undercoat 4L' },
+         ],
+       },
+diff --git a/src/utils/receiptAdapters.ts b/src/utils/receiptAdapters.ts
+index d37d430..817aa92 100644
+--- a/src/utils/receiptAdapters.ts
++++ b/src/utils/receiptAdapters.ts
+@@ -162,7 +162,25 @@ export function buildSpecialReceiptHtml(
+     };
+   });
+ 
+-  const printedTotal = Number(snapshot.printed_total || snapshot.master_total || 0);
++  const printedTotalRaw = Number(snapshot.printed_total || snapshot.master_total || 0);
++  const deliveryChargeAmt = Number(snapshot.delivery_charge || 0);
++
++  // "Sales Return" line (new special receipts only): every discount the customer got —
++  // (printed rate - special rate) and the Disc % — added up and shown under the subtotal.
++  const showSalesReturn = snapshot.show_sales_return === true && (snapshot.invoice_type || 'sales') !== 'return';
++  const itemsGross = items.reduce((sum, it) => sum + it.total, 0);
++  const chargedItemsTotal = (snapshot.items || []).reduce((sum: number, it: any) => {
++    const qty = Number(it.qty || 0);
++    const rate = Number(it.pre_discount_rate ?? it.unit_price ?? it.rate ?? 0);
++    return sum + Number(it.total_price ?? qty * rate);
++  }, 0);
++  const salesReturnAmount = showSalesReturn ? Math.max(0, Math.round((itemsGross - chargedItemsTotal) * 100) / 100) : 0;
++
++  // Subtotal never includes delivery (delivery is its own line). Net total = items - sales return + delivery.
++  const printedTotal = showSalesReturn
++    ? Math.max(0, Math.round((itemsGross - salesReturnAmount + deliveryChargeAmt) * 100) / 100)
++    : printedTotalRaw;
++  const subTotalShown = showSalesReturn ? itemsGross : Math.max(0, printedTotalRaw - deliveryChargeAmt);
+   const rawPaid = snapshot.paid_amount !== undefined ? Number(snapshot.paid_amount) : undefined;
+   const rawDue = snapshot.due_amount !== undefined ? Number(snapshot.due_amount) : undefined;
+ 
+@@ -203,17 +221,24 @@ export function buildSpecialReceiptHtml(
+     clientName: snapshot.client_name || undefined,
+     paymentMethod: resolvedPaymentMethod,
+     items,
+-    subTotal: printedTotal,
+-    discount: 0, // Option A: Zero discount disclosure on paper
++    subTotal: subTotalShown,
++    discount: salesReturnAmount, // only the combined "Sales Return" amount is disclosed, never per-item discounts
+     grandTotal: printedTotal,
+     paidAmount,
+     dueAmount,
+-    deliveryCharge: Number(snapshot.delivery_charge || 0),
++    deliveryCharge: deliveryChargeAmt,
+     headerNote: snapshot.header_note || undefined,
+     footerNote: snapshot.footer_note || undefined,
+     isReprint,
+   };
+ 
+-  return renderReceiptDocument(receiptData, normTemplate.template_json, normTemplate.paper_size, normTemplate.template_json);
++  const templateJson = salesReturnAmount > 0
++    ? {
++        ...normTemplate.template_json,
++        totals: { ...normTemplate.template_json.totals, showDiscount: true, discountLabel: 'Sales Return:' },
++      }
++    : normTemplate.template_json;
++
++  return renderReceiptDocument(receiptData, templateJson, normTemplate.paper_size, templateJson);
+ }
+ 
+-- 
+2.43.0
+
+
+From c499b7a18ba4ee5086b4f938a76e49cbe46d5bab Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Sun, 25 Oct 2026 10:13:38 +0000
+Subject: [PATCH 7/7] feat(inventory): cost/retail worth per item and totals in
+ Excel and print export
+
+---
+ src/components/StockInventory.tsx | 54 +++++++++++++++++++++++++------
+ src/utils/excelExporter.ts        | 27 ++++++++++++++--
+ 2 files changed, 70 insertions(+), 11 deletions(-)
+
+diff --git a/src/components/StockInventory.tsx b/src/components/StockInventory.tsx
+index 03957e0..f85ed0e 100644
+--- a/src/components/StockInventory.tsx
++++ b/src/components/StockInventory.tsx
+@@ -1314,6 +1314,20 @@ export default function StockInventory({
+   const [exportingExcel, setExportingExcel] = useState(false);
+ 
+   // Workstream C: Export to Excel (.xlsx) using sortedProducts
++  // Stock worth totals follow the currently filtered list (sortedProducts)
++  const inventoryWorth = (list: Item[]) => {
++    let qty = 0;
++    let cost = 0;
++    let retail = 0;
++    for (const i of list) {
++      const q = Number(i.stock_qty) || 0;
++      qty += q;
++      cost += q * (Number(i.cost_price) || 0);
++      retail += q * (Number(i.retail_price) || 0);
++    }
++    return { qty, cost, retail };
++  };
++
+   const handleExportExcel = async () => {
+     setShowExportMenu(false);
+     if (sortedProducts.length === 0) {
+@@ -1335,9 +1349,14 @@ export default function StockInventory({
+           { header: 'Stock Qty', type: 'Number', width: 14, format: '#,##0', getValue: (i) => i.stock_qty },
+           { header: 'Cost Price (PKR)', type: 'Number', width: 16, format: '#,##0.00', getValue: (i) => i.cost_price || 0 },
+           { header: 'Retail Price (PKR)', type: 'Number', width: 16, format: '#,##0.00', getValue: (i) => i.retail_price || 0 },
+-          { header: 'Stock Valuation (PKR)', type: 'Number', width: 20, format: '#,##0.00', getValue: (i) => (i.stock_qty || 0) * (i.cost_price || 0) },
++          { header: 'Stock Worth @ Cost (PKR)', type: 'Number', width: 22, format: '#,##0.00', getValue: (i) => (i.stock_qty || 0) * (i.cost_price || 0) },
++          { header: 'Stock Worth @ Retail (PKR)', type: 'Number', width: 24, format: '#,##0.00', getValue: (i) => (i.stock_qty || 0) * (i.retail_price || 0) },
+         ],
+-        'Inventory'
++        'Inventory',
++        (() => {
++          const t = inventoryWorth(sortedProducts);
++          return ['TOTAL', null, null, null, null, null, t.qty, null, null, t.cost, t.retail];
++        })()
+       );
+       showToast(`Exported ${sortedProducts.length} inventory items to Excel!`);
+     } catch (err: any) {
+@@ -1363,9 +1382,22 @@ export default function StockInventory({
+         <td style="padding: 6px 8px;">${i.category || 'General'}</td>
+         <td style="padding: 6px 8px;">${i.pack_size || i.unit || '—'}</td>
+         <td style="padding: 6px 8px; text-align: center; font-weight: 700;">${i.stock_qty}</td>
++        <td style="padding: 6px 8px; text-align: right;">Rs. ${(i.cost_price || 0).toLocaleString()}</td>
+         <td style="padding: 6px 8px; text-align: right;">Rs. ${(i.retail_price || 0).toLocaleString()}</td>
++        <td style="padding: 6px 8px; text-align: right; font-weight: 600;">Rs. ${((Number(i.stock_qty) || 0) * (Number(i.cost_price) || 0)).toLocaleString()}</td>
++        <td style="padding: 6px 8px; text-align: right; font-weight: 600;">Rs. ${((Number(i.stock_qty) || 0) * (Number(i.retail_price) || 0)).toLocaleString()}</td>
+       </tr>
+     `).join('');
++    const worth = inventoryWorth(sortedProducts);
++    const totalsHtml = `
++      <tr style="border-top: 2px solid #0F172A; background: #E2E8F0; font-weight: 800;">
++        <td colspan="4" style="padding: 8px; text-align: right;">TOTAL</td>
++        <td style="padding: 8px; text-align: center;">${worth.qty.toLocaleString()}</td>
++        <td></td>
++        <td></td>
++        <td style="padding: 8px; text-align: right;">Rs. ${worth.cost.toLocaleString()}</td>
++        <td style="padding: 8px; text-align: right;">Rs. ${worth.retail.toLocaleString()}</td>
++      </tr>`;
+ 
+     const printHtml = `<!DOCTYPE html>
+ <html>
+@@ -1373,7 +1405,7 @@ export default function StockInventory({
+   <meta charset="UTF-8">
+   <title>Inventory Manifest — ${tenantName}</title>
+   <style>
+-    @page { size: A4 portrait; margin: 12mm; }
++    @page { size: A4 landscape; margin: 12mm; }
+     * { box-sizing: border-box; margin: 0; padding: 0; }
+     body { font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #0F172A; padding: 10px; }
+     .header { margin-bottom: 16px; border-bottom: 2px solid #0F172A; padding-bottom: 8px; display: flex; justify-content: space-between; align-items: flex-end; }
+@@ -1394,16 +1426,20 @@ export default function StockInventory({
+   <table>
+     <thead>
+       <tr>
+-        <th style="width: 15%;">Code</th>
+-        <th style="width: 35%;">Product Name</th>
+-        <th style="width: 20%;">Category</th>
+-        <th style="width: 12%;">Pack / Unit</th>
+-        <th style="width: 8%; text-align: center;">Qty</th>
+-        <th style="width: 10%; text-align: right;">Retail</th>
++        <th style="width: 10%;">Code</th>
++        <th style="width: 24%;">Product Name</th>
++        <th style="width: 12%;">Category</th>
++        <th style="width: 8%;">Pack / Unit</th>
++        <th style="width: 6%; text-align: center;">Qty</th>
++        <th style="width: 9%; text-align: right;">Cost</th>
++        <th style="width: 9%; text-align: right;">Retail</th>
++        <th style="width: 11%; text-align: right;">Worth @ Cost</th>
++        <th style="width: 11%; text-align: right;">Worth @ Retail</th>
+       </tr>
+     </thead>
+     <tbody>
+       ${rowsHtml}
++      ${totalsHtml}
+     </tbody>
+   </table>
+ </body>
+diff --git a/src/utils/excelExporter.ts b/src/utils/excelExporter.ts
+index 5946ef1..e0bf8f7 100644
+--- a/src/utils/excelExporter.ts
++++ b/src/utils/excelExporter.ts
+@@ -27,7 +27,9 @@ export async function exportToXlsx<T>(
+   filename: string,
+   data: T[],
+   columns: ExportColumnDef<T>[],
+-  sheetName = 'Sheet1'
++  sheetName = 'Sheet1',
++  /** Optional bold footer row, one entry per column (string label, number total, or null). */
++  footerValues?: Array<string | number | null>
+ ): Promise<void> {
+   // 1. Header row
+   const headerRow: Row = columns.map((col) => ({
+@@ -79,7 +81,28 @@ export async function exportToXlsx<T>(
+     });
+   });
+ 
+-  const sheetData: SheetData = [headerRow, ...dataRows];
++  const footerRows: Row[] = [];
++  if (footerValues && footerValues.length > 0) {
++    footerRows.push(
++      columns.map((col, idx): Cell => {
++        const v = footerValues[idx];
++        if (v === null || v === undefined) return { value: '', type: String, backgroundColor: '#E2E8F0' };
++        if (typeof v === 'number' && Number.isFinite(v)) {
++          return {
++            value: v,
++            type: Number,
++            format: col.format || '#,##0.00',
++            align: 'right',
++            fontWeight: 'bold',
++            backgroundColor: '#E2E8F0',
++          };
++        }
++        return { value: String(v), type: String, align: 'left', fontWeight: 'bold', backgroundColor: '#E2E8F0' };
++      })
++    );
++  }
++
++  const sheetData: SheetData = [headerRow, ...dataRows, ...footerRows];
+ 
+   const columnWidths = columns.map((col) => ({
+     width: col.width || 18,
+-- 
+2.43.0
+

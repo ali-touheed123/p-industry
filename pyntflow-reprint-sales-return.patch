@@ -1,0 +1,66 @@
+From 8d5bfe61f5ae26ee0086fe75e21f08510eb2b6a0 Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Sun, 25 Oct 2026 10:52:37 +0000
+Subject: [PATCH] feat(special-receipt): show Sales Return on reprints of
+ special sales created after the cutoff date
+
+---
+ src/components/SalesHistory.tsx |  8 ++++++--
+ src/utils/receiptAdapters.ts    | 15 +++++++++++++++
+ 2 files changed, 21 insertions(+), 2 deletions(-)
+
+diff --git a/src/components/SalesHistory.tsx b/src/components/SalesHistory.tsx
+index c6c3ec8..14a7546 100644
+--- a/src/components/SalesHistory.tsx
++++ b/src/components/SalesHistory.tsx
+@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
+ import { Invoice, InvoiceItem } from '@/types';
+ import { printViaIframe } from '@/utils/iframePrint';
+ import { escapeHtml } from '@/utils/receiptRenderCore';
+-import { buildSalesHistoryThermalHtml, buildSpecialReceiptHtml } from '@/utils/receiptAdapters';
++import { buildSalesHistoryThermalHtml, buildSpecialReceiptHtml, isSalesReturnLineEnabled } from '@/utils/receiptAdapters';
+ import { serializeCsv, downloadCsv } from '@/utils/csvSerializer';
+ import { ReceiptTemplate } from '@/types/receipt';
+ import SpecialReturnModal from './SpecialReturnModal';
+@@ -207,7 +207,11 @@ export default function SalesHistory({
+       }
+ 
+       if (data.snapshot) {
+-        const specialHtml = buildSpecialReceiptHtml(data.snapshot, data.template, true);
++        const specialHtml = buildSpecialReceiptHtml(
++          { ...data.snapshot, show_sales_return: isSalesReturnLineEnabled((inv as any).created_at || inv.date) },
++          data.template,
++          true
++        );
+         printViaIframe(specialHtml);
+       }
+     } catch (err: any) {
+diff --git a/src/utils/receiptAdapters.ts b/src/utils/receiptAdapters.ts
+index 817aa92..6e79ff6 100644
+--- a/src/utils/receiptAdapters.ts
++++ b/src/utils/receiptAdapters.ts
+@@ -138,6 +138,21 @@ export function buildSalesHistoryThermalHtml(
+   return renderReceiptDocument(receiptData, tmpl?.template_json, tmpl?.paper_size);
+ }
+ 
++/**
++ * "Sales Return" line cutoff: special sales created on/after this date show the line on
++ * reprints too. Older special receipts reprint exactly as they were first printed.
++ * Set NEXT_PUBLIC_SALES_RETURN_START (YYYY-MM-DD) to the day this feature went live.
++ */
++export const SALES_RETURN_LINE_START: string =
++  process.env.NEXT_PUBLIC_SALES_RETURN_START || '2026-10-26';
++
++export function isSalesReturnLineEnabled(saleDate: string | null | undefined): boolean {
++  if (!saleDate) return false;
++  const t = new Date(saleDate).getTime();
++  const start = new Date(`${SALES_RETURN_LINE_START}T00:00:00`).getTime();
++  return Number.isFinite(t) && Number.isFinite(start) && t >= start;
++}
++
+ /**
+  * TASK-SR-08 / B7:
+  * Renders a Special Receipt from a server-verified JSON snapshot and template snapshot.
+-- 
+2.43.0
+
