@@ -141,13 +141,23 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    const { data: items, error } = await supabaseAdmin
-      .from('items')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .order('created_at', { ascending: false });
+    let items: any[] = [];
+    let from = 0;
+    const PAGE_SIZE = 1000;
+    while (true) {
+      const { data: chunk, error: chunkErr } = await supabaseAdmin
+        .from('items')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false })
+        .range(from, from + PAGE_SIZE - 1);
 
-    if (error) throw error;
+      if (chunkErr) throw chunkErr;
+      if (!chunk || chunk.length === 0) break;
+      items = items.concat(chunk);
+      if (chunk.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
 
     // Fetch active series token configs and series names to dynamically enrich live token values
     const [configsRes, seriesRes] = await Promise.all([

@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
     const tenantId = searchParams.get('tenant_id');
     const cursor = searchParams.get('cursor');
     const limitParam = searchParams.get('limit');
-    let limit = 50;
+    let limit = 1000;
     if (limitParam === 'all' || limitParam === 'none') {
       limit = 10000;
     } else if (limitParam) {
