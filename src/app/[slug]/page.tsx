@@ -237,10 +237,12 @@ export default function TenantAppPage({ params }: PageProps) {
     }
 
     const openingAmt = parseFloat(openingCashInput) || 0;
-    const prevClosing = currentLastClosed ? Number(currentLastClosed.actual_cash || 0) : 0;
-    const handoverVariance = openingAmt - prevClosing;
-    const handoverNotes = currentLastClosed
-      ? `Handover: Prev shift closed Rs.${prevClosing.toLocaleString()}, Counted Rs.${openingAmt.toLocaleString()}, Variance ${handoverVariance >= 0 ? '+' : ''}Rs.${handoverVariance.toLocaleString()}`
+    // B9: if there is no previous closed shift for the tenant/counter, previous_closing_cash must be NULL and handover_variance NULL/0
+    const hasPreviousClosed = Boolean(currentLastClosed && currentLastClosed.actual_cash !== undefined && currentLastClosed.actual_cash !== null);
+    const prevClosing = hasPreviousClosed ? Number(currentLastClosed.actual_cash) : null;
+    const handoverVariance = hasPreviousClosed && prevClosing !== null ? openingAmt - prevClosing : null;
+    const handoverNotes = hasPreviousClosed && prevClosing !== null
+      ? `Handover: Prev shift closed Rs.${prevClosing.toLocaleString()}, Counted Rs.${openingAmt.toLocaleString()}, Variance ${(handoverVariance ?? 0) >= 0 ? '+' : ''}Rs.${(handoverVariance ?? 0).toLocaleString()}`
       : 'First shift of the day';
 
     try {
@@ -252,7 +254,7 @@ export default function TenantAppPage({ params }: PageProps) {
           opened_by: currentUser?.id,
           opening_cash: openingAmt,
           previous_closing_cash: prevClosing,
-          handover_variance: handoverVariance,
+          handover_variance: handoverVariance !== null ? handoverVariance : 0,
           handover_notes: handoverNotes,
           notes: `Opened by ${currentUser?.full_name || currentUser?.username}`,
         }),

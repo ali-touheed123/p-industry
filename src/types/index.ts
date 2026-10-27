@@ -49,8 +49,8 @@ export interface Shift {
   expected_cash?: number;
   actual_cash?: number;
   difference?: number;
-  previous_closing_cash?: number;
-  handover_variance?: number;
+  previous_closing_cash?: number | null;
+  handover_variance?: number | null;
   handover_notes?: string;
   notes?: string;
   status: 'open' | 'closed';

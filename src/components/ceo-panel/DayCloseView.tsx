@@ -92,22 +92,36 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
             return true;
           });
 
+// N6: Compute shop local date with ONE consistent method everywhere (replaces mixes of split('T')[0] and toLocaleDateString)
+const toShopLocalDate = (val: string | Date | null | undefined): string => {
+  if (!val) return '';
+  if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val)) {
+    return val;
+  }
+  const d = typeof val === 'string' ? new Date(val) : val;
+  if (isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
           const mapped: DayCloseRecord[] = branchShifts.map((s: any) => {
-            const rawDate = s.start_time || s.created_at;
-            const shiftDate = rawDate ? new Date(rawDate).toLocaleDateString('en-CA') : todayLocal;
+            const rawStartTime = s.start_time || s.created_at;
+            const shiftDate = toShopLocalDate(rawStartTime) || todayLocal;
             const isOpen = s.status === 'open';
 
-            // Fix #5: Only use date fallback when this is the sole shift on the day.
+            // Fix #5 & N6: Only use date fallback when this is the sole shift on the day.
             // With multiple shifts per day, date-based fallback double-counts records across shifts.
             const isOnlyShiftOnDay = branchShifts.filter((other: any) => {
-              const otherDate = (other.start_time || other.created_at || '').split('T')[0];
+              const otherDate = toShopLocalDate(other.start_time || other.created_at);
               return otherDate === shiftDate;
             }).length <= 1;
 
             // Match expenses: prefer shift_id; date fallback only when sole shift on that day
             const shiftExpenses = allExpenses.filter((e: any) =>
               (e.shift_id && e.shift_id === s.id) ||
-              (!e.shift_id && isOnlyShiftOnDay && e.created_at?.split('T')[0] === shiftDate)
+              (!e.shift_id && isOnlyShiftOnDay && toShopLocalDate(e.created_at) === shiftDate)
             );
 
             // Match invoices: prefer shift_id; date fallback only when sole shift on that day
@@ -115,14 +129,14 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
             const shiftInvoices = allInvoices.filter((i: any) => {
               if (isCancelledInvoice(i)) return false;
               return (i.shift_id && i.shift_id === s.id) ||
-                (!i.shift_id && isOnlyShiftOnDay && (i.date === shiftDate || i.created_at?.split('T')[0] === shiftDate));
+                (!i.shift_id && isOnlyShiftOnDay && (toShopLocalDate(i.date) === shiftDate || toShopLocalDate(i.created_at) === shiftDate));
             });
 
             // Match token transactions for this shift; same date-fallback guard
             // Exclude reversed usage_status and reversal type (Phase 1)
             const shiftTokens = allTokens.filter((t: any) => {
               const matches = (t.shift_id && t.shift_id === s.id) ||
-                (!t.shift_id && isOnlyShiftOnDay && t.created_at?.split('T')[0] === shiftDate);
+                (!t.shift_id && isOnlyShiftOnDay && toShopLocalDate(t.created_at) === shiftDate);
               if (!matches) return false;
               const uStatus = (t.usage_status || '').toLowerCase();
               const tType = (t.type || t.transaction_type || '').toLowerCase();
@@ -250,11 +264,24 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
               amount: Number(e.amount || 0),
             }));
 
-            // Handover data (from previous shift close)
-            const prevClosingCash = Number(s.previous_closing_cash || 0);
-            const handoverVarianceAmt = Number(s.handover_variance || 0);
-            const handoverStatus: 'MATCHED' | 'SHORT' | 'EXCESS' =
-              handoverVarianceAmt === 0 ? 'MATCHED' : (handoverVarianceAmt < 0 ? 'SHORT' : 'EXCESS');
+            // B9: Only compare when a previous closed shift exists.
+            // If there is no previous closed shift for the tenant/counter, previous_closing_cash is NULL
+            // and handover_variance is NULL/0, and DayCloseView must not render the "Excess Cash Found" banner.
+            const hasPrevClosedShift = Boolean(
+              s.previous_closing_cash !== null &&
+              s.previous_closing_cash !== undefined &&
+              s.handover_notes !== 'First shift of the day' &&
+              !(Number(s.previous_closing_cash) === 0 && (!s.handover_notes || !s.handover_notes.toLowerCase().startsWith('handover:')))
+            );
+
+            const prevClosingCash = hasPrevClosedShift ? Number(s.previous_closing_cash || 0) : null;
+            const handoverVarianceAmt = hasPrevClosedShift && s.handover_variance !== null && s.handover_variance !== undefined
+              ? Number(s.handover_variance)
+              : null;
+            const handoverStatus: 'MATCHED' | 'SHORT' | 'EXCESS' | undefined =
+              handoverVarianceAmt !== null
+                ? (handoverVarianceAmt === 0 ? 'MATCHED' : (handoverVarianceAmt < 0 ? 'SHORT' : 'EXCESS'))
+                : undefined;
 
             const shiftTime = s.end_time
               ? new Date(s.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -287,6 +314,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
               isOpen,
               shiftTitle: `Register Shift #${s.id.substring(0, 4)}`,
               date: shiftDate,
+              startTime: rawStartTime,
               shiftTime,
               cashierName: resolveStaffName(),
               registerNo: '01',
@@ -310,7 +338,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
                 staffShares,
               },
               pettyCashLogs: pettyLogs,
-              ...(prevClosingCash > 0 || handoverVarianceAmt !== 0 ? {
+              ...(hasPrevClosedShift && prevClosingCash !== null && handoverVarianceAmt !== null && handoverStatus ? {
                 handover: {
                   previousClosingCash: prevClosingCash,
                   openingCountedCash: openAmt,
@@ -331,8 +359,12 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
             dateGroups.set(rec.date, existing);
           });
           dateGroups.forEach(group => {
-            // Sort by shift time (ascending) within the day
-            group.sort((a, b) => (a.shiftTime || '').localeCompare(b.shiftTime || ''));
+            // N6: Sort by start_time timestamp (ascending) within the day, not by the 12-hour string
+            group.sort((a, b) => {
+              const timeA = a.startTime ? new Date(a.startTime).getTime() : 0;
+              const timeB = b.startTime ? new Date(b.startTime).getTime() : 0;
+              return timeA - timeB;
+            });
 
             // Shift-to-shift sales delta (only meaningful with 2+ shifts)
             if (group.length >= 2) {

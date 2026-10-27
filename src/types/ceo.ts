@@ -90,6 +90,7 @@ export interface ReturnRecord {
 export interface DayCloseRecord {
   id: string;
   date: string;
+  startTime?: string;
   status?: 'open' | 'closed';
   isOpen?: boolean;
   shiftTitle: string;
