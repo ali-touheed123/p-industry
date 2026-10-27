@@ -65,7 +65,25 @@ export async function POST(req: NextRequest) {
     let effectiveUserId: string | null = null;
 
     if (auth.session.role === 'developer') {
-      printedBy = 'Developer Super Admin';
+      // In dev mode, map to the branch's first active staff user with special receipt permission.
+      // This prevents RPC failures when testing special invoices from the dev panel on a branch route.
+      const { data: devStaff } = await supabaseAdmin
+        .from('app_users')
+        .select('id, username, full_name')
+        .eq('tenant_id', tenant_id)
+        .eq('is_active', true)
+        .eq('can_use_special_receipt', true)
+        .eq('role', 'staff')
+        .limit(1)
+        .maybeSingle();
+
+      printedBy = devStaff
+        ? `Dev (via ${devStaff.full_name || devStaff.username})`
+        : 'Developer Super Admin';
+      effectiveUserId = devStaff?.id ?? null;
+    } else if (auth.session.role === 'ceo') {
+      // CEO is allowed to create special invoices for branches they own
+      printedBy = auth.session.username || 'CEO';
       effectiveUserId = null;
     } else if (auth.session.role === 'staff') {
       const { data: user, error: userErr } = await supabaseAdmin

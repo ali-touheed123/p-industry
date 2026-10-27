@@ -113,7 +113,25 @@ export async function getSession(req: NextRequest): Promise<UserSession | null> 
     }
   }
 
-  // 2. Try developer admin cookie (explicit dev session on /dev)
+  // 2. Standard user session cookie takes priority over dev cookie.
+  //    This ensures a cashier logged in on a branch route (/[slug]) is not
+  //    hijacked by a dev admin cookie that may also exist in the same browser.
+  if (userCookie) {
+    try {
+      const { payload } = await jwtVerify(userCookie, getJwtSecret());
+      const jti = (payload as any).jti || (payload as any).jti_claim;
+
+      if (jti && (await isSessionRevoked(jti))) {
+        return null;
+      }
+
+      return payload as unknown as UserSession;
+    } catch {
+      // Invalid user token — fall through to dev cookie
+    }
+  }
+
+  // 3. Developer admin cookie as fallback (only reached when no valid user session exists)
   if (devCookie) {
     try {
       const { payload } = await jwtVerify(devCookie, getDevSecret());
@@ -126,22 +144,6 @@ export async function getSession(req: NextRequest): Promise<UserSession | null> 
       }
     } catch {
       // Invalid dev cookie
-    }
-  }
-
-  // 3. Try standard user session cookie (branch cashier / CEO session)
-  if (userCookie) {
-    try {
-      const { payload } = await jwtVerify(userCookie, getJwtSecret());
-      const jti = (payload as any).jti || (payload as any).jti_claim;
-
-      if (jti && (await isSessionRevoked(jti))) {
-        return null;
-      }
-
-      return payload as unknown as UserSession;
-    } catch {
-      // Invalid user token
     }
   }
 
