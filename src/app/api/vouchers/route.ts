@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
     const partyType = searchParams.get('party_type');
     const limitParam = searchParams.get('limit');
     const offsetParam = searchParams.get('offset');
+    const shiftId = searchParams.get('shift_id');
 
     if (!tenantId) {
       return NextResponse.json({ success: false, error: 'Tenant ID required' }, { status: 400 });
@@ -47,6 +48,7 @@ export async function GET(req: NextRequest) {
 
     if (partyId) query = query.eq('party_id', partyId);
     if (partyType) query = query.eq('party_type', partyType);
+    if (shiftId) query = query.eq('shift_id', shiftId);
 
     if (offset > 0) {
       query = query.range(offset, offset + limit - 1);
@@ -71,6 +73,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const {
       tenant_id,
+      shift_id: inputShiftId,
       voucher_type = 'receipt', // 'receipt' (receive cash from client) or 'payment' (pay supplier)
       party_type = 'client',    // 'client' or 'supplier'
       party_id,
@@ -97,6 +100,23 @@ export async function POST(req: NextRequest) {
     const auth = await requireTenantAuth(req, tenant_id);
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
+    // Resolve current open shift for this tenant/counter if not explicitly supplied
+    let targetShiftId: string | null = inputShiftId || null;
+    if (!targetShiftId) {
+      const { data: openShift } = await supabaseAdmin
+        .from('shifts')
+        .select('id')
+        .eq('tenant_id', tenant_id)
+        .eq('status', 'open')
+        .order('start_time', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (openShift) {
+        targetShiftId = openShift.id;
+      }
     }
 
     // Validate token allocations if supplied (Canonical Contract per Plan Section 4.2)
@@ -168,6 +188,7 @@ export async function POST(req: NextRequest) {
       remarks: remarks || (voucher_type === 'receipt' ? 'Payment Received' : 'Supplier Payment'),
       created_by: created_by || null,
       date,
+      shift_id: targetShiftId,
     };
 
     // Task 8.1: Invoke atomic stored procedure
@@ -219,6 +240,7 @@ export async function POST(req: NextRequest) {
         remarks: voucherData.remarks,
         date: result.date,
         created_by: voucherData.created_by,
+        shift_id: targetShiftId,
       },
       tokens_applied_amount: result.tokens_applied_amount,
       cash_paid_amount: result.cash_paid_amount,

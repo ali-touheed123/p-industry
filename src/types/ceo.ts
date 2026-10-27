@@ -144,6 +144,7 @@ export interface DayCloseRecord {
     shiftCount: number;
     allShort: boolean;
   };
+  cash_breakdown?: any;
 }
 
 export interface CustomerTransaction {

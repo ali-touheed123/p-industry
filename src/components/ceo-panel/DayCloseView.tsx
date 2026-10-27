@@ -5,7 +5,7 @@ import { Branch, DayCloseRecord } from '@/types/ceo';
 import { formatCurrency } from '@/data/ceoMockData';
 import { CheckCircle2, AlertTriangle, Users, Coffee, CalendarCheck } from 'lucide-react';
 import { DatePeriodFilter } from './DatePeriodFilter';
-import { calculateExpectedClosingCash } from '@/utils/cashReconciliation';
+import { computeShiftCash, isCancelledInvoice, isReturnInvoice } from '@/utils/cashLedger';
 
 interface DayCloseViewProps {
   branch: Branch;
@@ -35,18 +35,20 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
       if (!tenantId) return;
       setLoading(true);
       try {
-        const [shiftsRes, expensesRes, invoicesRes, tokensRes] = await Promise.all([
+        const [shiftsRes, expensesRes, invoicesRes, tokensRes, vouchersRes] = await Promise.all([
           fetch(`/api/shifts?tenant_id=${tenantId}`),
           fetch(`/api/expenses?tenant_id=${tenantId}`),
           fetch(`/api/invoices?tenant_id=${tenantId}`),
           fetch(`/api/tokens?tenant_id=${tenantId}`),
+          fetch(`/api/vouchers?tenant_id=${tenantId}`),
         ]);
 
-        const [shiftsData, expensesData, invoicesData, tokensData] = await Promise.all([
+        const [shiftsData, expensesData, invoicesData, tokensData, vouchersData] = await Promise.all([
           shiftsRes.json(),
           expensesRes.json(),
           invoicesRes.json(),
           tokensRes.json(),
+          vouchersRes.json(),
         ]);
 
         if (!isMounted) return;
@@ -63,6 +65,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
         const allExpenses: any[] = expensesData.success ? (expensesData.expenses || []) : [];
         const allInvoices: any[] = invoicesData.success ? (invoicesData.invoices || []) : [];
         const allTokens: any[] = tokensData.success && Array.isArray(tokensData.transactions) ? tokensData.transactions : [];
+        const allVouchers: any[] = vouchersData.success && Array.isArray(vouchersData.vouchers) ? vouchersData.vouchers : [];
 
         const commEnabled = Boolean(currentTenant?.commission_enabled);
         const commRate = Number(currentTenant?.commission_rate || 2.0);
@@ -108,47 +111,81 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
             );
 
             // Match invoices: prefer shift_id; date fallback only when sole shift on that day
-            // Task 9.1: exclude cancelled invoices from all shift reconciliation
+            // Exclude cancelled AND void invoices from all shift reconciliation (Phase 1)
             const shiftInvoices = allInvoices.filter((i: any) => {
-              if ((i.status || '').toLowerCase() === 'cancelled') return false;
+              if (isCancelledInvoice(i)) return false;
               return (i.shift_id && i.shift_id === s.id) ||
                 (!i.shift_id && isOnlyShiftOnDay && (i.date === shiftDate || i.created_at?.split('T')[0] === shiftDate));
             });
 
             // Match token transactions for this shift; same date-fallback guard
-            const shiftTokens = allTokens.filter((t: any) =>
-              (t.shift_id && t.shift_id === s.id) ||
-              (!t.shift_id && isOnlyShiftOnDay && t.created_at?.split('T')[0] === shiftDate)
-            );
+            // Exclude reversed usage_status and reversal type (Phase 1)
+            const shiftTokens = allTokens.filter((t: any) => {
+              const matches = (t.shift_id && t.shift_id === s.id) ||
+                (!t.shift_id && isOnlyShiftOnDay && t.created_at?.split('T')[0] === shiftDate);
+              if (!matches) return false;
+              const uStatus = (t.usage_status || '').toLowerCase();
+              const tType = (t.type || t.transaction_type || '').toLowerCase();
+              return uStatus !== 'reversed' && tType !== 'reversal';
+            });
             const tokensRedeemedAmt = shiftTokens
               .filter((t: any) => (t.type || t.transaction_type) === 'redeemed')
               .reduce((sum: number, t: any) => sum + Number(t.total_amount || t.redeemed_amount || t.token_value || 0), 0);
 
-            const salesInvs = shiftInvoices.filter((i: any) => (i.invoice_type || 'sales') !== 'return');
-            const returnInvs = shiftInvoices.filter((i: any) => (i.invoice_type || 'sales') === 'return');
+            // Match vouchers: prefer shift_id; vouchers without shift_id excluded from cash ledger (Phase 1)
+            const shiftVouchers = allVouchers.filter((v: any) => v.shift_id && v.shift_id === s.id);
 
-            const cashSales = salesInvs.reduce((sum: number, i: any) => {
-              const cp = Number(i.cash_paid || 0);
-              if (cp > 0) return sum + cp;
-              if (!i.payment_type || i.payment_type === 'cash') {
-                return sum + Number(i.paid_amount || i.net_total || 0);
-              }
-              return sum;
-            // FIX CEO-10: subtract cash refunds so expected cash formula is correct
-            }, 0) - (returnInvs.reduce((sum: number, i: any) => {
-              const cp = Number(i.cash_paid || 0);
-              if (cp > 0) return sum + cp;
-              const pt = (i.payment_type || '').toLowerCase();
-              if (!pt || pt === 'cash' || pt === 'refund') return sum + Number(i.net_total || 0);
-              return sum;
-            }, 0));
+            const salesInvs = shiftInvoices.filter((i: any) => !isReturnInvoice(i));
+            const returnInvs = shiftInvoices.filter((i: any) => isReturnInvoice(i));
+
+            const grossSales = salesInvs.reduce((sum: number, i: any) => sum + Number(i.net_total || 0), 0);
+            const returnTotal = returnInvs.reduce((sum: number, i: any) => sum + Number(i.net_total || 0), 0);
+            const netShiftSales = grossSales - returnTotal;
+
+            const totalExpensesAmt = shiftExpenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0);
+
+            const openAmt = Number(s.opening_cash || 0);
+            const closeAmt = isOpen ? 0 : Number(s.actual_cash !== undefined && s.actual_cash !== null ? s.actual_cash : openAmt);
+
+            // For CLOSED shifts: use cash_breakdown persisted at close time if available.
+            // For OPEN shifts: compute live with shared function.
+            // For legacy closed shifts without cash_breakdown: use stored expected_cash.
+            let expCash: number;
+            let cashBreakdownLines: any = null;
+
+            if (!isOpen && s.cash_breakdown) {
+              cashBreakdownLines = s.cash_breakdown;
+              expCash = Number(s.cash_breakdown.expectedCash ?? s.expected_cash ?? openAmt);
+            } else if (!isOpen && s.expected_cash != null) {
+              expCash = Number(s.expected_cash);
+              cashBreakdownLines = null;
+            } else {
+              const bd = computeShiftCash({
+                openingCash: openAmt,
+                invoices: shiftInvoices,
+                purchases: [],
+                vouchers: shiftVouchers,
+                expenses: shiftExpenses,
+                tokens: shiftTokens,
+                shiftId: s.id,
+              });
+              expCash = bd.expectedCash;
+              cashBreakdownLines = bd;
+            }
+
+            const cashSalesAmt = cashBreakdownLines?.cashSales ??
+              salesInvs.reduce((sum: number, i: any) => {
+                const cp = Number(i.cash_paid || 0);
+                if (cp > 0) return sum + cp;
+                if (!i.payment_type || i.payment_type === 'cash') return sum + Number(i.paid_amount || i.net_total || 0);
+                return sum;
+              }, 0);
+            const cashSales = cashSalesAmt;
 
             const creditSales = salesInvs.reduce((sum: number, i: any) => {
               const due = Number(i.due_amount || 0);
               if (due > 0) return sum + due;
-              if (i.payment_type === 'credit') {
-                return sum + Number(i.net_total || 0);
-              }
+              if (i.payment_type === 'credit') return sum + Number(i.net_total || 0);
               return sum;
             }, 0);
 
@@ -161,42 +198,6 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
               return sum;
             }, 0);
 
-            const grossSales = salesInvs.reduce((sum: number, i: any) => sum + Number(i.net_total || 0), 0);
-            const returnTotal = returnInvs.reduce((sum: number, i: any) => sum + Number(i.net_total || 0), 0);
-            const netShiftSales = Math.max(0, grossSales - returnTotal);
-
-            // FIX CEO-10: deduct cash portion of return invoices from cashSales.
-            // Previously, returned goods were never subtracted, making the cash drawer
-            // appear short by exactly the returned amount.
-            const cashReturns = returnInvs.reduce((sum: number, i: any) => {
-              const cp = Number(i.cash_paid || 0);
-              if (cp > 0) return sum + cp;
-              // Only count as cash refund if the return was a pure cash/refund transaction
-              const pt = (i.payment_type || '').toLowerCase();
-              if (!pt || pt === 'cash' || pt === 'refund') return sum + Number(i.net_total || 0);
-              return sum;
-            }, 0);
-
-            const totalExpensesAmt = shiftExpenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0);
-
-            // Task 9.3: For closed shifts, expected_cash from the server already includes supplier cash deduction
-            // (computed via PATCH /api/shifts which uses shift_id-scoped purchase filter).
-            // For open shifts, we use the client formula matching ShiftDrawer.tsx (no separate supplier lookup needed here).
-
-            const openAmt = Number(s.opening_cash || 0);
-            const closeAmt = isOpen ? 0 : Number(s.actual_cash !== undefined && s.actual_cash !== null ? s.actual_cash : openAmt);
-            // Task 9.2: Fix double return deduction — cashSales already subtracts cashReturns (lines 127-141).
-            // The fallback formula must NOT subtract cashReturns again.
-            // For closed shifts: use server-computed expected_cash (includes supplier cash deduction).
-            // For open shifts: use client formula (matches ShiftDrawer) with no double deduction.
-            const expCash = Number(s.expected_cash !== undefined && s.expected_cash !== null && !isOpen
-              ? s.expected_cash
-              : Math.max(0, calculateExpectedClosingCash({
-                  openingCash: openAmt,
-                  cashSales,
-                  expenses: totalExpensesAmt,
-                  tokenPayouts: tokensRedeemedAmt,
-                })));
             const variance = isOpen ? 0 : (closeAmt - expCash);
             const varianceStatus: 'MATCHED' | 'SHORT' | 'EXCESS' =
               isOpen ? 'MATCHED' : (variance === 0 ? 'MATCHED' : (variance < 0 ? 'SHORT' : 'EXCESS'));
@@ -304,6 +305,7 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
                   handoverNotes: s.handover_notes || undefined,
                 },
               } : {}),
+              cash_breakdown: cashBreakdownLines,
             };
           });
 
@@ -569,22 +571,47 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B' }}>
-                <span>Total Register Sales (Cash)</span>
+                <span>(+) Register Cash Sales</span>
                 <span className="ceo-font-mono" style={{ color: '#34D399', fontWeight: 600 }}>{formatCurrency(financialSummary.cashSales)}</span>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B' }}>
-                <span style={{ paddingLeft: '8px' }}>Sales (Credit / Udhaar)</span>
-                <span className="ceo-font-mono" style={{ color: '#0F172A' }}>{formatCurrency(financialSummary.creditSales)}</span>
-              </div>
+              {activeRecord.cash_breakdown?.cashRefundsOnSalesReturns > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B' }}>
+                  <span>(-) Cash Refunds (Returns)</span>
+                  <span className="ceo-font-mono" style={{ color: '#F87171' }}>{formatCurrency(activeRecord.cash_breakdown.cashRefundsOnSalesReturns)}</span>
+                </div>
+              )}
+
+              {activeRecord.cash_breakdown?.supplierCashPaid > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B' }}>
+                  <span>(-) Supplier Cash Paid</span>
+                  <span className="ceo-font-mono" style={{ color: '#F87171' }}>{formatCurrency(activeRecord.cash_breakdown.supplierCashPaid)}</span>
+                </div>
+              )}
+
+              {activeRecord.cash_breakdown?.supplierReturnCashReceived > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B' }}>
+                  <span>(+) Supplier Returns (Cash In)</span>
+                  <span className="ceo-font-mono" style={{ color: '#34D399' }}>{formatCurrency(activeRecord.cash_breakdown.supplierReturnCashReceived)}</span>
+                </div>
+              )}
+
+              {activeRecord.cash_breakdown?.voucherCashReceipts > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B' }}>
+                  <span>(+) Voucher Cash In</span>
+                  <span className="ceo-font-mono" style={{ color: '#34D399' }}>{formatCurrency(activeRecord.cash_breakdown.voucherCashReceipts)}</span>
+                </div>
+              )}
+
+              {activeRecord.cash_breakdown?.voucherCashPayments > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B' }}>
+                  <span>(-) Voucher Cash Out</span>
+                  <span className="ceo-font-mono" style={{ color: '#F87171' }}>{formatCurrency(activeRecord.cash_breakdown.voucherCashPayments)}</span>
+                </div>
+              )}
 
               <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B' }}>
-                <span style={{ paddingLeft: '8px' }}>Sales (Bank / Card)</span>
-                <span className="ceo-font-mono" style={{ color: '#0F172A' }}>{formatCurrency(financialSummary.bankCardSales)}</span>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748B' }}>
-                <span>Petty Cash Expenses</span>
+                <span>(-) Petty Cash Expenses</span>
                 <span className="ceo-font-mono" style={{ color: '#F87171' }}>{formatCurrency(financialSummary.pettyExpenses)}</span>
               </div>
 
@@ -594,6 +621,16 @@ export const DayCloseView: React.FC<DayCloseViewProps> = ({ branch }) => {
                   <span className="ceo-font-mono" style={{ color: '#F87171' }}>{formatCurrency(financialSummary.tokenPayouts)}</span>
                 </div>
               )}
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94A3B8', fontSize: '11px', marginTop: '6px', borderTop: '1px dashed #E2E8F0', paddingTop: '6px' }}>
+                <span>Sales (Credit / Udhaar)</span>
+                <span className="ceo-font-mono">{formatCurrency(financialSummary.creditSales)}</span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94A3B8', fontSize: '11px' }}>
+                <span>Sales (Bank / Card)</span>
+                <span className="ceo-font-mono">{formatCurrency(financialSummary.bankCardSales)}</span>
+              </div>
 
               <div style={{ paddingTop: '12px', borderTop: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: '12px', fontWeight: 700, color: '#0F172A', textTransform: 'uppercase' }}>Expected Cash</span>

@@ -55,6 +55,7 @@ export interface Shift {
   notes?: string;
   status: 'open' | 'closed';
   created_at?: string;
+  cash_breakdown?: any;
 }
 
 export interface PettyExpense {

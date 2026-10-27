@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
+import { computeShiftCash } from '@/utils/cashLedger';
 
 async function resolveTenantId(idOrSlug: string): Promise<string | null> {
   if (!idOrSlug) return null;
@@ -236,10 +237,11 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    // FIX DB-08: recompute expected_cash server-side from DB transactions.
-    // The client-supplied expected_cash cannot be trusted — a tampered POS could
-    // submit any value to hide a cash shortage on shift close.
-    let serverExpectedCash = Number(expected_cash); // client value as starting fallback
+    // FIX B1/B2/B3: Recompute expected_cash server-side using shared computeShiftCash.
+    // The client-supplied expected_cash cannot be trusted.
+    // Uses the same formula as ShiftDrawer and DayCloseView — single source of truth.
+    let serverExpectedCash = Number(expected_cash); // fallback before DB fetch
+    let cashBreakdownJson: any = null;
     try {
       const shiftRecord = await supabaseAdmin
         .from('shifts')
@@ -251,84 +253,74 @@ export async function PATCH(req: NextRequest) {
         const openingAmt = Number(shiftRecord.data.opening_cash || 0);
         const tenantId = shiftRecord.data.tenant_id;
         const startTime = shiftRecord.data.start_time || new Date().toISOString().split('T')[0] + 'T00:00:00';
+        const endBound = new Date().toISOString();
 
-        // Sum cash received and cash returned: invoices linked to this shift (excluding cancelled)
+        // Invoices — shift-scoped, exclude cancelled AND void
         const { data: shiftInvoices } = await supabaseAdmin
           .from('invoices')
           .select('net_total, paid_amount, cash_paid, payment_type, invoice_type, status')
           .eq('shift_id', id)
           .eq('tenant_id', tenantId)
-          .neq('status', 'cancelled');
+          .not('status', 'in', '(cancelled,void,CANCELLED,VOID)');
 
-        let cashIn = 0;
-        let cashReturns = 0;
-        if (shiftInvoices) {
-          shiftInvoices.forEach((inv: any) => {
-            const isReturn = (inv.invoice_type || 'sales') === 'return';
-            const cp = Number(inv.cash_paid || 0);
-            const pt = (inv.payment_type || '').toLowerCase();
-            const fallbackAmount = Number(inv.paid_amount || inv.net_total || 0);
-            const cashAmount = cp > 0 ? cp : (!pt || pt === 'cash' || pt === 'refund' ? fallbackAmount : 0);
-
-            if (isReturn) {
-              cashReturns += cashAmount;
-            } else {
-              cashIn += cashAmount;
-            }
-          });
-        }
-
-        // Deduct supplier purchases paid in cash from the drawer during this shift
-        let supplierCashPaid = 0;
+        // Purchases — shift-scoped with time-window fallback for legacy NULL shift_id
         const { data: shiftPurchases } = await supabaseAdmin
           .from('purchases')
-          .select('net_total, paid_amount, payment_type, purchase_type, shift_id, created_at')
+          .select('net_total, paid_amount, cash_paid, payment_type, purchase_type, shift_id, created_at')
           .eq('tenant_id', tenantId)
-          .or(`shift_id.eq.${id},and(shift_id.is.null,created_at.gte.${startTime})`);
+          .or(`shift_id.eq.${id},and(shift_id.is.null,created_at.gte.${startTime},created_at.lte.${endBound})`);
 
-        if (shiftPurchases) {
-          shiftPurchases.forEach((p: any) => {
-            if ((p.purchase_type || 'purchase') === 'return') return;
-            const pt = (p.payment_type || '').toLowerCase();
-            if (pt === 'cash') {
-              const paid = Number(p.paid_amount || p.net_total || 0);
-              supplierCashPaid += paid;
-            } else if (Number(p.paid_amount || 0) > 0 && pt.includes('cash')) {
-              supplierCashPaid += Number(p.paid_amount);
-            }
-          });
-        }
+        // Vouchers — shift-scoped only (vouchers without shift_id excluded per spec)
+        const { data: shiftVouchers } = await supabaseAdmin
+          .from('vouchers')
+          .select('voucher_type, payment_mode, amount, shift_id')
+          .eq('tenant_id', tenantId)
+          .eq('shift_id', id);
 
-        // Deduct cash expenses
+        // Petty expenses
         const { data: shiftExpenses } = await supabaseAdmin
           .from('petty_expenses')
           .select('amount')
           .eq('shift_id', id)
           .eq('tenant_id', tenantId);
-        const totalExpenses = (shiftExpenses || []).reduce((s: number, e: any) => s + Number(e.amount || 0), 0);
 
-        // Deduct token cash payouts from token_transactions (type = 'redeemed', matching ShiftDrawer authoritative path)
-        const { data: shiftRedemptions } = await supabaseAdmin
+        // Token redemptions — exclude reversed
+        const { data: shiftTokens } = await supabaseAdmin
           .from('token_transactions')
-          .select('total_amount')
+          .select('type, usage_status, total_amount')
           .eq('shift_id', id)
           .eq('tenant_id', tenantId)
-          .eq('type', 'redeemed');
-        const totalTokenPayouts = (shiftRedemptions || []).reduce(
-          (s: number, r: any) => s + Number(r.total_amount || 0), 0
-        );
+          .eq('type', 'redeemed')
+          .neq('usage_status', 'reversed');
 
-        // Formula matches ShiftDrawer.tsx parity:
-        // Expected Cash = Opening Cash + Cash Sales - Cash Returns - Supplier Cash Paid - Total Expenses - Tokens Redeemed Cash
-        serverExpectedCash = Math.max(
-          0,
-          openingAmt + cashIn - cashReturns - supplierCashPaid - totalExpenses - totalTokenPayouts
-        );
+        // Use shared pure function — NO Math.max clamp
+        const breakdown = computeShiftCash({
+          openingCash: openingAmt,
+          invoices: shiftInvoices || [],
+          purchases: shiftPurchases || [],
+          vouchers: shiftVouchers || [],
+          expenses: shiftExpenses || [],
+          tokens: shiftTokens || [],
+          shiftId: id,
+        });
+
+        serverExpectedCash = breakdown.expectedCash;
+        cashBreakdownJson = {
+          openingCash: breakdown.openingCash,
+          cashSales: breakdown.cashSales,
+          cashRefundsOnSalesReturns: breakdown.cashRefundsOnSalesReturns,
+          supplierCashPaid: breakdown.supplierCashPaid,
+          supplierReturnCashReceived: breakdown.supplierReturnCashReceived,
+          voucherCashReceipts: breakdown.voucherCashReceipts,
+          voucherCashPayments: breakdown.voucherCashPayments,
+          pettyExpenses: breakdown.pettyExpenses,
+          tokenCashPayouts: breakdown.tokenCashPayouts,
+          expectedCash: breakdown.expectedCash,
+          computedAt: new Date().toISOString(),
+        };
       }
     } catch (calcErr) {
-      // FIX FINDING-API-014: Hard-fail on reconciliation error.
-      // The previous code fell back to the client-supplied expected_cash, which
-      // a tampered POS could manipulate to conceal a cash shortage on shift close.
+      // Hard-fail: do not fall back to client-supplied expected_cash (FINDING-API-014)
       console.error('Server-side expected_cash recomputation failed — aborting shift close:', calcErr);
       return NextResponse.json(
         { success: false, error: 'Shift close failed: unable to recompute expected cash from server transactions. Please try again.' },
@@ -346,6 +338,7 @@ export async function PATCH(req: NextRequest) {
         difference: Number(actual_cash) - serverExpectedCash,
         notes: notes || 'Shift Closed & Reconciled',
         status: 'closed',
+        cash_breakdown: cashBreakdownJson,
       })
       .eq('id', id)
       .select()
@@ -353,7 +346,7 @@ export async function PATCH(req: NextRequest) {
 
     if (error) throw error;
 
-    return NextResponse.json({ success: true, shift, server_expected_cash: serverExpectedCash });
+    return NextResponse.json({ success: true, shift, server_expected_cash: serverExpectedCash, cash_breakdown: cashBreakdownJson });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

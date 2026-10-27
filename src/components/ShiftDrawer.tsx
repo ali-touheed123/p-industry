@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { Shift, PettyExpense, Tenant, TokenTransaction } from '@/types';
-import { calculateExpectedClosingCash } from '@/utils/cashReconciliation';
+import { computeShiftCash, isCancelledInvoice, isReturnInvoice } from '@/utils/cashLedger';
 import { printViaIframe } from '@/utils/iframePrint';
 import { escapeHtml } from '@/utils/receiptRenderCore';
 
@@ -111,6 +111,7 @@ export default function ShiftDrawer({
   const [dbInvoices, setDbInvoices] = useState<any[]>([]);
   const [dbExpenses, setDbExpenses] = useState<PettyExpense[]>([]);
   const [tokenTransactions, setTokenTransactions] = useState<TokenTransaction[]>([]);
+  const [dbVouchers, setDbVouchers] = useState<any[]>([]);
 
   // Previous same-day shift (for reference & delta)
   const [previousSameDayShift, setPreviousSameDayShift] = useState<any | null>(null);
@@ -125,18 +126,20 @@ export default function ShiftDrawer({
     const fetchShiftData = async () => {
       try {
         const todayIso = new Date().toISOString().split('T')[0];
-        const [purchasesRes, invoicesRes, expensesRes, tokensRes] = await Promise.all([
+        const [purchasesRes, invoicesRes, expensesRes, tokensRes, vouchersRes] = await Promise.all([
           fetch(`/api/purchases?tenant_id=${tenantId}${shift?.id ? `&shift_id=${shift.id}` : `&start_date=${todayIso}`}`),
           fetch(`/api/invoices?tenant_id=${tenantId}${shift?.id ? `&shift_id=${shift.id}` : `&start_date=${todayIso}`}`),
           fetch(`/api/expenses?tenant_id=${tenantId}${shift?.id ? `&shift_id=${shift.id}` : ''}`),
           fetch(`/api/tokens?tenant_id=${tenantId}${shift?.id ? `&shift_id=${shift.id}` : ''}`),
+          fetch(`/api/vouchers?tenant_id=${tenantId}${shift?.id ? `&shift_id=${shift.id}` : ''}`),
         ]);
 
-        const [purchasesData, invoicesData, expensesData, tokensData] = await Promise.all([
+        const [purchasesData, invoicesData, expensesData, tokensData, vouchersData] = await Promise.all([
           purchasesRes.json(),
           invoicesRes.json(),
           expensesRes.json(),
           tokensRes.json(),
+          vouchersRes.json(),
         ]);
 
         if (purchasesData.success) {
@@ -150,6 +153,9 @@ export default function ShiftDrawer({
         }
         if (tokensData.success && Array.isArray(tokensData.transactions)) {
           setTokenTransactions(tokensData.transactions);
+        }
+        if (vouchersData.success && Array.isArray(vouchersData.vouchers)) {
+          setDbVouchers(vouchersData.vouchers);
         }
       } catch (err) {
         console.error('Error fetching shift drawer data', err);
@@ -177,11 +183,23 @@ export default function ShiftDrawer({
     fetchPrevShift();
   }, [tenantId, shift?.id]);
 
-  // Combine passed props with DB records (deduplicating by id and isolating to current shift)
+  // Combine passed props with DB records — deduplicate by id.
+  // Rule: a row that is cancelled/void in EITHER source is excluded.
+  // When both sources have the same id, prefer the fresher DB row.
   const activeInvoices = React.useMemo(() => {
     const map = new Map<string, any>();
-    dbInvoices.forEach(inv => map.set(inv.id, inv));
-    (invoices || []).forEach(inv => map.set(inv.id, inv));
+    // Load prop invoices first (lower priority)
+    (invoices || []).forEach(inv => {
+      if (!isCancelledInvoice(inv)) map.set(inv.id, inv);
+    });
+    // Overwrite with DB rows (higher priority)
+    dbInvoices.forEach(inv => {
+      if (isCancelledInvoice(inv)) {
+        map.delete(inv.id); // DB says cancelled/void — remove even if prop said active
+      } else {
+        map.set(inv.id, inv);
+      }
+    });
     const all = Array.from(map.values());
     const currentShiftId = shift?.id || closedShiftData?.id || closedShiftSnapshot?.shiftId;
     if (currentShiftId) {
@@ -202,50 +220,68 @@ export default function ShiftDrawer({
     return all;
   }, [dbExpenses, expenses, shift?.id, closedShiftData?.id, closedShiftSnapshot?.shiftId]);
 
-  // Dynamic Sales & Returns breakdown from live invoices (frozen to snapshot if closed)
+  // Dynamic Sales & Returns breakdown using shared computeShiftCash (Phase 1 — single source of truth)
   const openingCash = closedShiftSnapshot ? closedShiftSnapshot.openingCash : (shift?.opening_cash || 0);
-  
-  // Task 9.1: Exclude cancelled/voided invoices from reconciliation
-  const activeNonCancelledInvoices = activeInvoices.filter(
-    i => (i.status || '').toLowerCase() !== 'cancelled' && (i.status || '').toLowerCase() !== 'void'
+
+  // Active non-cancelled invoices for display only (already guaranteed by activeInvoices useMemo)
+  const activeNonCancelledInvoices = activeInvoices; // isCancelledInvoice already excluded in merge
+  const salesInvoices = activeNonCancelledInvoices.filter(i => !isReturnInvoice(i));
+  const returnInvoices = activeNonCancelledInvoices.filter(i => isReturnInvoice(i));
+
+  // Token metrics (excluding reversed rows)
+  const activeTokens = tokenTransactions.filter(t => {
+    const uStatus = (t.usage_status || '').toLowerCase();
+    return uStatus !== 'reversed';
+  });
+  const notReversalType = activeTokens.filter(t => (t.type || t.transaction_type || '').toLowerCase() !== 'reversal');
+
+  const tokensIssued = notReversalType
+    .filter((t) => (t.type || t.transaction_type) === 'issued')
+    .reduce((sum, t) => sum + Number(t.total_amount || t.token_value || 0), 0);
+
+  const tokensRedeemed = notReversalType
+    .filter((t) => (t.type || t.transaction_type) === 'redeemed')
+    .reduce((sum, t) => sum + Number(t.total_amount || t.redeemed_amount || t.token_value || 0), 0);
+
+  const tokenLiability = Math.max(0, tokensIssued - tokensRedeemed);
+
+  const retainedTransactions = tokenTransactions.filter(
+    (t) => (t.type || t.transaction_type) === 'shop_retained'
   );
-  const salesInvoices = activeNonCancelledInvoices.filter(i => (i.invoice_type || 'sales') !== 'return');
-  const returnInvoices = activeNonCancelledInvoices.filter(i => (i.invoice_type || 'sales') === 'return');
+  const retainedTotal = retainedTransactions.reduce(
+    (sum, t) => sum + Number(t.total_amount || t.token_value || 0),
+    0
+  );
 
-  const grossSales = salesInvoices.length > 0
-    ? salesInvoices.reduce((s, i) => s + Number(i.grandTotal || i.net_total || 0), 0)
-    : (totalSales > 0 ? totalSales : 0);
+  // Compute full cash breakdown via shared function
+  const currentShiftVouchers = shift?.id
+    ? dbVouchers.filter((v: any) => v.shift_id === shift.id)
+    : [];
 
+  const cashBreakdown = computeShiftCash({
+    openingCash,
+    invoices: activeInvoices,
+    purchases,
+    vouchers: currentShiftVouchers,
+    expenses: activeExpenses,
+    tokens: notReversalType,
+    shiftId: shift?.id || closedShiftData?.id || closedShiftSnapshot?.shiftId,
+  });
+
+  const cashSales = cashBreakdown.cashSales;
+  const cashReturns = cashBreakdown.cashRefundsOnSalesReturns;
+  const supplierCashPaid = cashBreakdown.supplierCashPaid;
+  // NO Math.max clamp on expectedCash anywhere — negative must be preserved
+  const expectedCash = cashBreakdown.expectedCash;
+
+  const grossSales = salesInvoices.reduce((s, i) => s + Number(i.grandTotal || i.net_total || 0), 0);
   const totalSalesReturns = returnInvoices.reduce((s, i) => s + Number(i.grandTotal || i.net_total || 0), 0);
-  const netSales = Math.max(0, grossSales - totalSalesReturns);
-
-  // Extract accurate payment components (handles pure cash, pure credit, pure bank/card, and split payments)
-  const cashSales = salesInvoices.length > 0
-    ? salesInvoices.reduce((s, i) => {
-        const cp = Number(i.cash_paid || 0);
-        if (cp > 0) return s + cp;
-        if (!i.payment_type || i.payment_type === 'cash') {
-          return s + Number(i.paid_amount || i.grandTotal || i.net_total || 0);
-        }
-        return s;
-      }, 0)
-    : (totalSales > 0 ? totalSales : 0);
-
-  const cashReturns = returnInvoices.reduce((s, i) => {
-    const cp = Number(i.cash_paid || 0);
-    if (cp > 0) return s + cp;
-    if (!i.payment_type || i.payment_type === 'cash') {
-      return s + Number(i.paid_amount || i.grandTotal || i.net_total || 0);
-    }
-    return s;
-  }, 0);
+  const netSales = grossSales - totalSalesReturns; // No clamp — keep sign
 
   const creditSales = salesInvoices.reduce((s, i) => {
     const due = Number(i.due_amount || 0);
     if (due > 0) return s + due;
-    if (i.payment_type === 'credit') {
-      return s + Number(i.grandTotal || i.net_total || 0);
-    }
+    if (i.payment_type === 'credit') return s + Number(i.grandTotal || i.net_total || 0);
     return s;
   }, 0);
 
@@ -264,31 +300,10 @@ export default function ShiftDrawer({
 
   const totalPurchases = regularPurchases.reduce((s, p) => s + Number(p.net_total || 0), 0);
   const totalPurchaseReturns = purchaseReturns.reduce((s, p) => s + Number(p.net_total || 0), 0);
-  const supplierCashPaid = regularPurchases
-    .reduce((s, p) => s + Number(p.paid_amount || (p.payment_type === 'cash' ? p.net_total : 0) || 0), 0);
 
   const totalSalesAggregate = grossSales;
   const currentExpenses = activeExpenses;
   const totalExpenses = currentExpenses.reduce((sum, exp) => sum + exp.amount, 0);
-
-  // Token Metrics Calculations
-  const tokensIssued = tokenTransactions
-    .filter((t) => (t.type || t.transaction_type) === 'issued')
-    .reduce((sum, t) => sum + Number(t.total_amount || t.token_value || 0), 0);
-
-  const tokensRedeemed = tokenTransactions
-    .filter((t) => (t.type || t.transaction_type) === 'redeemed')
-    .reduce((sum, t) => sum + Number(t.total_amount || t.redeemed_amount || t.token_value || 0), 0);
-
-  const tokenLiability = Math.max(0, tokensIssued - tokensRedeemed);
-
-  const retainedTransactions = tokenTransactions.filter(
-    (t) => (t.type || t.transaction_type) === 'shop_retained'
-  );
-  const retainedTotal = retainedTransactions.reduce(
-    (sum, t) => sum + Number(t.total_amount || t.token_value || 0),
-    0
-  );
 
   const retainedGrouped = React.useMemo(() => {
     const groups: Record<
@@ -313,21 +328,7 @@ export default function ShiftDrawer({
     return Object.values(groups);
   }, [retainedTransactions]);
 
-  // Standardized Cash Reconciliation Formula (Task 13.1.4 / 13.2.11):
-  // Expected Cash = Opening Cash + Cash Sales - Cash Returns - Supplier Cash - Expenses - Tokens Redeemed
-  const expectedCash = Math.max(
-    0,
-    calculateExpectedClosingCash({
-      openingCash,
-      cashSales,
-      cashReturns,
-      expenses: totalExpenses,
-      supplierPayouts: supplierCashPaid,
-      tokenPayouts: tokensRedeemed,
-    })
-  );
-
-  // BUG FIX #6: Actual Physical Cash does NOT default to expectedCash — requires explicit input
+  // NO Math.max clamp — negative expected cash must be shown (Phase 1)
   const hasCashInput = actualCashInput !== '';
   const actualPhysicalCash = hasCashInput ? (parseFloat(actualCashInput) || 0) : 0;
   const variance = hasCashInput ? actualPhysicalCash - expectedCash : 0;
