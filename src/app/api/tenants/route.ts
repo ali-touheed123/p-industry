@@ -45,8 +45,9 @@ export async function GET(req: NextRequest) {
     // Scope tenant listing based on session role
     if (auth.session.role === 'developer') {
       // Developer can see all tenants
-    } else if (auth.session.role === 'ceo') {
-      // CEO can see their own tenant and sister branches matching owner_id (or fallback owner_name or email)
+    } else if (auth.session.role === 'ceo' || auth.session.role === 'staff' || auth.session.role === 'godown_staff') {
+      // CEO and branch staff can see their own tenant and sister branches matching owner_id (or fallback owner_name or email)
+      // This enables inter-branch requisitioning and transfer workflows within the same enterprise
       let callerOwnerId = auth.session.ownerId;
       let callerTenant: any = null;
 
@@ -103,7 +104,7 @@ export async function GET(req: NextRequest) {
         }
       }
     } else {
-      // Staff / other: only their assigned branch
+      // Unmapped roles: fallback strictly to their assigned branch
       tenantQuery = tenantQuery.eq('id', auth.session.tenantId);
     }
 

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState, useEffect } from 'react';
 import { Branch } from '@/types/ceo';
@@ -17,6 +17,7 @@ import { BranchOrdersView } from './BranchOrdersView';
 import { AuditLogsView } from './AuditLogsView';
 import { SpecialPrintLogView } from './SpecialPrintLogView';
 import { SettingsView } from './SettingsView';
+import { NegativeStockView } from './NegativeStockView';
 import './ceo-panel.css';
 
 interface CeoSuiteProps {
@@ -266,6 +267,7 @@ export const CeoSuite: React.FC<CeoSuiteProps> = ({ tenant, initialBranchSlug, o
           {currentSection === 'purchase'      && <PurchaseView key={selectedBranch.id} branch={selectedBranch} />}
           {currentSection === 'tokens'        && <TokensView key={selectedBranch.id} branch={selectedBranch} />}
           {currentSection === 'branch-orders' && <BranchOrdersView key={selectedBranch.id} branch={selectedBranch} />}
+          {currentSection === 'negative-stock' && <NegativeStockView key={selectedBranch.id} branch={selectedBranch} />}
           {currentSection === 'audit-logs'        && <AuditLogsView key={selectedBranch.id} branch={selectedBranch} />}
           {currentSection === 'special-print-log' && <SpecialPrintLogView key={selectedBranch.id} branch={selectedBranch} />}
           {currentSection === 'settings'          && <SettingsView tenant={selectedBranch as any} />}

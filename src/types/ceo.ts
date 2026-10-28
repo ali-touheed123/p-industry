@@ -57,6 +57,7 @@ export interface Invoice {
   salesman: string;
   register?: string;
   shiftId?: string;
+  remarks?: string;
   items: InvoiceItem[];
 }
 

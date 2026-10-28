@@ -78,6 +78,7 @@ export const SalesView: React.FC<SalesViewProps> = ({ branch }) => {
               itemsCount: rawItems.length,
               status: isReturn ? 'return' : (inv.status || 'Completed'),
               salesman: inv.created_by || 'Counter Staff',
+              remarks: inv.remarks || '',
               shiftId: inv.shift_id || '',
               register: inv.shift_id ? `Shift Register #${String(inv.shift_id).slice(-4)}` : (inv.created_by ? `${inv.created_by} POS Register` : 'Main Counter Register'),
               items: rawItems.map((it: any) => ({

@@ -46,6 +46,14 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
           </button>
         </div>
 
+        {/* Remarks / Cancel / Edit Reason Banner */}
+        {invoice.remarks && (
+          <div style={{ padding: '10px 24px', backgroundColor: '#FEF2F2', borderBottom: '1px solid #FECACA', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#991B1B' }}>
+            <span style={{ fontWeight: 700, padding: '2px 6px', backgroundColor: '#FEE2E2', borderRadius: '4px', textTransform: 'uppercase', fontSize: '10px' }}>Reason / Notes</span>
+            <span style={{ fontWeight: 600 }}>{invoice.remarks}</span>
+          </div>
+        )}
+
         {/* Invoice Meta Grid */}
         <div style={{ padding: '16px 24px', backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', fontSize: '12px' }}>
           <div style={{ backgroundColor: '#FFFFFF', padding: '12px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>

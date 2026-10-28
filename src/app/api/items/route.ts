@@ -278,6 +278,8 @@ export async function GET(req: NextRequest) {
         query = query.lte('stock_qty', 5);
       } else if (stockStatusParam === 'out_of_stock') {
         query = query.lte('stock_qty', 0);
+      } else if (stockStatusParam === 'negative_stock') {
+        query = query.lt('stock_qty', 0);
       }
 
       const validSortFields: Record<string, string> = {

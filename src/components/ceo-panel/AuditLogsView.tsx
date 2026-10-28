@@ -58,6 +58,8 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({ branch }) => {
       let matches = false;
       if (actionFilter === 'sales' || actionFilter === 'create_invoice') {
         matches = act.includes('sales invoice') || actType === 'sale' || (entity === 'invoice' && !act.includes('return'));
+      } else if (actionFilter === 'edits_cancels') {
+        matches = act.includes('edit') || act.includes('cancel') || act.includes('void');
       } else if (actionFilter === 'returns' || actionFilter === 'return_invoice') {
         matches = act.includes('return') || act.includes('credit note') || actType === 'return' || actType === 'purchase_return';
       } else if (actionFilter === 'purchases' || actionFilter === 'create_purchase') {
@@ -168,6 +170,7 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({ branch }) => {
           >
             <option value="all">All Actions</option>
             <option value="sales">Sales Invoices</option>
+            <option value="edits_cancels">Sales Edits &amp; Cancellations</option>
             <option value="returns">Returns &amp; Credit Notes</option>
             <option value="purchases">Purchase Invoices</option>
             <option value="grn">Goods Received (GRN)</option>
@@ -258,12 +261,17 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({ branch }) => {
                       {log.details ? (
                         <div style={{ maxWidth: '400px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {log.details.invoice_no ? <strong style={{ color: '#0F172A' }}>Invoice #{log.details.invoice_no}</strong> : ''}
+                          {log.details.reason ? (
+                            <span style={{ color: '#DC2626', fontWeight: 600, marginLeft: '6px', backgroundColor: '#FEF2F2', padding: '1px 6px', borderRadius: '4px', border: '1px solid #FECACA' }}>
+                              Wajah / Reason: &ldquo;{log.details.reason}&rdquo;
+                            </span>
+                          ) : ''}
                           {log.details.net_total !== undefined ? <span style={{ color: '#D97706', fontWeight: 600 }}> • Net: Rs. {Number(log.details.net_total).toLocaleString()}</span> : ''}
                           {log.details.item_name ? <span>Product: {log.details.item_name}</span> : ''}
                           {log.details.qty ? <span style={{ color: '#475569' }}> • Qty: {log.details.qty}</span> : ''}
                           {log.details.grn_no ? <strong style={{ color: '#166534' }}> • GRN #{log.details.grn_no}</strong> : ''}
                           {log.details.supplier_name ? <span style={{ color: '#475569' }}>Supplier: {log.details.supplier_name}</span> : ''}
-                          {!log.details.invoice_no && !log.details.item_name && !log.details.grn_no && !log.details.supplier_name ? JSON.stringify(log.details) : ''}
+                          {!log.details.invoice_no && !log.details.item_name && !log.details.grn_no && !log.details.supplier_name && !log.details.reason ? JSON.stringify(log.details) : ''}
                         </div>
                       ) : (
                         '—'

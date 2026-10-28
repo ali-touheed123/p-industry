@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React from 'react';
 import { Branch } from '@/types/ceo';
@@ -18,9 +18,10 @@ import {
   ArrowLeft,
   ChevronRight,
   ChevronLeft,
+  AlertTriangle,
 } from 'lucide-react';
 
-export type CEOSection = 'overview' | 'sales' | 'returns' | 'day-close' | 'customers' | 'purchase' | 'tokens' | 'branch-orders' | 'audit-logs' | 'special-print-log' | 'settings';
+export type CEOSection = 'overview' | 'sales' | 'returns' | 'day-close' | 'customers' | 'purchase' | 'tokens' | 'branch-orders' | 'negative-stock' | 'audit-logs' | 'special-print-log' | 'settings';
 
 interface ExecutiveSidebarProps {
   currentSection: CEOSection;
@@ -42,6 +43,7 @@ const NAV_ITEMS: { id: CEOSection; label: string; icon: React.ComponentType<{ st
   { id: 'purchase',          label: 'Procurement & POs',       icon: ShoppingBag },
   { id: 'tokens',            label: 'Token Stockpile',         icon: Coins },
   { id: 'branch-orders',     label: 'Branch Transfers',        icon: Truck },
+  { id: 'negative-stock',    label: 'Negative Stock Alert',    icon: AlertTriangle },
   { id: 'audit-logs',        label: 'Audit & Activity Log',    icon: ShieldCheck },
   { id: 'special-print-log', label: 'Special Receipt Log',     icon: ScrollText },
   { id: 'settings',          label: 'Branch & Commission',     icon: Settings },
