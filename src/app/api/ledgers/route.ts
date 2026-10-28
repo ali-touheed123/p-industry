@@ -177,22 +177,33 @@ export async function GET(req: NextRequest) {
       )
     );
     const transferItemsByOrderNo: Record<string, any[]> = {};
+    const transferOrderMetaByOrderNo: Record<string, any> = {};
     if (ibtRefs.length > 0) {
       const { data: orders } = await supabaseAdmin
         .from('branch_orders')
-        .select('order_no, branch_order_items(*)')
+        .select('order_no, subtotal, discount, delivery_charges, dispatch_note, transfer_value, dispatched_at, branch_order_items(*)')
         .in('order_no', ibtRefs as string[])
         .or(`from_tenant_id.eq.${tenantId},to_tenant_id.eq.${tenantId}`);
       (orders || []).forEach((o: any) => {
-        transferItemsByOrderNo[o.order_no] = (o.branch_order_items || []).map((it: any) => ({
-          item_name: it.item_name || it.item_code,
-          code: it.item_code,
-          shade_code: '',
-          pack_size: it.unit || 'Can',
-          qty: Number(it.qty) || 0,
-          unit_price: 0,
-          total_price: 0,
-        }));
+        transferOrderMetaByOrderNo[o.order_no] = {
+          subtotal: o.subtotal != null ? Number(o.subtotal) : null,
+          discount: o.discount != null ? Number(o.discount) : null,
+          delivery_charges: o.delivery_charges != null ? Number(o.delivery_charges) : null,
+          dispatch_note: o.dispatch_note || null,
+          transfer_value: o.transfer_value != null ? Number(o.transfer_value) : null,
+        };
+        transferItemsByOrderNo[o.order_no] = (o.branch_order_items || []).map((it: any) => {
+          const isLegacy = it.dispatched_qty === null || it.dispatched_qty === undefined;
+          return {
+            item_name: it.item_name || it.item_code,
+            code: it.item_code,
+            shade_code: '',
+            pack_size: it.unit || 'Can',
+            qty: isLegacy ? Number(it.qty) || 0 : Number(it.dispatched_qty) || 0,
+            unit_price: isLegacy ? null : Number(it.unit_price ?? 0),
+            total_price: isLegacy ? null : Number(it.total_price ?? (Number(it.dispatched_qty || 0) * Number(it.unit_price || 0))),
+          };
+        });
       });
     }
 
@@ -206,29 +217,35 @@ export async function GET(req: NextRequest) {
       // ── Branch Transfer Vouchers ──────────────────────────────────────
       if (vType === 'branch_transfer_in') {
         // We received stock → Debit (we OWE them)
+        const meta = transferOrderMetaByOrderNo[v.reference_no];
+        const noteStr = meta?.dispatch_note ? ` · Note: ${meta.dispatch_note}` : '';
         transactions.push({
           id: v.id,
           date: v.date || new Date(v.created_at).toISOString().split('T')[0],
           timestamp: new Date(v.created_at).getTime(),
           type: 'IBT-IN',
           typeClass: 'badge-target',
-          desc: `${v.voucher_no} — ${v.remarks || 'Stock Received (Payable)'}`,
+          desc: `${v.voucher_no} — ${v.remarks || 'Stock Received (Payable)'}${noteStr}`,
           debit: amt,
           credit: 0,
           items: transferItemsByOrderNo[v.reference_no] || undefined,
+          pricingMeta: meta || undefined,
         });
       } else if (vType === 'branch_transfer_out') {
         // We dispatched stock → Credit (they OWE us)
+        const meta = transferOrderMetaByOrderNo[v.reference_no];
+        const noteStr = meta?.dispatch_note ? ` · Note: ${meta.dispatch_note}` : '';
         transactions.push({
           id: v.id,
           date: v.date || new Date(v.created_at).toISOString().split('T')[0],
           timestamp: new Date(v.created_at).getTime(),
           type: 'IBT-OUT',
           typeClass: 'badge-credit',
-          desc: `${v.voucher_no} — ${v.remarks || 'Stock Dispatched (Receivable)'}`,
+          desc: `${v.voucher_no} — ${v.remarks || 'Stock Dispatched (Receivable)'}${noteStr}`,
           debit: 0,
           credit: amt,
           items: transferItemsByOrderNo[v.reference_no] || undefined,
+          pricingMeta: meta || undefined,
         });
       } else if (vType === 'opening_balance') {
         // ── Opening Balance / Previous Credit ───────────────────────────

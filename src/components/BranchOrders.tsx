@@ -88,6 +88,37 @@ export default function BranchOrders({
   const [formError, setFormError] = useState('');
   const [formSuccess, setFormSuccess] = useState('');
 
+  // Dispatch Review Modal State
+  const [dispatchModalOrder, setDispatchModalOrder] = useState<BranchOrder | null>(null);
+  const [dispatchLines, setDispatchLines] = useState<
+    Array<{
+      id: string;
+      item_code: string;
+      item_name: string;
+      unit: string;
+      requested_qty: number;
+      available_stock: number;
+      dispatched_qty: number;
+      unit_price: number;
+    }>
+  >([]);
+  const [dispatchDiscountType, setDispatchDiscountType] = useState<'flat' | 'percent'>('flat');
+  const [dispatchDiscountVal, setDispatchDiscountVal] = useState<number>(0);
+  const [dispatchDeliveryCharges, setDispatchDeliveryCharges] = useState<number>(0);
+  const [dispatchDeliveryMethod, setDispatchDeliveryMethod] = useState<string>('Van / Transport');
+  const [dispatchNote, setDispatchNote] = useState<string>('');
+  const [dispatchSubmitting, setDispatchSubmitting] = useState<boolean>(false);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
+
+  // Reject Modal State
+  const [rejectModalOrder, setRejectModalOrder] = useState<BranchOrder | null>(null);
+  const [rejectReason, setRejectReason] = useState<string>('');
+  const [rejectSubmitting, setRejectSubmitting] = useState<boolean>(false);
+  const [rejectError, setRejectError] = useState<string | null>(null);
+
+  // Double-click protection tracker
+  const [actionInProgressId, setActionInProgressId] = useState<string | null>(null);
+
   // Close search dropdown on click outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -268,8 +299,160 @@ export default function BranchOrders({
     }
   };
 
-  // Update order status (accept / reject / dispatch / receive)
+  // Open Dispatch Review Modal
+  const openDispatchModal = (order: BranchOrder) => {
+    const lines = (order.items || []).map((it) => {
+      const stock = it.supplier_stock !== undefined ? it.supplier_stock : 0;
+      // Default dispatched qty: min(requested_qty, available_stock) -> 0 if out of stock
+      const defaultQty = Math.max(0, Math.min(it.qty, stock));
+      // Default rate: pre-filled from supplying branch (cost_price fallback retail * 0.85)
+      const defaultRate = it.default_rate !== undefined ? it.default_rate : 0;
+      return {
+        id: it.id || '',
+        item_code: it.item_code || '',
+        item_name: it.item_name,
+        unit: it.unit || 'Can',
+        requested_qty: it.qty,
+        available_stock: stock,
+        dispatched_qty: defaultQty,
+        unit_price: defaultRate,
+      };
+    });
+
+    setDispatchLines(lines);
+    setDispatchDiscountType('flat');
+    setDispatchDiscountVal(0);
+    setDispatchDeliveryCharges(0);
+    setDispatchDeliveryMethod('Van / Transport');
+    setDispatchNote('');
+    setDispatchError(null);
+    setDispatchModalOrder(order);
+  };
+
+  // Confirm Dispatch
+  const handleConfirmDispatch = async () => {
+    if (!dispatchModalOrder) return;
+    setDispatchError(null);
+
+    const hasShort = dispatchLines.some((l) => l.dispatched_qty < l.requested_qty);
+    if (hasShort && !dispatchNote.trim()) {
+      setDispatchError('A note to the requesting branch is required when any item is dispatched short.');
+      return;
+    }
+
+    const totalQty = dispatchLines.reduce((s, l) => s + l.dispatched_qty, 0);
+    if (totalQty === 0) {
+      setDispatchError('Cannot dispatch an order with 0 total quantity. Please reject the order instead.');
+      return;
+    }
+
+    for (const line of dispatchLines) {
+      if (line.unit_price < 0) {
+        setDispatchError(`Unit price cannot be negative for ${line.item_name}.`);
+        return;
+      }
+      if (line.dispatched_qty > line.requested_qty) {
+        setDispatchError(`Dispatched quantity cannot exceed requested quantity for ${line.item_name}.`);
+        return;
+      }
+    }
+
+    const subtotal = dispatchLines.reduce((sum, l) => sum + l.dispatched_qty * l.unit_price, 0);
+    const resolvedDiscount =
+      dispatchDiscountType === 'percent'
+        ? Math.round(((subtotal * dispatchDiscountVal) / 100) * 100) / 100
+        : dispatchDiscountVal;
+
+    if (resolvedDiscount > subtotal) {
+      setDispatchError('Discount cannot exceed subtotal.');
+      return;
+    }
+
+    setDispatchSubmitting(true);
+    try {
+      const res = await fetch('/api/branch-orders', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: dispatchModalOrder.id,
+          status: 'dispatched',
+          items: dispatchLines.map((l) => ({
+            id: l.id,
+            item_code: l.item_code,
+            dispatched_qty: l.dispatched_qty,
+            unit_price: l.unit_price,
+          })),
+          discount: resolvedDiscount,
+          delivery_charges: dispatchDeliveryCharges,
+          delivery_method: dispatchDeliveryMethod,
+          dispatch_note: dispatchNote.trim() || null,
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.success) {
+        setDispatchError(data.error || 'Failed to dispatch order');
+      } else {
+        setDispatchModalOrder(null);
+        await fetchOrders();
+      }
+    } catch (err: any) {
+      setDispatchError(err.message || 'Network error dispatching order');
+    } finally {
+      setDispatchSubmitting(false);
+    }
+  };
+
+  // Open Reject Modal
+  const openRejectModal = (order: BranchOrder) => {
+    setRejectReason('');
+    setRejectError(null);
+    setRejectModalOrder(order);
+  };
+
+  // Confirm Reject
+  const handleConfirmReject = async () => {
+    if (!rejectModalOrder) return;
+    const clean = rejectReason.trim();
+    if (!clean) {
+      setRejectError('A rejection reason is required.');
+      return;
+    }
+    if (clean.length > 500) {
+      setRejectError('Rejection reason cannot exceed 500 characters.');
+      return;
+    }
+
+    setRejectSubmitting(true);
+    try {
+      const res = await fetch('/api/branch-orders', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: rejectModalOrder.id,
+          status: 'rejected',
+          reject_reason: clean,
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.success) {
+        setRejectError(data.error || 'Failed to reject order');
+      } else {
+        setRejectModalOrder(null);
+        await fetchOrders();
+      }
+    } catch (err: any) {
+      setRejectError(err.message || 'Network error rejecting order');
+    } finally {
+      setRejectSubmitting(false);
+    }
+  };
+
+  // Update order status (accept / receive) with double-click guard
   const handleStatusUpdate = async (orderId: string, newStatus: string) => {
+    if (actionInProgressId) return;
+    setActionInProgressId(orderId);
     try {
       const res = await fetch('/api/branch-orders', {
         method: 'PATCH',
@@ -284,6 +467,8 @@ export default function BranchOrders({
       }
     } catch (err) {
       console.error(err);
+    } finally {
+      setActionInProgressId(null);
     }
   };
 
@@ -1390,7 +1575,14 @@ export default function BranchOrders({
                                 whiteSpace: 'nowrap',
                               }}
                             >
-                              Qty: {item.qty} {item.unit || 'Can'}
+                              {item.dispatched_qty !== undefined && item.dispatched_qty !== null && item.dispatched_qty !== item.qty ? (
+                                <span style={{ color: '#D97706' }}>
+                                  Qty: {item.dispatched_qty} of {item.qty} {item.unit || 'Can'}
+                                </span>
+                              ) : (
+                                <span>Qty: {item.qty} {item.unit || 'Can'}</span>
+                              )}
+                              {item.unit_price ? ` @ Rs. ${item.unit_price.toLocaleString()}` : ''}
                             </span>
                           </div>
                         ))}
@@ -1414,6 +1606,76 @@ export default function BranchOrders({
                           <span>
                             <strong>Notes:</strong> {order.notes}
                           </span>
+                        </div>
+                      )}
+
+                      {order.dispatch_note && (
+                        <div
+                          style={{
+                            fontSize: '12px',
+                            color: '#1E40AF',
+                            marginTop: '6px',
+                            background: '#EFF6FF',
+                            border: '1px solid #DBEAFE',
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                        >
+                          <Truck size={14} style={{ color: '#2563EB', flexShrink: 0 }} />
+                          <span>
+                            <strong>Dispatch Note:</strong> {order.dispatch_note}
+                          </span>
+                        </div>
+                      )}
+
+                      {order.reject_reason && (
+                        <div
+                          style={{
+                            fontSize: '12px',
+                            color: '#991B1B',
+                            marginTop: '6px',
+                            background: '#FEF2F2',
+                            border: '1px solid #FEE2E2',
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                        >
+                          <XCircle size={14} style={{ color: '#DC2626', flexShrink: 0 }} />
+                          <span>
+                            <strong>Rejection Reason:</strong> {order.reject_reason}
+                          </span>
+                        </div>
+                      )}
+
+                      {order.transfer_value !== undefined && order.transfer_value !== null && (order.status === 'dispatched' || order.status === 'received') && (
+                        <div
+                          style={{
+                            fontSize: '12px',
+                            color: '#334155',
+                            background: '#F8FAFC',
+                            padding: '6px 10px',
+                            borderRadius: '6px',
+                            border: '1px solid #E2E8F0',
+                            marginTop: '6px',
+                            display: 'flex',
+                            gap: '12px',
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          <span>Subtotal: <strong>Rs. {Number(order.subtotal || 0).toLocaleString()}</strong></span>
+                          {Number(order.discount || 0) > 0 && (
+                            <span style={{ color: '#16A34A' }}>Discount: <strong>-Rs. {Number(order.discount).toLocaleString()}</strong></span>
+                          )}
+                          {Number(order.delivery_charges || 0) > 0 && (
+                            <span style={{ color: '#2563EB' }}>Delivery ({order.delivery_method || 'Transport'}): <strong>+Rs. {Number(order.delivery_charges).toLocaleString()}</strong></span>
+                          )}
+                          <span style={{ fontWeight: 700, color: '#0F172A' }}>Net Value: <strong>Rs. {Number(order.transfer_value || 0).toLocaleString()}</strong></span>
                         </div>
                       )}
                     </div>
@@ -1441,6 +1703,7 @@ export default function BranchOrders({
                       {order.status === 'dispatched' && (
                         <button
                           onClick={() => handleStatusUpdate(order.id, 'received')}
+                          disabled={actionInProgressId === order.id}
                           className="btn btn-primary"
                           style={{
                             marginTop: '8px',
@@ -1449,10 +1712,11 @@ export default function BranchOrders({
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '6px',
+                            opacity: actionInProgressId === order.id ? 0.7 : 1,
                           }}
                         >
                           <CheckCircle2 size={14} />
-                          Mark Received
+                          {actionInProgressId === order.id ? 'Confirming...' : 'Mark Received'}
                         </button>
                       )}
                     </div>
@@ -1624,7 +1888,14 @@ export default function BranchOrders({
                                 whiteSpace: 'nowrap',
                               }}
                             >
-                              Qty: {item.qty} {item.unit || 'Can'}
+                              {item.dispatched_qty !== undefined && item.dispatched_qty !== null && item.dispatched_qty !== item.qty ? (
+                                <span style={{ color: '#D97706' }}>
+                                  Qty: {item.dispatched_qty} of {item.qty} {item.unit || 'Can'}
+                                </span>
+                              ) : (
+                                <span>Qty: {item.qty} {item.unit || 'Can'}</span>
+                              )}
+                              {item.unit_price ? ` @ Rs. ${item.unit_price.toLocaleString()}` : ''}
                             </span>
                           </div>
                         ))}
@@ -1648,6 +1919,76 @@ export default function BranchOrders({
                           <span>
                             <strong>Notes:</strong> {order.notes}
                           </span>
+                        </div>
+                      )}
+
+                      {order.dispatch_note && (
+                        <div
+                          style={{
+                            fontSize: '12px',
+                            color: '#1E40AF',
+                            marginTop: '6px',
+                            background: '#EFF6FF',
+                            border: '1px solid #DBEAFE',
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                        >
+                          <Truck size={14} style={{ color: '#2563EB', flexShrink: 0 }} />
+                          <span>
+                            <strong>Dispatch Note:</strong> {order.dispatch_note}
+                          </span>
+                        </div>
+                      )}
+
+                      {order.reject_reason && (
+                        <div
+                          style={{
+                            fontSize: '12px',
+                            color: '#991B1B',
+                            marginTop: '6px',
+                            background: '#FEF2F2',
+                            border: '1px solid #FEE2E2',
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                        >
+                          <XCircle size={14} style={{ color: '#DC2626', flexShrink: 0 }} />
+                          <span>
+                            <strong>Rejection Reason:</strong> {order.reject_reason}
+                          </span>
+                        </div>
+                      )}
+
+                      {order.transfer_value !== undefined && order.transfer_value !== null && (order.status === 'dispatched' || order.status === 'received') && (
+                        <div
+                          style={{
+                            fontSize: '12px',
+                            color: '#334155',
+                            background: '#F8FAFC',
+                            padding: '6px 10px',
+                            borderRadius: '6px',
+                            border: '1px solid #E2E8F0',
+                            marginTop: '6px',
+                            display: 'flex',
+                            gap: '12px',
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          <span>Subtotal: <strong>Rs. {Number(order.subtotal || 0).toLocaleString()}</strong></span>
+                          {Number(order.discount || 0) > 0 && (
+                            <span style={{ color: '#16A34A' }}>Discount: <strong>-Rs. {Number(order.discount).toLocaleString()}</strong></span>
+                          )}
+                          {Number(order.delivery_charges || 0) > 0 && (
+                            <span style={{ color: '#2563EB' }}>Delivery ({order.delivery_method || 'Transport'}): <strong>+Rs. {Number(order.delivery_charges).toLocaleString()}</strong></span>
+                          )}
+                          <span style={{ fontWeight: 700, color: '#0F172A' }}>Net Value: <strong>Rs. {Number(order.transfer_value || 0).toLocaleString()}</strong></span>
                         </div>
                       )}
                     </div>
@@ -1677,6 +2018,7 @@ export default function BranchOrders({
                         <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
                           <button
                             onClick={() => handleStatusUpdate(order.id, 'accepted')}
+                            disabled={actionInProgressId === order.id}
                             style={{
                               fontSize: '12px',
                               fontWeight: 700,
@@ -1689,13 +2031,15 @@ export default function BranchOrders({
                               display: 'inline-flex',
                               alignItems: 'center',
                               gap: '4px',
+                              opacity: actionInProgressId === order.id ? 0.7 : 1,
                             }}
                           >
                             <Check size={14} />
-                            Accept
+                            {actionInProgressId === order.id ? 'Accepting...' : 'Accept'}
                           </button>
                           <button
-                            onClick={() => handleStatusUpdate(order.id, 'rejected')}
+                            onClick={() => openRejectModal(order)}
+                            disabled={actionInProgressId === order.id}
                             style={{
                               fontSize: '12px',
                               fontWeight: 700,
@@ -1717,26 +2061,48 @@ export default function BranchOrders({
                       )}
 
                       {isAccepted && (
-                        <button
-                          onClick={() => handleStatusUpdate(order.id, 'dispatched')}
-                          style={{
-                            fontSize: '12px',
-                            fontWeight: 700,
-                            padding: '6px 14px',
-                            borderRadius: '6px',
-                            border: '1px solid #BFDBFE',
-                            background: '#EFF6FF',
-                            color: '#1D4ED8',
-                            cursor: 'pointer',
-                            marginTop: '4px',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                          }}
-                        >
-                          <Truck size={14} />
-                          Mark Dispatched
-                        </button>
+                        <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                          <button
+                            onClick={() => openDispatchModal(order)}
+                            disabled={actionInProgressId === order.id}
+                            style={{
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              padding: '6px 14px',
+                              borderRadius: '6px',
+                              border: '1px solid #BFDBFE',
+                              background: '#EFF6FF',
+                              color: '#1D4ED8',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                            }}
+                          >
+                            <Truck size={14} />
+                            Dispatch Order
+                          </button>
+                          <button
+                            onClick={() => openRejectModal(order)}
+                            disabled={actionInProgressId === order.id}
+                            style={{
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              padding: '6px 14px',
+                              borderRadius: '6px',
+                              border: '1px solid #FECACA',
+                              background: '#FEF2F2',
+                              color: '#991B1B',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                          >
+                            <X size={14} />
+                            Reject
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1744,6 +2110,505 @@ export default function BranchOrders({
               );
             })
           )}
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* DISPATCH REVIEW MODAL                                              */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {dispatchModalOrder && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.6)',
+            backdropFilter: 'blur(4px)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+          }}
+        >
+          <div
+            style={{
+              background: '#FFFFFF',
+              borderRadius: '16px',
+              maxWidth: '780px',
+              width: '100%',
+              maxHeight: '92vh',
+              overflowY: 'auto',
+              padding: '24px',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '18px',
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #E2E8F0', paddingBottom: '14px' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Truck size={20} style={{ color: '#2563EB' }} />
+                  <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
+                    Dispatch Order #{dispatchModalOrder.order_no}
+                  </h3>
+                </div>
+                <div style={{ fontSize: '13px', color: '#64748B', marginTop: '4px' }}>
+                  Destination: <strong>{dispatchModalOrder.from_tenant?.name || 'Requesting Branch'}</strong>
+                  {dispatchModalOrder.from_counter ? ` (${dispatchModalOrder.from_counter})` : ''}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDispatchModalOrder(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', color: '#64748B' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Error Banner */}
+            {dispatchError && (
+              <div
+                style={{
+                  background: '#FEF2F2',
+                  border: '1px solid #FCA5A5',
+                  color: '#991B1B',
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  fontSize: '13px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                <span>{dispatchError}</span>
+              </div>
+            )}
+
+            {/* Line Items Table */}
+            <div>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: '#334155', marginBottom: '8px' }}>
+                Verify &amp; Adjust Quantities &amp; Rates:
+              </div>
+              <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0', textAlign: 'left', color: '#475569' }}>
+                      <th style={{ padding: '8px 12px' }}>Product</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'center' }}>Req / Stock</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'center', width: '110px' }}>Dispatch Qty</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'center', width: '120px' }}>Unit Rate (Rs.)</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'right' }}>Line Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dispatchLines.map((line, idx) => {
+                      const isShort = line.dispatched_qty < line.requested_qty;
+                      return (
+                        <tr key={line.id} style={{ borderBottom: idx === dispatchLines.length - 1 ? 'none' : '1px solid #F1F5F9' }}>
+                          <td style={{ padding: '8px 12px' }}>
+                            <div style={{ fontWeight: 600, color: '#0F172A' }}>{line.item_name}</div>
+                            <div style={{ fontSize: '11px', color: '#64748B' }}>{line.item_code}</div>
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                            <div><strong>{line.requested_qty}</strong> {line.unit}</div>
+                            <div style={{ fontSize: '11px', color: line.available_stock >= line.requested_qty ? '#16A34A' : line.available_stock > 0 ? '#D97706' : '#DC2626', fontWeight: 600 }}>
+                              {line.available_stock <= 0 ? 'Out of Stock (0)' : `Avail: ${line.available_stock}`}
+                            </div>
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                            <input
+                              type="number"
+                              min="0"
+                              max={line.requested_qty}
+                              value={line.dispatched_qty}
+                              onChange={(e) => {
+                                const val = Math.max(0, Math.min(line.requested_qty, parseInt(e.target.value) || 0));
+                                setDispatchLines((prev) =>
+                                  prev.map((l, i) => (i === idx ? { ...l, dispatched_qty: val } : l))
+                                );
+                              }}
+                              style={{
+                                width: '80px',
+                                padding: '4px 8px',
+                                textAlign: 'center',
+                                borderRadius: '6px',
+                                border: isShort ? '1px solid #F59E0B' : '1px solid #CBD5E1',
+                                background: isShort ? '#FFFBEB' : '#FFFFFF',
+                                fontWeight: 700,
+                                fontSize: '13px',
+                              }}
+                            />
+                            {isShort && (
+                              <div style={{ fontSize: '10px', color: '#D97706', fontWeight: 700, marginTop: '2px' }}>
+                                Short (-{line.requested_qty - line.dispatched_qty})
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={line.unit_price}
+                              onChange={(e) => {
+                                const val = Math.max(0, parseFloat(e.target.value) || 0);
+                                setDispatchLines((prev) =>
+                                  prev.map((l, i) => (i === idx ? { ...l, unit_price: val } : l))
+                                );
+                              }}
+                              style={{
+                                width: '100px',
+                                padding: '4px 8px',
+                                textAlign: 'right',
+                                borderRadius: '6px',
+                                border: '1px solid #CBD5E1',
+                                fontWeight: 600,
+                                fontSize: '13px',
+                              }}
+                            />
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: '#0F172A' }}>
+                            Rs. {(line.dispatched_qty * line.unit_price).toLocaleString()}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Note & Freight Adjustments Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  Delivery / Carriage Charges (Rs.)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={dispatchDeliveryCharges}
+                  onChange={(e) => setDispatchDeliveryCharges(Math.max(0, parseFloat(e.target.value) || 0))}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid #CBD5E1',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                  }}
+                  placeholder="0"
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                  Delivery Method / Transporter
+                </label>
+                <input
+                  type="text"
+                  value={dispatchDeliveryMethod}
+                  onChange={(e) => setDispatchDeliveryMethod(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid #CBD5E1',
+                    fontSize: '13px',
+                  }}
+                  placeholder="e.g. Suzuki, Courier, By Hand"
+                />
+              </div>
+
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 700, color: '#334155' }}>Discount</label>
+                  <div style={{ display: 'flex', gap: '4px', fontSize: '11px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setDispatchDiscountType('flat')}
+                      style={{
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        border: '1px solid #CBD5E1',
+                        background: dispatchDiscountType === 'flat' ? '#2563EB' : '#F8FAFC',
+                        color: dispatchDiscountType === 'flat' ? '#FFFFFF' : '#475569',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                      }}
+                    >
+                      Rs. Flat
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDispatchDiscountType('percent')}
+                      style={{
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        border: '1px solid #CBD5E1',
+                        background: dispatchDiscountType === 'percent' ? '#2563EB' : '#F8FAFC',
+                        color: dispatchDiscountType === 'percent' ? '#FFFFFF' : '#475569',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                      }}
+                    >
+                      %
+                    </button>
+                  </div>
+                </div>
+                <input
+                  type="number"
+                  min="0"
+                  value={dispatchDiscountVal}
+                  onChange={(e) => setDispatchDiscountVal(Math.max(0, parseFloat(e.target.value) || 0))}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid #CBD5E1',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                  }}
+                  placeholder="0"
+                />
+              </div>
+
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 700, color: '#334155' }}>
+                    Note to Requesting Branch {dispatchLines.some((l) => l.dispatched_qty < l.requested_qty) ? <span style={{ color: '#DC2626' }}>* (Required)</span> : '(Optional)'}
+                  </label>
+                  <span style={{ fontSize: '11px', color: '#94A3B8' }}>{dispatchNote.length}/500</span>
+                </div>
+                <textarea
+                  rows={2}
+                  maxLength={500}
+                  value={dispatchNote}
+                  onChange={(e) => setDispatchNote(e.target.value)}
+                  placeholder={dispatchLines.some((l) => l.dispatched_qty < l.requested_qty) ? 'Required: Explain why items are dispatched short...' : 'Add any dispatch comments...'}
+                  style={{
+                    width: '100%',
+                    padding: '6px 10px',
+                    borderRadius: '6px',
+                    border: dispatchLines.some((l) => l.dispatched_qty < l.requested_qty) && !dispatchNote.trim() ? '1px solid #FCA5A5' : '1px solid #CBD5E1',
+                    fontSize: '12px',
+                    resize: 'none',
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Calculation Summary Box */}
+            {(() => {
+              const subtotal = dispatchLines.reduce((sum, l) => sum + l.dispatched_qty * l.unit_price, 0);
+              const resolvedDiscount =
+                dispatchDiscountType === 'percent'
+                  ? Math.round(((subtotal * dispatchDiscountVal) / 100) * 100) / 100
+                  : dispatchDiscountVal;
+              const netTotal = Math.max(0, subtotal - resolvedDiscount + dispatchDeliveryCharges);
+
+              return (
+                <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '10px', padding: '12px 16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#475569', marginBottom: '4px' }}>
+                    <span>Subtotal:</span>
+                    <span>Rs. {subtotal.toLocaleString()}</span>
+                  </div>
+                  {resolvedDiscount > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#16A34A', marginBottom: '4px' }}>
+                      <span>Discount:</span>
+                      <span>-Rs. {resolvedDiscount.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {dispatchDeliveryCharges > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#2563EB', marginBottom: '4px' }}>
+                      <span>Delivery ({dispatchDeliveryMethod || 'Transport'}):</span>
+                      <span>+Rs. {dispatchDeliveryCharges.toLocaleString()}</span>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '15px', fontWeight: 800, color: '#0F172A', borderTop: '1px solid #E2E8F0', paddingTop: '6px', marginTop: '4px' }}>
+                    <span>Net Transfer Value:</span>
+                    <span>Rs. {netTotal.toLocaleString()}</span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Modal Actions */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid #E2E8F0', paddingTop: '14px' }}>
+              <button
+                type="button"
+                onClick={() => setDispatchModalOrder(null)}
+                disabled={dispatchSubmitting}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: '6px',
+                  border: '1px solid #CBD5E1',
+                  background: '#FFFFFF',
+                  color: '#475569',
+                  fontWeight: 600,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDispatch}
+                disabled={dispatchSubmitting}
+                style={{
+                  padding: '8px 22px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: '#2563EB',
+                  color: '#FFFFFF',
+                  fontWeight: 700,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  opacity: dispatchSubmitting ? 0.7 : 1,
+                }}
+              >
+                <Truck size={15} />
+                {dispatchSubmitting ? 'Dispatching...' : 'Confirm & Dispatch Stock'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* REJECT REASON MODAL                                                 */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {rejectModalOrder && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.6)',
+            backdropFilter: 'blur(4px)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+          }}
+        >
+          <div
+            style={{
+              background: '#FFFFFF',
+              borderRadius: '16px',
+              maxWidth: '480px',
+              width: '100%',
+              padding: '24px',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <h3 style={{ fontSize: '17px', fontWeight: 700, color: '#991B1B', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <XCircle size={18} />
+                  Reject Order #{rejectModalOrder.order_no}
+                </h3>
+                <div style={{ fontSize: '13px', color: '#64748B', marginTop: '4px' }}>
+                  From: <strong>{rejectModalOrder.from_tenant?.name || 'Requesting Branch'}</strong>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRejectModalOrder(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', color: '#64748B' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {rejectError && (
+              <div
+                style={{
+                  background: '#FEF2F2',
+                  border: '1px solid #FCA5A5',
+                  color: '#991B1B',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                }}
+              >
+                {rejectError}
+              </div>
+            )}
+
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 700, color: '#334155' }}>
+                  Reason for Rejection *
+                </label>
+                <span style={{ fontSize: '11px', color: '#94A3B8' }}>{rejectReason.length}/500</span>
+              </div>
+              <textarea
+                rows={3}
+                maxLength={500}
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder="e.g. Out of stock in all godowns, price revision pending, etc."
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid #CBD5E1',
+                  fontSize: '13px',
+                  resize: 'none',
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', paddingTop: '8px' }}>
+              <button
+                type="button"
+                onClick={() => setRejectModalOrder(null)}
+                disabled={rejectSubmitting}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  border: '1px solid #CBD5E1',
+                  background: '#FFFFFF',
+                  color: '#475569',
+                  fontWeight: 600,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmReject}
+                disabled={rejectSubmitting || !rejectReason.trim()}
+                style={{
+                  padding: '8px 20px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: '#DC2626',
+                  color: '#FFFFFF',
+                  fontWeight: 700,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  opacity: rejectSubmitting || !rejectReason.trim() ? 0.6 : 1,
+                }}
+              >
+                {rejectSubmitting ? 'Rejecting...' : 'Confirm Rejection'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

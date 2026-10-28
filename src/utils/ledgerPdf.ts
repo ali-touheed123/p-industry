@@ -20,8 +20,8 @@ export interface LedgerPdfItem {
   shade_code?: string;
   pack_size?: string;
   qty: number;
-  unit_price: number;
-  total_price: number;
+  unit_price?: number | null;
+  total_price?: number | null;
 }
 
 export interface LedgerPdfTx {

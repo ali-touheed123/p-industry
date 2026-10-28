@@ -19,6 +19,48 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
+    // Lifecycle events for the requesting branch (notifications for order status changes)
+    if (searchParams.get('events') === 'lifecycle') {
+      if (!tenantId) {
+        return NextResponse.json({ success: false, error: 'tenant_id required' }, { status: 400 });
+      }
+
+      const serverTime = new Date().toISOString();
+
+      // Return only the single newest event and the server time to anchor new browsers/sessions
+      if (searchParams.get('latest') === '1') {
+        const { data: latestEvents, error: evErr } = await supabaseAdmin
+          .from('branch_order_events')
+          .select('id, order_id, event_type, data, created_at')
+          .eq('notify_tenant_id', tenantId)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (evErr) {
+          return NextResponse.json({ success: false, error: evErr.message }, { status: 500 });
+        }
+
+        return NextResponse.json({
+          success: true,
+          latestEvent: latestEvents?.[0] || null,
+          server_time: serverTime,
+        });
+      }
+
+      const since = searchParams.get('since') || new Date(0).toISOString();
+      const { data: events, error: evErr } = await supabaseAdmin
+        .from('branch_order_events')
+        .select('id, order_id, event_type, data, created_at')
+        .eq('notify_tenant_id', tenantId)
+        .gt('created_at', since)
+        .order('created_at', { ascending: true })
+        .limit(20);
+      if (evErr) {
+        return NextResponse.json({ success: false, error: evErr.message }, { status: 500 });
+      }
+      return NextResponse.json({ success: true, events: events || [], server_time: serverTime });
+    }
+
     // If count_only=incoming, return count of pending incoming orders & latest order info for toast alert
     if (countOnly === 'incoming') {
       let countQuery = supabaseAdmin
@@ -99,13 +141,61 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    // Enrich order items with supplying branch live stock and default rates (cost_price fallback retail * 0.85)
+    // for orders where this tenant is the supplying branch (to_tenant_id === tenantId)
+    const supplierItemCodes = Array.from(
+      new Set(
+        (orders || [])
+          .filter((o: any) => o.to_tenant_id === tenantId)
+          .flatMap((o: any) => (o.branch_order_items || []).map((it: any) => (it.item_code || '').trim().toUpperCase()))
+          .filter(Boolean)
+      )
+    );
+
+    let supplierStockMap: Record<string, { stock_qty: number; cost_price: number; retail_price: number; default_rate: number }> = {};
+    if (supplierItemCodes.length > 0) {
+      const { data: stockItems } = await supabaseAdmin
+        .from('items')
+        .select('code, stock_qty, cost_price, retail_price')
+        .eq('tenant_id', tenantId);
+
+      (stockItems || []).forEach((si: any) => {
+        const c = (si.code || '').trim().toUpperCase();
+        const cp = Number(si.cost_price) || 0;
+        const rp = Number(si.retail_price) || 0;
+        const defaultRate = cp > 0 ? cp : rp * 0.85;
+        supplierStockMap[c] = {
+          stock_qty: Number(si.stock_qty) || 0,
+          cost_price: cp,
+          retail_price: rp,
+          default_rate: Math.round(defaultRate * 100) / 100,
+        };
+      });
+    }
+
     // Attach tenant info and map items to each order
-    const enrichedOrders = (orders || []).map((o: any) => ({
-      ...o,
-      items: o.branch_order_items || o.items || [],
-      from_tenant: tenantsMap[o.from_tenant_id] || null,
-      to_tenant: tenantsMap[o.to_tenant_id] || null,
-    }));
+    const enrichedOrders = (orders || []).map((o: any) => {
+      const isSupplier = o.to_tenant_id === tenantId;
+      const rawItems = o.branch_order_items || o.items || [];
+      const mappedItems = rawItems.map((it: any) => {
+        const clean = (it.item_code || '').trim().toUpperCase();
+        const stockInfo = isSupplier ? supplierStockMap[clean] : null;
+        return {
+          ...it,
+          supplier_stock: stockInfo ? stockInfo.stock_qty : undefined,
+          cost_price: stockInfo ? stockInfo.cost_price : undefined,
+          retail_price: stockInfo ? stockInfo.retail_price : undefined,
+          default_rate: stockInfo ? stockInfo.default_rate : undefined,
+        };
+      });
+
+      return {
+        ...o,
+        items: mappedItems,
+        from_tenant: tenantsMap[o.from_tenant_id] || null,
+        to_tenant: tenantsMap[o.to_tenant_id] || null,
+      };
+    });
 
     return NextResponse.json({ success: true, orders: enrichedOrders });
   } catch (error: any) {
@@ -154,16 +244,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ── Server-side stock validation ─────────────────────────────────────────
-    // Validate every requested item's qty against the source branch's live stock_qty.
-    // This guards against stale client-side stock numbers bypassing the client cap.
+    // Server-side stock validation: validate every requested item's qty against source branch live stock
     for (const item of items) {
       const cleanCode = (item.item_code || '').trim().toUpperCase();
       if (!cleanCode) continue;
 
       const { data: sourceItem } = await supabaseAdmin
         .from('items')
-        .select('stock_qty, name')
+        .select('name, stock_qty')
         .eq('tenant_id', to_tenant_id)
         .ilike('code', cleanCode)
         .maybeSingle();
@@ -183,7 +271,6 @@ export async function POST(req: NextRequest) {
         }
       }
     }
-    // ─────────────────────────────────────────────────────────────────────────
 
     const order_no = `BO-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
 
@@ -220,6 +307,24 @@ export async function POST(req: NextRequest) {
 
     if (itemsErr) throw itemsErr;
 
+    // 3. Insert initial 'placed' notification event for supplying branch (to_tenant_id)
+    try {
+      await supabaseAdmin.from('branch_order_events').insert({
+        order_id: order.id,
+        event_type: 'placed',
+        notify_tenant_id: to_tenant_id,
+        data: {
+          order_no: order.order_no,
+          from_tenant_id,
+          from_counter: from_counter || null,
+          items_count: orderItems.length,
+          notes: notes || null,
+        },
+      });
+    } catch (evtErr) {
+      console.error('Failed to create order placed event:', evtErr);
+    }
+
     return NextResponse.json({ success: true, order });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
@@ -229,8 +334,25 @@ export async function POST(req: NextRequest) {
 // PATCH: Update order status (accept, reject, dispatch, receive)
 export async function PATCH(req: NextRequest) {
   try {
+    const session = await getSession(req);
+    if (!session) {
+      return NextResponse.json({ success: false, error: 'Unauthorized: Valid login session required' }, { status: 401 });
+    }
+    if (session.role !== 'developer' && !session.tenantId) {
+      return NextResponse.json({ success: false, error: 'Forbidden: No tenant assigned to this session' }, { status: 403 });
+    }
+
     const body = await req.json();
-    const { id, status } = body;
+    const {
+      id,
+      status,
+      items,
+      discount,
+      delivery_charges,
+      delivery_method,
+      dispatch_note,
+      reject_reason,
+    } = body;
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Order ID required' }, { status: 400 });
@@ -244,41 +366,7 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    // Helper: calculate total transfer value from supplying branch's real cost prices
-    const calcTransferValue = async (toTenantId: string, itemsList: any[]): Promise<number> => {
-      let total = 0;
-      for (const it of itemsList) {
-        const cleanCode = (it.item_code || '').trim().toUpperCase();
-        const { data: srcItem } = await supabaseAdmin
-          .from('items')
-          .select('cost_price, retail_price')
-          .eq('tenant_id', toTenantId)
-          .ilike('code', cleanCode)
-          .maybeSingle();
-        if (srcItem) {
-          const unitCost = Number(srcItem.cost_price) || Number(srcItem.retail_price) * 0.85 || 0;
-          total += unitCost * Number(it.qty || 1);
-        }
-      }
-      return total;
-    };
-
-    // Task 12.3 — FINDING-E2E-008 FIX: Replace requireTenantAuth(req, null) with getSession.
-    // Passing null to requireTenantAuth skips tenant matching — any authenticated session passes.
-    // getSession enforces authentication without bypassing tenant isolation.
-    // Strict tenant-party validation occurs post-fetch (lines below) after currentOrder is known.
-    // FINDING-API-003 ordering preserved: auth check still occurs before order fetch.
-    const session = await getSession(req);
-    if (!session) {
-      return NextResponse.json({ success: false, error: 'Unauthorized: Valid login session required' }, { status: 401 });
-    }
-    if (session.role !== 'developer' && !session.tenantId) {
-      return NextResponse.json({ success: false, error: 'Forbidden: No tenant assigned to this session' }, { status: 403 });
-    }
-    // Wrap session in auth-compatible shape for downstream code that uses auth.session
-    const auth = { authorized: true, session };
-
-    // Fetch the current order to validate transition
+    // Fetch the current order
     const { data: currentOrder, error: fetchErr } = await supabaseAdmin
       .from('branch_orders')
       .select('*')
@@ -289,22 +377,38 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Order not found' }, { status: 404 });
     }
 
-    // Enforce tenant membership: caller must belong to one of the two branches
-    if (auth.session && auth.session.role !== 'developer') {
-      if (auth.session.tenantId !== currentOrder.from_tenant_id && auth.session.tenantId !== currentOrder.to_tenant_id) {
+    const isDev = session.role === 'developer';
+    const isCeo = session.role === 'ceo';
+    const sessionTenantId = session.tenantId;
+
+    // Helper: Verify if CEO owns a specific tenant
+    const ceoOwnsTenant = (targetTenantId: string): boolean => {
+      if (!isCeo) return false;
+      if (sessionTenantId === targetTenantId) return true;
+      if (session.ceoTenants && session.ceoTenants.some((t: any) => t.id === targetTenantId)) return true;
+      return false;
+    };
+
+    // Enforce tenant authorization based on role
+    if (!isDev) {
+      const hasAccessToFrom = sessionTenantId === currentOrder.from_tenant_id || ceoOwnsTenant(currentOrder.from_tenant_id);
+      const hasAccessToTo = sessionTenantId === currentOrder.to_tenant_id || ceoOwnsTenant(currentOrder.to_tenant_id);
+
+      if (!hasAccessToFrom && !hasAccessToTo) {
         return NextResponse.json({ success: false, error: 'Forbidden: Access denied to this branch order' }, { status: 403 });
       }
 
       // Enforce role-specific transition restrictions:
-      //   'dispatched' can only be set by the supplying branch (to_tenant_id)
-      //   'received'   can only be set by the requesting branch (from_tenant_id)
-      if (status === 'dispatched' && auth.session.tenantId !== currentOrder.to_tenant_id) {
+      // 'accepted', 'dispatched', 'rejected' can only be executed by the supplying branch (to_tenant_id)
+      if (['accepted', 'dispatched', 'rejected'].includes(status) && !hasAccessToTo) {
         return NextResponse.json(
-          { success: false, error: 'Forbidden: Only the supplying branch may dispatch this order' },
+          { success: false, error: `Forbidden: Only the supplying branch may ${status} this order` },
           { status: 403 }
         );
       }
-      if (status === 'received' && auth.session.tenantId !== currentOrder.from_tenant_id) {
+
+      // 'received' can only be executed by the requesting branch (from_tenant_id)
+      if (status === 'received' && !hasAccessToFrom) {
         return NextResponse.json(
           { success: false, error: 'Forbidden: Only the requesting branch may confirm receipt of this order' },
           { status: 403 }
@@ -327,166 +431,114 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    // 1. Fetch order items and tenant info
-    const { data: orderItems } = await supabaseAdmin
-      .from('branch_order_items')
-      .select('*')
-      .eq('order_id', id);
+    const supplyingTenantId = currentOrder.to_tenant_id;
+    const requestingTenantId = currentOrder.from_tenant_id;
 
-    const itemsList = orderItems || [];
+    // ─── Status Specific Atomic Operations ───
+    if (status === 'accepted') {
+      const { error: rpcErr } = await supabaseAdmin.rpc('process_branch_accept_atomic', {
+        p_order_id: id,
+        p_to_tenant_id: supplyingTenantId,
+      });
 
-    // 2. Fetch tenant names
-    const { data: fromTenant } = await supabaseAdmin
-      .from('tenants')
-      .select('id, name')
-      .eq('id', currentOrder.from_tenant_id)
-      .maybeSingle();
+      if (rpcErr) {
+        return NextResponse.json({ success: false, error: rpcErr.message }, { status: 400 });
+      }
 
-    const { data: toTenant } = await supabaseAdmin
-      .from('tenants')
-      .select('id, name')
-      .eq('id', currentOrder.to_tenant_id)
-      .maybeSingle();
+    } else if (status === 'rejected') {
+      const cleanReason = typeof reject_reason === 'string' ? reject_reason.trim() : '';
+      if (!cleanReason) {
+        return NextResponse.json({ success: false, error: 'A non-empty rejection reason is required' }, { status: 400 });
+      }
+      if (cleanReason.length > 500) {
+        return NextResponse.json({ success: false, error: 'Rejection reason cannot exceed 500 characters' }, { status: 400 });
+      }
 
-    const fromName = fromTenant?.name || 'Requesting Branch';
-    const toName = toTenant?.name || 'Supplying Branch';
+      const { error: rpcErr } = await supabaseAdmin.rpc('process_branch_reject_atomic', {
+        p_order_id: id,
+        p_to_tenant_id: supplyingTenantId,
+        p_reject_reason: cleanReason,
+      });
 
-    // 3. Handle Status Specific Actions (Stock & Financial Posting)
-    if (status === 'dispatched') {
-      // ─── STEP A: Deduct stock from Supplying Branch (to_tenant_id) ───
-      // FIX FINDING-API-006: Use atomic RPC with FOR UPDATE row locking to prevent
-      // concurrent dispatch race conditions. The RPC also persists the transfer_value.
-      const { data: rpcTransferValue, error: dispatchErr } = await supabaseAdmin.rpc(
-        'process_branch_dispatch_atomic',
-        {
-          p_order_id:     id,
-          p_to_tenant_id: currentOrder.to_tenant_id,
+      if (rpcErr) {
+        return NextResponse.json({ success: false, error: rpcErr.message }, { status: 400 });
+      }
+
+    } else if (status === 'dispatched') {
+      if (!Array.isArray(items) || items.length === 0) {
+        return NextResponse.json({ success: false, error: 'Items payload is required for dispatch' }, { status: 400 });
+      }
+
+      // Validate each item strictly matches required contract
+      for (const it of items) {
+        if (!it.id) {
+          return NextResponse.json(
+            { success: false, error: `Each dispatched item must include a valid line id` },
+            { status: 400 }
+          );
         }
-      );
+        if (typeof it.dispatched_qty !== 'number' || it.dispatched_qty < 0) {
+          return NextResponse.json(
+            { success: false, error: `Invalid dispatched quantity for item ${it.item_code || it.id}` },
+            { status: 400 }
+          );
+        }
+        if (it.unit_price === undefined || it.unit_price === null || typeof it.unit_price !== 'number' || it.unit_price < 0) {
+          return NextResponse.json(
+            { success: false, error: `Unit price is required and must be non-negative for item ${it.item_code || it.id}` },
+            { status: 400 }
+          );
+        }
+      }
 
-      if (dispatchErr) throw dispatchErr;
+      const cleanDiscount = Number(discount) || 0;
+      const cleanDelivery = Number(delivery_charges) || 0;
+      const cleanMethod = delivery_method ? String(delivery_method).trim() : null;
+      const cleanNote = dispatch_note ? String(dispatch_note).trim() : null;
 
-      const realTransferValue = Number(rpcTransferValue || 0);
+      const { data: netTransferVal, error: rpcErr } = await supabaseAdmin.rpc('process_branch_dispatch_atomic', {
+        p_order_id: id,
+        p_to_tenant_id: supplyingTenantId,
+        p_items: items,
+        p_discount: cleanDiscount,
+        p_delivery_charges: cleanDelivery,
+        p_delivery_method: cleanMethod,
+        p_dispatch_note: cleanNote,
+      });
 
-      // Log dispatch audit
-      try {
-        await supabaseAdmin.from('audit_logs').insert({
-          tenant_id: currentOrder.to_tenant_id,
-          user_name: toName,
-          action: `Branch Order ${currentOrder.order_no} Dispatched to ${fromName}`,
-          action_type: 'branch_dispatch',
-          entity_type: 'branch_order',
-          entity_id: id,
-          details: {
-            order_no: currentOrder.order_no,
-            to: fromName,
-            items_count: itemsList.length,
-            transfer_value: realTransferValue,
-          },
-        });
-      } catch {}
+      if (rpcErr) {
+        return NextResponse.json({ success: false, error: rpcErr.message }, { status: 400 });
+      }
 
     } else if (status === 'received') {
-      // ─── STEP B: Add stock to Requesting Branch (from_tenant_id) ───
-      // FIX FINDING-API-006: Use atomic RPC with FOR UPDATE row locking to prevent
-      // concurrent receive race conditions.
-      const { error: receiveErr } = await supabaseAdmin.rpc(
-        'process_branch_receive_atomic',
-        {
-          p_order_id:       id,
-          p_from_tenant_id: currentOrder.from_tenant_id,
-          p_to_tenant_id:   currentOrder.to_tenant_id,
-        }
-      );
+      const { error: rpcErr } = await supabaseAdmin.rpc('process_branch_receive_atomic', {
+        p_order_id: id,
+        p_from_tenant_id: requestingTenantId,
+        p_to_tenant_id: supplyingTenantId,
+      });
 
-      if (receiveErr) throw receiveErr;
-
-      // Read transfer value that was stored at dispatch time
-      const dispatchValue = Number((currentOrder as any).transfer_value || 0);
-      const transferAmount = dispatchValue > 0
-        ? dispatchValue
-        : await calcTransferValue(currentOrder.to_tenant_id, itemsList);
-
-      // ─── STEP C: Post Inter-Branch Ledger Vouchers (real amount only) ───
-
-      // Determine if this is a same-tenant counter order or a true inter-branch order
-      const isCounterOrder = currentOrder.from_tenant_id === currentOrder.to_tenant_id;
-
-      // For counter orders, party_id must be "counter_<username>" to match ledger queries.
-      // For branch orders, party_id is the tenant UUID.
-      const receivingPartyId = isCounterOrder
-        ? `counter_${currentOrder.target_counter}`   // the counter that supplied (supplier side)
-        : currentOrder.to_tenant_id;
-      const supplyingPartyId = isCounterOrder
-        ? `counter_${currentOrder.from_counter}`     // the counter that requested (debtor side)
-        : currentOrder.from_tenant_id;
-
-      // Voucher for Receiving Counter/Branch — they OWE the supplying side (Debit / Payable)
-      try {
-        await supabaseAdmin.from('vouchers').insert({
-          tenant_id: currentOrder.from_tenant_id,
-          voucher_no: `IBT-${currentOrder.order_no.slice(-6)}`,
-          voucher_type: 'branch_transfer_in',
-          party_type: 'branch',
-          party_id: currentOrder.to_tenant_id,          // always the tenant UUID
-          party_code: isCounterOrder ? receivingPartyId : null, // counter_<username> for counter orders
-          party_name: toName,
-          amount: transferAmount,
-          payment_mode: 'Transfer on Account',
-          reference_no: currentOrder.order_no,
-          remarks: `Stock Received from ${toName} | ${itemsList.length} item(s) | ${currentOrder.order_no}`,
-          date: new Date().toISOString().split('T')[0],
-        });
-      } catch {}
-
-      // Voucher for Supplying Counter/Branch — they are OWED by the receiving side (Credit / Receivable)
-      try {
-        await supabaseAdmin.from('vouchers').insert({
-          tenant_id: currentOrder.to_tenant_id,
-          voucher_no: `IBT-${currentOrder.order_no.slice(-6)}`,
-          voucher_type: 'branch_transfer_out',
-          party_type: 'branch',
-          party_id: currentOrder.from_tenant_id,        // always the tenant UUID
-          party_code: isCounterOrder ? supplyingPartyId : null, // counter_<username> for counter orders
-          party_name: fromName,
-          amount: transferAmount,
-          payment_mode: 'Transfer on Account',
-          reference_no: currentOrder.order_no,
-          remarks: `Stock Dispatched to ${fromName} | ${itemsList.length} item(s) | ${currentOrder.order_no}`,
-          date: new Date().toISOString().split('T')[0],
-        });
-      } catch {}
-
-      // Log receive audit
-      try {
-        await supabaseAdmin.from('audit_logs').insert({
-          tenant_id: currentOrder.from_tenant_id,
-          user_name: fromName,
-          action: `Branch Order ${currentOrder.order_no} Received & Restocked from ${toName}`,
-          action_type: 'branch_receive',
-          entity_type: 'branch_order',
-          entity_id: id,
-          details: {
-            order_no: currentOrder.order_no,
-            from: toName,
-            amount: transferAmount,
-            items_count: itemsList.length,
-          },
-        });
-      } catch {}
+      if (rpcErr) {
+        return NextResponse.json({ success: false, error: rpcErr.message }, { status: 400 });
+      }
+      // Note: Vouchers are created inside process_branch_receive_atomic atomically and idempotently.
     }
 
-    // 4. Update the order status in DB
-    const { data: updatedOrder, error: updateErr } = await supabaseAdmin
+    // Fetch the updated order with all fields and items
+    const { data: updatedOrder, error: reloadErr } = await supabaseAdmin
       .from('branch_orders')
-      .update({ status })
+      .select('*, branch_order_items(*)')
       .eq('id', id)
-      .select()
       .single();
 
-    if (updateErr) throw updateErr;
+    if (reloadErr) throw reloadErr;
 
-    return NextResponse.json({ success: true, order: updatedOrder });
+    return NextResponse.json({
+      success: true,
+      order: {
+        ...updatedOrder,
+        items: updatedOrder.branch_order_items || [],
+      },
+    });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

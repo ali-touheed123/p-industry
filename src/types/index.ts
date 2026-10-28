@@ -355,6 +355,17 @@ export interface BranchOrder {
   target_counter?: string;
   status: 'pending' | 'accepted' | 'dispatched' | 'received' | 'rejected';
   notes?: string;
+  subtotal?: number;
+  discount?: number;
+  delivery_charges?: number;
+  delivery_method?: string;
+  dispatch_note?: string;
+  reject_reason?: string;
+  transfer_value?: number;
+  accepted_at?: string;
+  dispatched_at?: string;
+  received_at?: string;
+  rejected_at?: string;
   created_by?: string;
   created_at: string;
   from_tenant?: Tenant;
@@ -369,4 +380,11 @@ export interface BranchOrderItem {
   item_name: string;
   unit?: string;
   qty: number;
+  dispatched_qty?: number;
+  unit_price?: number;
+  total_price?: number;
+  supplier_stock?: number;
+  default_rate?: number;
+  cost_price?: number;
+  retail_price?: number;
 }

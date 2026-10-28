@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -38,8 +38,18 @@ export interface LedgerTransactionItem {
   shade_code?: string;
   pack_size?: string;
   qty: number;
-  unit_price: number;
-  total_price: number;
+  /** null for legacy branch transfer orders dispatched before new RPC */
+  unit_price: number | null;
+  /** null for legacy branch transfer orders dispatched before new RPC */
+  total_price: number | null;
+}
+
+interface IbtPricingMeta {
+  subtotal: number | null;
+  discount: number | null;
+  delivery_charges: number | null;
+  dispatch_note: string | null;
+  transfer_value: number | null;
 }
 
 interface LedgerTransaction {
@@ -52,6 +62,8 @@ interface LedgerTransaction {
   credit: number;
   bal: number;
   items?: LedgerTransactionItem[];
+  /** Present for IBT-IN / IBT-OUT vouchers with order-level pricing */
+  pricingMeta?: IbtPricingMeta;
 }
 
 export default function FinancialLedgers({
@@ -172,6 +184,26 @@ export default function FinancialLedgers({
         const combinedBranches: any[] = [];
 
         try {
+          // Calculate live balances for branches from vouchers
+          const branchBalances: Record<string, number> = {};
+          try {
+            const vouchRes = await fetch(`/api/vouchers?tenant_id=${tenantId}&party_type=branch&limit=500`);
+            const vouchData = await vouchRes.json();
+            if (vouchData.success && Array.isArray(vouchData.vouchers)) {
+              vouchData.vouchers.forEach((v: any) => {
+                const pId = v.party_id;
+                if (!pId) return;
+                const amt = Number(v.amount || 0);
+                const vType = v.voucher_type || '';
+                const debit = (vType === 'branch_transfer_in' || vType === 'opening_balance') ? amt : 0;
+                const credit = (vType === 'branch_transfer_out' || vType === 'payment' || vType === 'receipt') ? amt : 0;
+                branchBalances[pId] = (branchBalances[pId] || 0) + (debit - credit);
+              });
+            }
+          } catch (vErr) {
+            console.error('Error fetching branch vouchers for balances:', vErr);
+          }
+
           const res = await fetch('/api/tenants');
           const data = await res.json();
           if (data.success && data.tenants) {
@@ -185,7 +217,7 @@ export default function FinancialLedgers({
                   phone: t.phone || t.owner_phone || '—',
                   address: t.address || t.city || 'Commercial Market',
                   type: 'branch',
-                  current_balance: 0,
+                  current_balance: branchBalances[t.id] || 0,
                 });
               }
             });
@@ -1213,15 +1245,34 @@ export default function FinancialLedgers({
                                             {it.qty}
                                           </td>
                                           <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>
-                                            {Number(it.unit_price || 0) > 0 || Number(it.total_price || 0) > 0 ? `Rs. ${Number(it.unit_price || 0).toLocaleString()}` : '—'}
+                                            {it.unit_price != null ? `Rs. ${Number(it.unit_price).toLocaleString()}` : '—'}
                                           </td>
                                           <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A' }}>
-                                            {Number(it.unit_price || 0) > 0 || Number(it.total_price || 0) > 0 ? `Rs. ${Number(it.total_price || (it.qty * it.unit_price)).toLocaleString()}` : '—'}
+                                            {it.total_price != null ? `Rs. ${Number(it.total_price).toLocaleString()}` : '—'}
                                           </td>
                                         </tr>
                                       ))}
                                     </tbody>
                                   </table>
+                                  {t.pricingMeta && (
+                                    <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid #E2E8F0', display: 'flex', gap: '14px', fontSize: '11px', flexWrap: 'wrap' }}>
+                                      {t.pricingMeta.subtotal != null && (
+                                        <span>Subtotal: <strong className="font-mono">Rs. {Number(t.pricingMeta.subtotal).toLocaleString()}</strong></span>
+                                      )}
+                                      {t.pricingMeta.discount != null && t.pricingMeta.discount > 0 && (
+                                        <span style={{ color: '#DC2626' }}>Discount: <strong className="font-mono">-Rs. {Number(t.pricingMeta.discount).toLocaleString()}</strong></span>
+                                      )}
+                                      {t.pricingMeta.delivery_charges != null && t.pricingMeta.delivery_charges > 0 && (
+                                        <span style={{ color: '#D97706' }}>Delivery: <strong className="font-mono">+Rs. {Number(t.pricingMeta.delivery_charges).toLocaleString()}</strong></span>
+                                      )}
+                                      {t.pricingMeta.transfer_value != null && (
+                                        <span style={{ color: '#166534', fontWeight: 700 }}>Net Value: <strong className="font-mono">Rs. {Number(t.pricingMeta.transfer_value).toLocaleString()}</strong></span>
+                                      )}
+                                      {t.pricingMeta.dispatch_note && (
+                                        <span style={{ color: '#2563EB', fontStyle: 'italic' }}>Note: "{t.pricingMeta.dispatch_note}"</span>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
                               </td>
                             </tr>

@@ -91,6 +91,13 @@ export default function TenantAppPage({ params }: PageProps) {
     fromBranchName?: string;
     count: number;
   } | null>(null);
+  const [lifecycleToast, setLifecycleToast] = useState<{
+    eventType: string;
+    orderNo?: string;
+    message: string;
+  } | null>(null);
+  const lifecycleLastSeenRef = React.useRef<string>(new Date(0).toISOString());
+  const lifecycleInitDoneRef = React.useRef<boolean>(false);
   const initialFetchDoneRef = useRef<boolean>(false);
   const prevOrdersCountRef = useRef<number>(0);
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
@@ -342,6 +349,93 @@ export default function TenantAppPage({ params }: PageProps) {
     }
   }, [newOrderToast]);
 
+  const seenEventIdsRef = React.useRef<Set<string>>(new Set());
+
+  const fetchLifecycleEvents = async () => {
+    if (!tenant?.id) return;
+    if (typeof window !== 'undefined' && !navigator.onLine) return;
+    try {
+      const storageKey = `branch_orders_last_seen_${tenant.id}`;
+      let storedSince = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null;
+
+      // On first load without a stored timestamp, anchor to the newest server event/timestamp (no history replay)
+      if (!storedSince) {
+        const anchorRes = await fetch(`/api/branch-orders?tenant_id=${tenant.id}&events=lifecycle&latest=1`);
+        if (anchorRes.ok) {
+          const anchorData = await anchorRes.json();
+          if (anchorData.success) {
+            const serverAnchor = anchorData.latestEvent?.created_at || anchorData.server_time;
+            if (anchorData.latestEvent) {
+              seenEventIdsRef.current.add(anchorData.latestEvent.id);
+            }
+            if (serverAnchor && typeof window !== 'undefined') {
+              localStorage.setItem(storageKey, serverAnchor);
+            }
+          }
+        }
+        return;
+      }
+
+      const sinceParam = encodeURIComponent(storedSince);
+      const res = await fetch(
+        `/api/branch-orders?tenant_id=${tenant.id}&events=lifecycle&since=${sinceParam}`
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.success && Array.isArray(data.events) && data.events.length > 0) {
+        const storedDateMs = new Date(storedSince).getTime();
+
+        // De-duplicate by event id AND by parsed date timestamp (immune to client clock or string format drift)
+        const newEvents = data.events.filter(
+          (e: any) => !seenEventIdsRef.current.has(e.id) && new Date(e.created_at).getTime() > storedDateMs
+        );
+
+        if (newEvents.length > 0) {
+          const latest = newEvents[newEvents.length - 1];
+          // Always use server-provided created_at for last seen timestamp (never client clock)
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(storageKey, latest.created_at);
+          }
+
+          newEvents.forEach((e: any) => seenEventIdsRef.current.add(e.id));
+
+          // Filter out 'placed' events: newly placed orders are alerted exclusively by count_only=incoming (single path)
+          const alertable = newEvents.filter((e: any) => e.event_type !== 'placed');
+          if (alertable.length > 0) {
+            const ev = alertable[alertable.length - 1];
+            const orderNo = ev.data?.order_no || '';
+            let message = '';
+            switch (ev.event_type) {
+              case 'accepted':
+                message = `Order ${orderNo} accepted — being prepared`;
+                break;
+              case 'dispatched': {
+                const method = ev.data?.delivery_method ? ` · ${ev.data.delivery_method}` : '';
+                const note = ev.data?.dispatch_note ? ` · "${ev.data.dispatch_note.slice(0, 60)}"` : '';
+                message = `Order ${orderNo} dispatched!${method}${note}`;
+                break;
+              }
+              case 'received':
+                message = `Order ${orderNo} confirmed received`;
+                break;
+              case 'rejected': {
+                const reason = ev.data?.reject_reason ? ` — ${ev.data.reject_reason.slice(0, 60)}` : '';
+                message = `Order ${orderNo} rejected${reason}`;
+                break;
+              }
+              default:
+                message = `Order ${orderNo} updated (${ev.event_type})`;
+            }
+            playNotificationSound();
+            setLifecycleToast({ eventType: ev.event_type, orderNo, message });
+          }
+        }
+      }
+    } catch {
+      // Silently ignore transient background polling network hiccups
+    }
+  };
+
   const handleOpenIncomingOrder = () => {
     setOrdersDefaultTab('incoming');
     setActiveTab('orders');
@@ -351,12 +445,25 @@ export default function TenantAppPage({ params }: PageProps) {
   useEffect(() => {
     if (tenant?.id) {
       fetchPendingOrdersCount();
-      const interval = setInterval(fetchPendingOrdersCount, 15000);
-      return () => clearInterval(interval);
+      fetchLifecycleEvents();
+      const interval1 = setInterval(fetchPendingOrdersCount, 15000);
+      const interval2 = setInterval(fetchLifecycleEvents, 12000);
+      return () => {
+        clearInterval(interval1);
+        clearInterval(interval2);
+      };
     }
   }, [tenant?.id, currentUser?.username]);
 
-
+  // Auto-dismiss lifecycle notification after 12 seconds
+  useEffect(() => {
+    if (lifecycleToast) {
+      const timer = setTimeout(() => {
+        setLifecycleToast(null);
+      }, 12000);
+      return () => clearTimeout(timer);
+    }
+  }, [lifecycleToast]);
 
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
 
@@ -365,6 +472,7 @@ export default function TenantAppPage({ params }: PageProps) {
     try {
       await refreshItems();
       await fetchPendingOrdersCount();
+      await fetchLifecycleEvents();
     } catch (err) {
       console.error('Refresh failed:', err);
     } finally {
@@ -1060,6 +1168,93 @@ export default function TenantAppPage({ params }: PageProps) {
           </div>
         );
       })()}
+      {/* ── Realtime Branch Order Lifecycle Event Toast ── */}
+      {lifecycleToast && (
+        <div
+          role="alert"
+          style={{
+            position: 'fixed',
+            bottom: newOrderToast ? '180px' : '24px',
+            right: '24px',
+            zIndex: 9999,
+            backgroundColor:
+              lifecycleToast.eventType === 'rejected'
+                ? '#FEF2F2'
+                : lifecycleToast.eventType === 'dispatched'
+                ? '#F5F3FF'
+                : lifecycleToast.eventType === 'received'
+                ? '#F0FDF4'
+                : '#EFF6FF',
+            border: `2px solid ${
+              lifecycleToast.eventType === 'rejected'
+                ? '#EF4444'
+                : lifecycleToast.eventType === 'dispatched'
+                ? '#8B5CF6'
+                : lifecycleToast.eventType === 'received'
+                ? '#22C55E'
+                : '#3B82F6'
+            }`,
+            borderRadius: '14px',
+            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.15)',
+            padding: '14px 18px',
+            maxWidth: '380px',
+            width: 'calc(100vw - 48px)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+            animation: 'fadeIn 0.25s ease-out',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+            <div>
+              <div
+                style={{
+                  fontWeight: 800,
+                  fontSize: '13px',
+                  color:
+                    lifecycleToast.eventType === 'rejected'
+                      ? '#991B1B'
+                      : lifecycleToast.eventType === 'dispatched'
+                      ? '#6B21A8'
+                      : lifecycleToast.eventType === 'received'
+                      ? '#166534'
+                      : '#1E40AF',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                }}
+              >
+                {lifecycleToast.eventType === 'accepted'
+                  ? '✅ Order Accepted'
+                  : lifecycleToast.eventType === 'dispatched'
+                  ? '🚚 Order Dispatched'
+                  : lifecycleToast.eventType === 'received'
+                  ? '📦 Order Received'
+                  : lifecycleToast.eventType === 'rejected'
+                  ? '❌ Order Rejected'
+                  : '📋 Order Update'}
+              </div>
+              <div style={{ fontSize: '13px', color: '#0F172A', marginTop: '4px', lineHeight: 1.4 }}>
+                {lifecycleToast.message}
+              </div>
+            </div>
+            <button
+              onClick={() => setLifecycleToast(null)}
+              aria-label="Close notification"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#64748B',
+                cursor: 'pointer',
+                padding: '2px 4px',
+                fontSize: '14px',
+                lineHeight: 1,
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
       {/* ── Realtime Branch Order Incoming Alert Toast ── */}
       {newOrderToast && (
         <div
