@@ -10,6 +10,7 @@ interface Props {
   staffName: string;
   onClose: () => void;
   onSaved: (message: string) => void;
+  allowNegativeStock?: boolean;
 }
 
 interface AdjRow {
@@ -38,7 +39,14 @@ const newRow = (): AdjRow => ({
   status: 'idle',
 });
 
-export default function StockAdjustmentGrid({ items, tenantId, staffName, onClose, onSaved }: Props) {
+export default function StockAdjustmentGrid({
+  items,
+  tenantId,
+  staffName,
+  onClose,
+  onSaved,
+  allowNegativeStock = true,
+}: Props) {
   const [rows, setRows] = useState<AdjRow[]>([newRow()]);
   const [reason, setReason] = useState<string>(REASONS[0]);
   const [batchRef, setBatchRef] = useState<string>(
@@ -101,7 +109,9 @@ export default function StockAdjustmentGrid({ items, tenantId, staffName, onClos
       return;
     }
     const res = Number(row.item.stock_qty || 0) + row.sign * q;
-    if (res < 0) {
+    // Only block if this is a subtraction (sign === -1) AND branch has strict stock mode (!allowNegativeStock)
+    // Additions (sign === 1) increase stock / reduce deficit and must never be blocked!
+    if (row.sign === -1 && !allowNegativeStock && res < 0) {
       updateRow(row.key, { status: 'error', error: `Stock cannot go below 0 (current ${row.item.stock_qty})` });
       return;
     }
@@ -144,7 +154,8 @@ export default function StockAdjustmentGrid({ items, tenantId, staffName, onClos
         hasInvalid = true;
         return { ...r, status: 'error' as const, error: 'Enter a quantity greater than 0' };
       }
-      if (Number(r.item.stock_qty || 0) + r.sign * q < 0) {
+      const res = Number(r.item.stock_qty || 0) + r.sign * q;
+      if (r.sign === -1 && !allowNegativeStock && res < 0) {
         hasInvalid = true;
         return { ...r, status: 'error' as const, error: `Stock cannot go below 0 (current ${r.item.stock_qty})` };
       }

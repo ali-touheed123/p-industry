@@ -805,6 +805,7 @@ export default function TenantAppPage({ params }: PageProps) {
               tenantName={tenant.name}
               onStockUpdated={refreshItems}
               requireCeoApproval={needsCeoApproval}
+              allowNegativeStock={branchAllowsNegativeStock}
             />
           )}
           {(activeTab === 'customers' || activeTab === 'ledgers') && (

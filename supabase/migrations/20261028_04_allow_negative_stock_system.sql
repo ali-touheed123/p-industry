@@ -1198,3 +1198,95 @@ REVOKE EXECUTE ON FUNCTION public.create_purchase_atomic(uuid, jsonb, jsonb, uui
 
 GRANT EXECUTE ON FUNCTION public.create_purchase_atomic(uuid, jsonb, jsonb, jsonb) TO service_role;
 GRANT EXECUTE ON FUNCTION public.create_purchase_atomic(uuid, jsonb, jsonb, uuid[]) TO service_role;
+
+
+-- ==============================================================================
+-- 4. STOCK ADJUSTMENT ATOMIC: PER-BRANCH ALLOW_NEGATIVE_STOCK COMPLIANCE
+-- ==============================================================================
+
+CREATE OR REPLACE FUNCTION public.stock_adjustment_atomic(
+  p_tenant_id   UUID,
+  p_item_id     UUID,
+  p_delta       NUMERIC,
+  p_reason      TEXT DEFAULT NULL,
+  p_batch_ref   TEXT DEFAULT NULL,
+  p_adjusted_by TEXT DEFAULT 'Inventory Staff'
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $func$
+DECLARE
+  v_allow_neg_stock BOOLEAN := true;
+  v_item           RECORD;
+  v_previous_stock NUMERIC;
+  v_new_stock      NUMERIC;
+BEGIN
+  IF p_delta IS NULL OR p_delta = 0 THEN
+    RAISE EXCEPTION 'Adjustment quantity must be non-zero';
+  END IF;
+
+  -- Fetch tenant negative stock policy (defaults to true)
+  SELECT allow_negative_stock INTO v_allow_neg_stock
+    FROM tenants
+   WHERE id = p_tenant_id;
+
+  -- Lock the item row under the authorized tenant
+  SELECT id, tenant_id, code, name, stock_qty
+    INTO v_item
+    FROM items
+   WHERE id = p_item_id
+     AND tenant_id = p_tenant_id
+     FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Item not found or does not belong to authorized tenant';
+  END IF;
+
+  v_previous_stock := COALESCE(v_item.stock_qty, 0);
+  v_new_stock := v_previous_stock + p_delta;
+
+  -- Validation:
+  -- If p_delta > 0, it is an addition (inward/audit find) which increases stock and must never be blocked.
+  -- Only block if tenant has strict stock (allow_negative_stock = false) AND this is a reduction (p_delta < 0) causing stock to go below 0.
+  IF NOT COALESCE(v_allow_neg_stock, true) AND p_delta < 0 AND v_new_stock < 0 THEN
+    RAISE EXCEPTION 'Insufficient stock for % (current %, adjustment %)', v_item.code, v_previous_stock, p_delta;
+  END IF;
+
+  UPDATE items SET stock_qty = v_new_stock WHERE id = p_item_id;
+
+  INSERT INTO audit_logs (
+    tenant_id, user_name, action, action_type, entity_type, entity_id, details
+  ) VALUES (
+    p_tenant_id,
+    COALESCE(p_adjusted_by, 'Inventory Staff'),
+    'Stock Adjustment (' || CASE WHEN p_delta > 0 THEN '+' ELSE '-' END || abs(p_delta)::text || ')',
+    'stock_adjustment',
+    'item',
+    p_item_id::text,
+    jsonb_build_object(
+      'item_id', p_item_id,
+      'item_code', v_item.code,
+      'item_name', v_item.name,
+      'qty_delta', p_delta,
+      'previous_stock', v_previous_stock,
+      'new_stock', v_new_stock,
+      'reason', p_reason,
+      'batch_ref', p_batch_ref,
+      'adjusted_at', to_char(NOW(), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+    )
+  );
+
+  RETURN jsonb_build_object(
+    'item_id', p_item_id,
+    'item_code', v_item.code,
+    'item_name', v_item.name,
+    'previous_stock', v_previous_stock,
+    'new_stock', v_new_stock
+  );
+END;
+$func$;
+
+REVOKE EXECUTE ON FUNCTION public.stock_adjustment_atomic(uuid, uuid, numeric, text, text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.stock_adjustment_atomic(uuid, uuid, numeric, text, text, text) TO service_role;

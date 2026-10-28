@@ -50,6 +50,7 @@ interface Props {
   onStockUpdated?: () => void;
   /** Staff must enter the CEO password before stock adjustment, bulk price edit and product edit. */
   requireCeoApproval?: boolean;
+  allowNegativeStock?: boolean;
 }
 
 const DEFAULT_CATEGORIES = [
@@ -81,6 +82,7 @@ export default function StockInventory({
   tenantName = 'PyntFlow Store',
   onStockUpdated,
   requireCeoApproval = false,
+  allowNegativeStock = true,
 }: Props) {
   const { ensure: ensureCeoApproval, modal: ceoApprovalModal } = useCeoApproval(tenantId, requireCeoApproval);
   // Filters state (Matching painterp InventoryView.tsx)
@@ -2480,7 +2482,7 @@ export default function StockInventory({
                   </label>
                   <input
                     type="number"
-                    min="0"
+                    min={allowNegativeStock ? undefined : 0}
                     value={formStockQty}
                     onChange={(e) => setFormStockQty(e.target.value)}
                     className="pos-text-input"
@@ -2618,6 +2620,7 @@ export default function StockInventory({
           items={items}
           tenantId={tenantId}
           staffName={tenantName || 'Inventory Staff'}
+          allowNegativeStock={allowNegativeStock}
           onClose={() => setShowReceiveModal(false)}
           onSaved={(msg) => {
             showToast(msg);
