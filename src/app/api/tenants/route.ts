@@ -172,6 +172,7 @@ export async function POST(req: NextRequest) {
       city,
       address,
       require_ceo_pass,
+      allow_negative_stock,
       ceo_username,
       ceo_password,
       staff_username,
@@ -314,6 +315,7 @@ export async function POST(req: NextRequest) {
         city: city?.trim() || 'Karachi',
         address: address?.trim() || null,
         require_ceo_pass: require_ceo_pass !== undefined ? Boolean(require_ceo_pass) : true,
+        allow_negative_stock: allow_negative_stock !== undefined ? Boolean(allow_negative_stock) : true,
       })
       .select()
       .single();
@@ -710,6 +712,7 @@ export async function PATCH(req: NextRequest) {
       address, 
       type,
       require_ceo_pass,
+      allow_negative_stock,
       commission_enabled,
       commission_rate,
       commission_split_lead,
@@ -752,6 +755,7 @@ export async function PATCH(req: NextRequest) {
     if (address !== undefined) updateData.address = address;
     if (type) updateData.type = type;
     if (require_ceo_pass !== undefined) updateData.require_ceo_pass = Boolean(require_ceo_pass);
+    if (allow_negative_stock !== undefined) updateData.allow_negative_stock = Boolean(allow_negative_stock);
     if (commission_enabled !== undefined) updateData.commission_enabled = commission_enabled;
     if (commission_rate !== undefined) updateData.commission_rate = Number(commission_rate);
     if (commission_split_lead !== undefined) updateData.commission_split_lead = Number(commission_split_lead);

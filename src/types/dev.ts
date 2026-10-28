@@ -13,6 +13,7 @@ export interface Tenant {
   email?: string;
   is_active: boolean;
   require_ceo_pass?: boolean;
+  allow_negative_stock?: boolean;
   usersCount?: number;
   ceo?: { username: string; name: string } | null;
   staffCount?: number;

@@ -42,6 +42,7 @@ interface Props {
   onClearEditingInvoice?: () => void;
   pendingOrdersCount?: number;
   onNavigateToOrders?: () => void;
+  allowNegativeStock?: boolean;
 }
 
 export interface ProductLastPurchase {
@@ -124,6 +125,7 @@ export default function PosBilling({
   onClearEditingInvoice,
   pendingOrdersCount = 0,
   onNavigateToOrders,
+  allowNegativeStock = true,
 }: Props) {
   // Mode toggle: Sales Invoice vs Return
   const [invoiceType, setInvoiceType] = useState<'sales' | 'return'>('sales');
@@ -738,8 +740,12 @@ export default function PosBilling({
     if (invoiceType === 'sales') {
       const availableStock = prod.stock_qty ?? 0;
       if (totalQtyRequested > availableStock) {
-        showFeedback(`Insufficient stock! Available: ${availableStock} ${prod.unit || 'PCS'}`);
-        return;
+        if (!allowNegativeStock) {
+          showFeedback(`Insufficient stock! Available: ${availableStock} ${prod.unit || 'PCS'}`);
+          return;
+        }
+        // Negative stock allowed — warn but proceed
+        showFeedback(`⚠️ Stock will go negative (${availableStock - totalQtyRequested} ${prod.unit || 'PCS'}). Sale proceeding...`);
       }
     }
 
@@ -835,8 +841,12 @@ export default function PosBilling({
       ) || targetItem.item;
       const availableStock = productRecord?.stock_qty ?? 0;
       if (newQty > availableStock) {
-        showFeedback(`Cannot exceed available stock (${availableStock} ${targetItem.unit})`);
-        return;
+        if (!allowNegativeStock) {
+          showFeedback(`Cannot exceed available stock (${availableStock} ${targetItem.unit})`);
+          return;
+        }
+        // Negative stock allowed — warn but proceed
+        showFeedback(`⚠️ Stock will go negative (${availableStock - newQty} ${targetItem.unit}). Proceeding...`);
       }
     }
 

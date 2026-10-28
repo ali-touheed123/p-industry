@@ -318,6 +318,39 @@ export const DevBranchesView: React.FC<DevBranchesViewProps> = ({
                           CEO PASS: ON
                         </span>
                       )}
+                      {branch.allow_negative_stock === false ? (
+                        <span
+                          style={{
+                            fontSize: '10px',
+                            fontFamily: "'JetBrains Mono', monospace",
+                            fontWeight: 700,
+                            padding: '2px 8px',
+                            borderRadius: '9999px',
+                            backgroundColor: 'rgba(251, 191, 36, 0.15)',
+                            color: '#fbbf24',
+                            border: '1px solid rgba(251, 191, 36, 0.3)',
+                          }}
+                          title="Strict Stock: sales blocked when stock is insufficient"
+                        >
+                          STRICT STOCK
+                        </span>
+                      ) : (
+                        <span
+                          style={{
+                            fontSize: '10px',
+                            fontFamily: "'JetBrains Mono', monospace",
+                            fontWeight: 700,
+                            padding: '2px 8px',
+                            borderRadius: '9999px',
+                            backgroundColor: 'rgba(16, 185, 129, 0.10)',
+                            color: '#6ee7b7',
+                            border: '1px solid rgba(16, 185, 129, 0.2)',
+                          }}
+                          title="Negative Stock allowed: counters can sell even when stock is 0"
+                        >
+                          NEG STOCK: ON
+                        </span>
+                      )}
                       {!branch.is_active && (
                         <span
                           style={{

@@ -2019,6 +2019,7 @@ export default function StockInventory({
                   itemsToRender.map((prod) => {
                     const minAlert = prod.min_stock_alert || 5;
                     const isCritical = prod.stock_qty <= minAlert;
+                    const isNegative = prod.stock_qty < 0;
                     return (
                       <tr key={prod.id}>
                         {/* Code */}
@@ -2079,8 +2080,18 @@ export default function StockInventory({
                         </td>
                         {/* Stock Qty */}
                         <td style={{ textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>
-                          <span style={{ fontWeight: 700, color: isCritical ? '#DC2626' : '#0F172A' }}>
+                          <span style={{
+                            fontWeight: 700,
+                            color: isNegative ? '#ef4444' : isCritical ? '#DC2626' : '#0F172A',
+                          }}
+                            title={isNegative ? 'Deficit stock — pending purchase inward' : undefined}
+                          >
                             {prod.stock_qty}
+                            {isNegative && (
+                              <span style={{ fontSize: '9px', marginLeft: '3px', color: '#fca5a5', fontWeight: 600 }}>
+                                ▼ DEFICIT
+                              </span>
+                            )}
                           </span>
                           <span style={{ fontSize: '10px', color: '#94A3B8', display: 'block' }}>
                             Min: {minAlert}
@@ -2094,7 +2105,19 @@ export default function StockInventory({
                         </td>
                         {/* Status */}
                         <td style={{ textAlign: 'center' }}>
-                          {isCritical ? (
+                          {isNegative ? (
+                            <span
+                              style={{
+                                fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700,
+                                padding: '2px 7px', borderRadius: '9999px',
+                                backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#fca5a5',
+                                border: '1px solid rgba(239, 68, 68, 0.3)',
+                              }}
+                              title="Deficit — pending purchase inward"
+                            >
+                              Deficit
+                            </span>
+                          ) : isCritical ? (
                             <span className="inv-badge-alert">Low</span>
                           ) : (
                             <span className="inv-badge-optimal">OK</span>

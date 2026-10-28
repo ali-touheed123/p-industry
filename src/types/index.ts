@@ -24,6 +24,7 @@ export interface Tenant {
   logo_url?: string;
   is_active: boolean;
   require_ceo_pass?: boolean;
+  allow_negative_stock?: boolean;
   commission_enabled?: boolean;
   commission_rate?: number;
   commission_split_lead?: number;

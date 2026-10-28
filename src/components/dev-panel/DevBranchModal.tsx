@@ -39,6 +39,9 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
   // Security Master Switch: Require CEO password for sensitive POS actions
   const [requireCeoPass, setRequireCeoPass] = useState<boolean>(true);
 
+  // Stock Policy Switch: Allow selling when stock is 0 or below (negative stock)
+  const [allowNegativeStock, setAllowNegativeStock] = useState<boolean>(true);
+
   // Initial Login Accounts fields
   const [ceoUsername, setCeoUsername] = useState('');
   const [ceoPassword, setCeoPassword] = useState('');
@@ -63,6 +66,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
       setOwnerMode('existing');
       setSelectedOwnerId(editingBranch.owner_id || '');
       setRequireCeoPass(editingBranch.require_ceo_pass !== undefined ? Boolean(editingBranch.require_ceo_pass) : true);
+      setAllowNegativeStock(editingBranch.allow_negative_stock !== undefined ? Boolean(editingBranch.allow_negative_stock) : true);
       setCeoUsername('');
       setCeoPassword('');
       setCounters([{ username: 'counter1', password: '123', name: 'Counter 01 (Main POS)' }]);
@@ -90,6 +94,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
       }
 
       setRequireCeoPass(true);
+      setAllowNegativeStock(true);
       setCeoUsername('');
       setCeoPassword('');
       setCounters([
@@ -171,6 +176,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
           owner_name: ownerName.trim(),
           owner_id: isExistingOwner ? selectedOwnerId : editingBranch?.owner_id,
           require_ceo_pass: requireCeoPass,
+          allow_negative_stock: allowNegativeStock,
         },
         !editingBranch
           ? {
@@ -531,6 +537,74 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
               ) : (
                 <div>
                   🔓 <strong style={{ color: '#fca5a5' }}>Bypassed (Off):</strong> Staff at this branch can <strong>freely access</strong> Receipt Template Settings, Stock Adjustments, and Product/Price edits <strong>without entering any CEO password</strong>.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── Negative Stock Policy Toggle ─────────────────────────────── */}
+          <div style={{
+            padding: '20px',
+            borderRadius: '16px',
+            backgroundColor: allowNegativeStock ? 'rgba(16, 185, 129, 0.05)' : 'rgba(251, 191, 36, 0.05)',
+            border: `1px solid ${allowNegativeStock ? 'rgba(16, 185, 129, 0.25)' : 'rgba(251, 191, 36, 0.25)'}`,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '14px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '36px', height: '36px', borderRadius: '10px', flexShrink: 0,
+                  backgroundColor: allowNegativeStock ? 'rgba(16, 185, 129, 0.15)' : 'rgba(251, 191, 36, 0.15)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <span style={{ fontSize: '18px' }}>{allowNegativeStock ? '📉' : '🔒'}</span>
+                </div>
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#f1f5f9', letterSpacing: '0.02em' }}>
+                    Allow Negative Stock Sales
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px' }}>
+                    <span style={{
+                      fontSize: '10px', fontFamily: "'JetBrains Mono', monospace", fontWeight: 700,
+                      padding: '2px 8px', borderRadius: '9999px',
+                      backgroundColor: allowNegativeStock ? 'rgba(16, 185, 129, 0.2)' : 'rgba(251, 191, 36, 0.2)',
+                      color: allowNegativeStock ? '#34d399' : '#fbbf24',
+                      border: `1px solid ${allowNegativeStock ? 'rgba(16, 185, 129, 0.4)' : 'rgba(251, 191, 36, 0.4)'}`,
+                    }}>
+                      {allowNegativeStock ? 'NEG STOCK: ON' : 'STRICT STOCK: OFF'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              {/* Toggle Switch */}
+              <div
+                onClick={() => setAllowNegativeStock(!allowNegativeStock)}
+                style={{
+                  width: '48px', height: '26px', borderRadius: '13px', cursor: 'pointer',
+                  position: 'relative', flexShrink: 0, transition: 'background 0.2s',
+                  backgroundColor: allowNegativeStock ? 'rgba(16, 185, 129, 0.15)' : 'rgba(251, 191, 36, 0.15)',
+                  border: `1px solid ${allowNegativeStock ? 'rgba(16, 185, 129, 0.4)' : 'rgba(251, 191, 36, 0.4)'}`,
+                }}
+              >
+                <div style={{
+                  position: 'absolute', top: '3px',
+                  left: allowNegativeStock ? '24px' : '3px',
+                  width: '18px', height: '18px', borderRadius: '50%', transition: 'left 0.2s',
+                  backgroundColor: allowNegativeStock ? '#34d399' : '#fbbf24',
+                  boxShadow: allowNegativeStock ? '0 0 8px #34d399' : '0 0 8px #fbbf24',
+                }} />
+              </div>
+            </div>
+            <div style={{ fontSize: '12px', lineHeight: '1.6', color: allowNegativeStock ? '#d1d5db' : '#9ca3af' }}>
+              {allowNegativeStock ? (
+                <div>
+                  📉 <strong style={{ color: '#34d399' }}>Enabled (On):</strong> Counters can sell products even when stock is <strong>0 or below</strong>. Stock goes negative (e.g. <code style={{ fontSize: '11px', backgroundColor: 'rgba(255,255,255,0.08)', padding: '1px 5px', borderRadius: '4px' }}>−4</code>) and <strong>self-corrects</strong> when a purchase bill or inward is recorded later.
+                </div>
+              ) : (
+                <div>
+                  🔒 <strong style={{ color: '#fbbf24' }}>Strict (Off):</strong> Sale is <strong>blocked</strong> if product stock is insufficient. Counters must wait for a purchase inward before selling.
                 </div>
               )}
             </div>
