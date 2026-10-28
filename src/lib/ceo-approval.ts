@@ -2,6 +2,7 @@ import { SignJWT, jwtVerify } from 'jose';
 import { NextRequest, NextResponse } from 'next/server';
 import { getJwtSecret } from './jwt-secrets';
 import type { UserSession } from './session';
+import { supabaseAdmin } from './supabase';
 
 /**
  * CEO approval — a short-lived, tenant- and user-bound token that a staff session
@@ -65,13 +66,35 @@ export async function hasValidCeoApproval(
 export type CeoGateResult = { ok: true } | { ok: false; response: NextResponse };
 
 /**
- * Call AFTER requireTenantAuth succeeded. Staff sessions must present a valid approval token.
+ * Call AFTER requireTenantAuth succeeded. Staff sessions must present a valid approval token,
+ * UNLESS the branch has CEO password requirement disabled (require_ceo_pass === false).
  */
 export async function requireCeoApproval(
   req: NextRequest,
-  session: UserSession
+  session: UserSession,
+  tenantId?: string | null
 ): Promise<CeoGateResult> {
+  if (isCeoLevelRole(session.role)) return { ok: true };
   if (await hasValidCeoApproval(req, session)) return { ok: true };
+
+  // Check if this tenant has master CEO pass switch disabled
+  const targetTenantId = tenantId || session.tenantId;
+  if (targetTenantId) {
+    try {
+      const { data: tenant } = await supabaseAdmin
+        .from('tenants')
+        .select('require_ceo_pass')
+        .eq('id', targetTenantId)
+        .maybeSingle();
+
+      if (tenant && tenant.require_ceo_pass === false) {
+        return { ok: true };
+      }
+    } catch {
+      // Fall through to requiring approval on DB error
+    }
+  }
+
   return {
     ok: false,
     response: NextResponse.json(

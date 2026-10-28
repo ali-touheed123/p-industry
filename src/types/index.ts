@@ -23,6 +23,7 @@ export interface Tenant {
   city?: string;
   logo_url?: string;
   is_active: boolean;
+  require_ceo_pass?: boolean;
   commission_enabled?: boolean;
   commission_rate?: number;
   commission_split_lead?: number;

@@ -670,8 +670,8 @@ export async function PATCH(req: NextRequest) {
       if (!auth.authorized) {
         return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
       }
-      // CEO approval gate: bulk price edit requires the CEO password for staff
-      const ceoGateBatch = await requireCeoApproval(req, auth.session);
+      // CEO approval gate: bulk price edit requires the CEO password for staff (if enabled for tenant)
+      const ceoGateBatch = await requireCeoApproval(req, auth.session, tenant_id);
       if (!ceoGateBatch.ok) return ceoGateBatch.response;
 
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -871,8 +871,8 @@ export async function PATCH(req: NextRequest) {
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
-    // CEO approval gate: editing a product requires the CEO password for staff
-    const ceoGateSingle = await requireCeoApproval(req, auth.session);
+    // CEO approval gate: editing a product requires the CEO password for staff (if enabled for tenant)
+    const ceoGateSingle = await requireCeoApproval(req, auth.session, targetTenantId);
     if (!ceoGateSingle.ok) return ceoGateSingle.response;
 
     // Strip tenant_id from update payload to prevent cross-tenant hijacking or reassignment

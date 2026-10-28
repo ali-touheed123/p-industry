@@ -331,8 +331,11 @@ export default function TenantAppPage({ params }: PageProps) {
   };
 
   const isCEO = currentUser?.role === 'ceo' || currentUser?.role === 'developer';
-  // Staff must enter the CEO password before protected features (receipt settings, price/stock edits)
-  const { ensure: ensureCeoApproval, modal: ceoApprovalModal } = useCeoApproval(tenant?.id, !isCEO);
+  // Check if this branch enforces CEO password for sensitive POS features (defaults to true)
+  const branchRequiresCeoPass = tenant?.require_ceo_pass !== false;
+  const needsCeoApproval = !isCEO && branchRequiresCeoPass;
+  // Staff must enter the CEO password before protected features (receipt settings, price/stock edits), if branch enforces it
+  const { ensure: ensureCeoApproval, modal: ceoApprovalModal } = useCeoApproval(tenant?.id, needsCeoApproval);
   const totalSales = invoices.reduce((s, i) => s + (i.grandTotal || 0), 0);
 
   // Automatic Redirect for Invalid / Non-existent Shop URL
@@ -798,7 +801,7 @@ export default function TenantAppPage({ params }: PageProps) {
               tenantId={tenant.id}
               tenantName={tenant.name}
               onStockUpdated={refreshItems}
-              requireCeoApproval={!isCEO}
+              requireCeoApproval={needsCeoApproval}
             />
           )}
           {(activeTab === 'customers' || activeTab === 'ledgers') && (

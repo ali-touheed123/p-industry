@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, KeyRound, Plus, Trash2, Mail, Phone, MapPin, Building, Globe } from 'lucide-react';
+import { X, KeyRound, Plus, Trash2, Mail, Phone, MapPin, Building, Globe, Lock, Unlock, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { Tenant, BranchType, InitialAccountsData } from '@/types/dev';
 import { Owner } from '@/types';
 
@@ -36,6 +36,9 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
   const [ownerMode, setOwnerMode] = useState<'existing' | 'new'>('existing');
   const [selectedOwnerId, setSelectedOwnerId] = useState<string>('');
 
+  // Security Master Switch: Require CEO password for sensitive POS actions
+  const [requireCeoPass, setRequireCeoPass] = useState<boolean>(true);
+
   // Initial Login Accounts fields
   const [ceoUsername, setCeoUsername] = useState('');
   const [ceoPassword, setCeoPassword] = useState('');
@@ -59,6 +62,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
       setOwnerName(editingBranch.owner_name || '');
       setOwnerMode('existing');
       setSelectedOwnerId(editingBranch.owner_id || '');
+      setRequireCeoPass(editingBranch.require_ceo_pass !== undefined ? Boolean(editingBranch.require_ceo_pass) : true);
       setCeoUsername('');
       setCeoPassword('');
       setCounters([{ username: 'counter1', password: '123', name: 'Counter 01 (Main POS)' }]);
@@ -85,6 +89,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
         setPhone('');
       }
 
+      setRequireCeoPass(true);
       setCeoUsername('');
       setCeoPassword('');
       setCounters([
@@ -165,6 +170,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
           email: email.trim(),
           owner_name: ownerName.trim(),
           owner_id: isExistingOwner ? selectedOwnerId : editingBranch?.owner_id,
+          require_ceo_pass: requireCeoPass,
         },
         !editingBranch
           ? {
@@ -409,6 +415,124 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
                 placeholder="e.g. Shop #42, Main Commercial Market, Timber Market Road"
                 className="aura-form-input"
               />
+            </div>
+          </div>
+
+          {/* POS CEO Password Security (Master Switch for Protected Features) */}
+          <div
+            style={{
+              padding: '16px',
+              borderRadius: '16px',
+              backgroundColor: requireCeoPass ? 'rgba(212, 175, 55, 0.05)' : 'rgba(239, 68, 68, 0.05)',
+              border: `1px solid ${requireCeoPass ? 'rgba(212, 175, 55, 0.25)' : 'rgba(239, 68, 68, 0.25)'}`,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: '34px',
+                    height: '34px',
+                    borderRadius: '10px',
+                    backgroundColor: requireCeoPass ? 'rgba(212, 175, 55, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  {requireCeoPass ? (
+                    <Lock style={{ width: 18, height: 18, color: '#D4AF37' }} />
+                  ) : (
+                    <Unlock style={{ width: 18, height: 18, color: '#f87171' }} />
+                  )}
+                </div>
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>POS CEO Password Gate</span>
+                    <span
+                      style={{
+                        fontSize: '9px',
+                        padding: '1px 6px',
+                        borderRadius: '4px',
+                        backgroundColor: requireCeoPass ? 'rgba(212, 175, 55, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                        color: requireCeoPass ? '#D4AF37' : '#f87171',
+                        border: `1px solid ${requireCeoPass ? 'rgba(212, 175, 55, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+                        fontFamily: "'JetBrains Mono', monospace",
+                      }}
+                    >
+                      {requireCeoPass ? 'PROTECTION ON' : 'PROTECTION OFF'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '2px' }}>
+                    Decide if staff POS counters need the CEO password to access sensitive features.
+                  </div>
+                </div>
+              </div>
+
+              {/* Master Toggle Switch */}
+              <button
+                type="button"
+                onClick={() => setRequireCeoPass(!requireCeoPass)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '7px 14px',
+                  borderRadius: '9999px',
+                  backgroundColor: requireCeoPass ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                  border: `1px solid ${requireCeoPass ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+                  color: requireCeoPass ? '#34d399' : '#f87171',
+                  cursor: 'pointer',
+                  fontWeight: 700,
+                  fontSize: '11px',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <div
+                  style={{
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    backgroundColor: requireCeoPass ? '#34d399' : '#f87171',
+                    boxShadow: requireCeoPass ? '0 0 8px #34d399' : '0 0 8px #f87171',
+                  }}
+                />
+                {requireCeoPass ? 'CEO PASS: REQUIRED' : 'CEO PASS: OFF (FREE ACCESS)'}
+              </button>
+            </div>
+
+            {/* Explanatory Features Box */}
+            <div
+              style={{
+                fontSize: '11px',
+                color: requireCeoPass ? '#d1d5db' : '#9ca3af',
+                backgroundColor: 'rgba(0, 0, 0, 0.35)',
+                padding: '10px 14px',
+                borderRadius: '10px',
+                border: '1px solid rgba(255, 255, 255, 0.05)',
+                lineHeight: 1.6,
+              }}
+            >
+              {requireCeoPass ? (
+                <div>
+                  🔒 <strong style={{ color: '#F3E5AB' }}>Active Protection:</strong> Staff at this branch <strong>must enter the CEO password</strong> to access:
+                  <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                    <li>Receipt Template Settings</li>
+                    <li>Stock Adjustment & Damage Audits</li>
+                    <li>Bulk Price Edits & Product Details Editing</li>
+                  </ul>
+                </div>
+              ) : (
+                <div>
+                  🔓 <strong style={{ color: '#fca5a5' }}>Bypassed (Off):</strong> Staff at this branch can <strong>freely access</strong> Receipt Template Settings, Stock Adjustments, and Product/Price edits <strong>without entering any CEO password</strong>.
+                </div>
+              )}
             </div>
           </div>
 

@@ -83,8 +83,8 @@ export async function POST(req: NextRequest) {
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
-    // CEO approval gate (staff must have entered the CEO password)
-    const ceoGate = await requireCeoApproval(req, auth.session);
+    // CEO approval gate (staff must have entered the CEO password, unless disabled for this tenant)
+    const ceoGate = await requireCeoApproval(req, auth.session, tenant_id);
     if (!ceoGate.ok) return ceoGate.response;
 
     const perm = await verifySpecialReceiptPermission(auth.session, tenant_id);

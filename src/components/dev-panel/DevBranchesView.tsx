@@ -285,6 +285,39 @@ export const DevBranchesView: React.FC<DevBranchesViewProps> = ({
                           <span>{branch.city}</span>
                         </span>
                       )}
+                      {branch.require_ceo_pass === false ? (
+                        <span
+                          style={{
+                            fontSize: '10px',
+                            fontFamily: "'JetBrains Mono', monospace",
+                            fontWeight: 700,
+                            padding: '2px 8px',
+                            borderRadius: '9999px',
+                            backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                            color: '#fca5a5',
+                            border: '1px solid rgba(239, 68, 68, 0.3)',
+                          }}
+                          title="CEO Password check is DISABLED for POS sensitive features"
+                        >
+                          CEO PASS: OFF
+                        </span>
+                      ) : (
+                        <span
+                          style={{
+                            fontSize: '10px',
+                            fontFamily: "'JetBrains Mono', monospace",
+                            fontWeight: 700,
+                            padding: '2px 8px',
+                            borderRadius: '9999px',
+                            backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                            color: '#34d399',
+                            border: '1px solid rgba(16, 185, 129, 0.25)',
+                          }}
+                          title="CEO Password check is REQUIRED for POS sensitive features"
+                        >
+                          CEO PASS: ON
+                        </span>
+                      )}
                       {!branch.is_active && (
                         <span
                           style={{
