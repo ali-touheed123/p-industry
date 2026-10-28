@@ -51,6 +51,7 @@ interface Props {
   staffName?: string;
   staffUsername?: string;
   onOrderPlaced?: () => void;
+  defaultTab?: 'place' | 'my_requests' | 'incoming';
 }
 
 export default function BranchOrders({
@@ -61,11 +62,18 @@ export default function BranchOrders({
   staffName = 'Staff',
   staffUsername,
   onOrderPlaced,
+  defaultTab,
 }: Props) {
   // State: destinations, orders, form
   const [destinations, setDestinations] = useState<OrderDestination[]>([]);
   const [orders, setOrders] = useState<BranchOrder[]>([]);
-  const [activeTab, setActiveTab] = useState<'place' | 'my_requests' | 'incoming'>('place');
+  const [activeTab, setActiveTab] = useState<'place' | 'my_requests' | 'incoming'>(defaultTab || 'place');
+
+  useEffect(() => {
+    if (defaultTab) {
+      setActiveTab(defaultTab);
+    }
+  }, [defaultTab]);
   const [loadingOrders, setLoadingOrders] = useState(false);
 
   // Form state

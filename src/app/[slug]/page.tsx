@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, use } from 'react';
+import React, { useState, useEffect, use, useRef } from 'react';
 import { Item, Tenant, Shift, PettyExpense, AuditLog } from '@/types';
 import dynamic from 'next/dynamic';
 import PosBilling from '@/components/PosBilling';
@@ -60,6 +60,8 @@ import {
   LockOpen,
   AlertCircle,
   Printer,
+  ArrowRight,
+  X,
 } from 'lucide-react';
 
 interface PageProps {
@@ -83,6 +85,14 @@ export default function TenantAppPage({ params }: PageProps) {
     'pos' | 'inventory' | 'purchases' | 'sales' | 'customers' | 'returns' | 'orders' | 'hold_invoices' | 'credit_recovery' | 'reports' | 'day_close' | 'stock' | 'ledgers' | 'credit' | 'shift' | 'ceo_reports' | 'tokens' | 'token_management' | 'receipt'
   >('pos');
   const [pendingOrdersCount, setPendingOrdersCount] = useState<number>(0);
+  const [ordersDefaultTab, setOrdersDefaultTab] = useState<'place' | 'my_requests' | 'incoming'>('place');
+  const [newOrderToast, setNewOrderToast] = useState<{
+    orderNo?: string;
+    fromBranchName?: string;
+    count: number;
+  } | null>(null);
+  const initialFetchDoneRef = useRef<boolean>(false);
+  const prevOrdersCountRef = useRef<number>(0);
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
   const [showOpenShiftModal, setShowOpenShiftModal] = useState(false);
   const [openingCashInput, setOpeningCashInput] = useState('');
@@ -277,6 +287,21 @@ export default function TenantAppPage({ params }: PageProps) {
     }
   };
 
+  const playNotificationSound = () => {
+    try {
+      const audio = new Audio('/sounds/order-notification.wav');
+      audio.volume = 0.85;
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.warn('[BranchOrders] Autoplay blocked until user interaction:', err);
+        });
+      }
+    } catch (err) {
+      console.warn('[BranchOrders] Audio initialize failed:', err);
+    }
+  };
+
   const fetchPendingOrdersCount = async () => {
     if (!tenant?.id) return;
     if (typeof window !== 'undefined' && !navigator.onLine) return;
@@ -286,11 +311,41 @@ export default function TenantAppPage({ params }: PageProps) {
       if (!res.ok) return;
       const data = await res.json();
       if (data && data.success) {
-        setPendingOrdersCount(data.pendingCount || 0);
+        const newCount = Number(data.pendingCount || 0);
+
+        // Only play audio & show toast on count INCREASE (not on initial mount/reload)
+        if (initialFetchDoneRef.current && newCount > prevOrdersCountRef.current) {
+          playNotificationSound();
+          setNewOrderToast({
+            orderNo: data.latestOrder?.orderNo,
+            fromBranchName: data.latestOrder?.fromBranchName || 'Sister Branch',
+            count: newCount,
+          });
+        }
+
+        initialFetchDoneRef.current = true;
+        prevOrdersCountRef.current = newCount;
+        setPendingOrdersCount(newCount);
       }
     } catch {
       // Silently ignore transient background polling network hiccups
     }
+  };
+
+  // Auto-dismiss notification after 15 seconds
+  useEffect(() => {
+    if (newOrderToast) {
+      const timer = setTimeout(() => {
+        setNewOrderToast(null);
+      }, 15000);
+      return () => clearTimeout(timer);
+    }
+  }, [newOrderToast]);
+
+  const handleOpenIncomingOrder = () => {
+    setOrdersDefaultTab('incoming');
+    setActiveTab('orders');
+    setNewOrderToast(null);
   };
 
   useEffect(() => {
@@ -740,7 +795,8 @@ export default function TenantAppPage({ params }: PageProps) {
               staffName={currentUser?.full_name || currentUser?.username || 'Staff'}
               staffUsername={currentUser?.username}
               onOrderPlaced={fetchPendingOrdersCount}
-            />
+                defaultTab={ordersDefaultTab}
+              />
           )}
           {activeTab === 'purchases' && (
             <PurchasesView
@@ -1004,6 +1060,124 @@ export default function TenantAppPage({ params }: PageProps) {
           </div>
         );
       })()}
+      {/* ── Realtime Branch Order Incoming Alert Toast ── */}
+      {newOrderToast && (
+        <div
+          role="alert"
+          style={{
+            position: 'fixed',
+            bottom: '24px',
+            right: '24px',
+            zIndex: 9999,
+            backgroundColor: '#FFFFFF',
+            border: '2px solid #F97316',
+            borderRadius: '14px',
+            boxShadow: '0 10px 25px -5px rgba(249, 115, 22, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+            padding: '16px 20px',
+            maxWidth: '380px',
+            width: 'calc(100vw - 48px)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            animation: 'fadeIn 0.25s ease-out',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div
+                style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '10px',
+                  backgroundColor: '#FFF7ED',
+                  border: '1px solid #FFEDD5',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#EA580C',
+                  flexShrink: 0,
+                }}
+              >
+                <PackagePlus size={20} />
+              </div>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: '14px', color: '#0F172A', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>Naya Branch Order!</span>
+                  {newOrderToast.orderNo && (
+                    <span style={{ fontSize: '11px', padding: '1px 6px', background: '#FFEDD5', color: '#C2410C', borderRadius: '4px', fontFamily: 'monospace' }}>
+                      {newOrderToast.orderNo}
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: '12px', color: '#64748B', marginTop: '2px' }}>
+                  From: <strong style={{ color: '#0F172A' }}>{newOrderToast.fromBranchName}</strong>
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => setNewOrderToast(null)}
+              aria-label="Close notification"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#94A3B8',
+                cursor: 'pointer',
+                padding: '4px',
+                borderRadius: '6px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <div style={{ fontSize: '12px', color: '#475569', lineHeight: 1.4 }}>
+            Doosri branch se stock transfer / maal mangwane ki request aayi hai.
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
+            <button
+              onClick={handleOpenIncomingOrder}
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                padding: '9px 14px',
+                backgroundColor: '#F97316',
+                color: '#FFFFFF',
+                border: 'none',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                boxShadow: '0 2px 4px rgba(249, 115, 22, 0.3)',
+              }}
+            >
+              <span>Order Request Kholein</span>
+              <ArrowRight size={14} />
+            </button>
+            <button
+              onClick={() => setNewOrderToast(null)}
+              style={{
+                padding: '9px 12px',
+                backgroundColor: '#F1F5F9',
+                color: '#475569',
+                border: 'none',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

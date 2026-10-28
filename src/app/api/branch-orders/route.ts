@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    // If count_only=incoming, return just the count of pending incoming orders (for notification dot)
+    // If count_only=incoming, return count of pending incoming orders & latest order info for toast alert
     if (countOnly === 'incoming') {
       let countQuery = supabaseAdmin
         .from('branch_orders')
@@ -34,7 +34,41 @@ export async function GET(req: NextRequest) {
       const { count, error } = await countQuery;
 
       if (error) throw error;
-      return NextResponse.json({ success: true, pendingCount: count || 0 });
+
+      let latestOrder: any = null;
+      if (count && count > 0) {
+        let latestQuery = supabaseAdmin
+          .from('branch_orders')
+          .select('id, order_no, from_tenant_id, created_at, from_counter')
+          .eq('to_tenant_id', tenantId)
+          .eq('status', 'pending')
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (counterUsername) {
+          latestQuery = latestQuery.or(`target_counter.eq.${counterUsername},target_counter.is.null`);
+        }
+
+        const { data: latestData } = await latestQuery;
+        if (latestData && latestData.length > 0) {
+          const lo = latestData[0];
+          const { data: fromTenant } = await supabaseAdmin
+            .from('tenants')
+            .select('name')
+            .eq('id', lo.from_tenant_id)
+            .maybeSingle();
+
+          latestOrder = {
+            id: lo.id,
+            orderNo: lo.order_no,
+            fromBranchName: fromTenant?.name || 'Sister Branch',
+            fromCounter: lo.from_counter,
+            createdAt: lo.created_at,
+          };
+        }
+      }
+
+      return NextResponse.json({ success: true, pendingCount: count || 0, latestOrder });
     }
 
     // Fetch all orders where this tenant is either sender or receiver
