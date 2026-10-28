@@ -658,27 +658,11 @@ export default function BranchOrders({
                     >
                       <div style={{ fontSize: '13px', color: '#475569', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <Building2 size={16} />
-                        Koi doosri branch ya counter register nahi hai
+                        Koi doosri branch ya godown registered nahi hai
                       </div>
                       <div style={{ fontSize: '12px', color: '#64748B', lineHeight: 1.4 }}>
-                        Dusri branch se maal mangwane ke liye Developer Panel me branch register karein.
+                        Dusri branch se maal mangwane ke liye apne CEO ya Administrator se rabta karein.
                       </div>
-                      <a
-                        href="/dev"
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          fontSize: '12px',
-                          fontWeight: 700,
-                          color: '#F97316',
-                          textDecoration: 'none',
-                        }}
-                      >
-                        Open Developer Panel to Add Branch →
-                      </a>
                     </div>
                   )}
                 </div>

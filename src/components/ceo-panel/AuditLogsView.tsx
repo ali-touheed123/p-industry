@@ -20,9 +20,7 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({ branch }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [actionFilter, setActionFilter] = useState<string>('all');
 
-  const tenantId = branch?.id
-    ? (/-b\d+$/.test(branch.id) ? branch.id.replace(/-b\d+$/, '') : branch.id)
-    : (branch?.slug || '');
+  const tenantId = branch?.id || branch?.slug || '';
 
   const fetchLogs = async () => {
     if (!tenantId) return;

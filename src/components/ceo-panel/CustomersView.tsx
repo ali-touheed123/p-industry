@@ -20,9 +20,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ branch }) => {
   useEffect(() => {
     let isMounted = true;
     const fetchCustomers = async () => {
-      const tenantId = branch?.id
-        ? (/-b\d+$/.test(branch.id) ? branch.id.replace(/-b\d+$/, '') : branch.id)
-        : (branch?.slug || '');
+      const tenantId = branch?.id || branch?.slug || '';
 
       if (!tenantId) return;
       setLoading(true);
@@ -403,11 +401,11 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ branch }) => {
         customer={selectedCustomer}
         onClose={() => setSelectedCustomer(null)}
         branchName={branch.name}
-        tenantId={branch?.id ? (/-b\d+$/.test(branch.id) ? branch.id.replace(/-b\d+$/, '') : branch.id) : (branch?.slug || '')}
+        tenantId={branch?.id || branch?.slug || ''}
         onPaymentRecorded={() => {
           setSelectedCustomer(null);
           // Re-fetch all customers & transactions
-          const tid = branch?.id ? (/-b\d+$/.test(branch.id) ? branch.id.replace(/-b\d+$/, '') : branch.id) : (branch?.slug || '');
+          const tid = branch?.id || branch?.slug || '';
           if (tid) {
             setLoading(true);
             Promise.all([

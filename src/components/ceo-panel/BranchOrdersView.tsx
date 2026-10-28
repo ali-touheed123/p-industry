@@ -21,9 +21,7 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
 
-  const tenantId = branch?.id
-    ? (/-b\d+$/.test(branch.id) ? branch.id.replace(/-b\d+$/, '') : branch.id)
-    : (branch?.slug || '');
+  const tenantId = branch?.id || branch?.slug || '';
 
   const fetchOrders = async () => {
     if (!tenantId) return;
