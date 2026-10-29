@@ -202,6 +202,10 @@ export async function GET(req: NextRequest) {
             qty: isLegacy ? Number(it.qty) || 0 : Number(it.dispatched_qty) || 0,
             unit_price: isLegacy ? null : Number(it.unit_price ?? 0),
             total_price: isLegacy ? null : Number(it.total_price ?? (Number(it.dispatched_qty || 0) * Number(it.unit_price || 0))),
+            discount_type: it.discount_type || null,
+            discount_value: it.discount_value != null ? Number(it.discount_value) : null,
+            discount_amount: it.discount_amount != null ? Number(it.discount_amount) : null,
+            is_additional: !!it.is_additional,
           };
         });
       });

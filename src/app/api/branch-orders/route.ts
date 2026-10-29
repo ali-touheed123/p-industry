@@ -470,10 +470,17 @@ export async function PATCH(req: NextRequest) {
       }
 
       // Validate each item strictly matches required contract
+      const sanitizedItems: any[] = [];
       for (const it of items) {
-        if (!it.id) {
+        if (!it.id && !it.is_additional) {
           return NextResponse.json(
-            { success: false, error: `Each dispatched item must include a valid line id` },
+            { success: false, error: 'Each dispatched item must include a valid line id unless marked as additional' },
+            { status: 400 }
+          );
+        }
+        if (it.is_additional && (!it.item_code || !String(it.item_code).trim())) {
+          return NextResponse.json(
+            { success: false, error: 'Additional items must specify a valid item_code' },
             { status: 400 }
           );
         }
@@ -483,12 +490,34 @@ export async function PATCH(req: NextRequest) {
             { status: 400 }
           );
         }
+        if (it.is_additional && it.dispatched_qty < 1) {
+          return NextResponse.json(
+            { success: false, error: `Additional item ${it.item_code} must have dispatched quantity >= 1` },
+            { status: 400 }
+          );
+        }
         if (it.unit_price === undefined || it.unit_price === null || typeof it.unit_price !== 'number' || it.unit_price < 0) {
           return NextResponse.json(
             { success: false, error: `Unit price is required and must be non-negative for item ${it.item_code || it.id}` },
             { status: 400 }
           );
         }
+
+        const sanitizedLine: any = {
+          dispatched_qty: it.dispatched_qty,
+          unit_price: Math.round(Number(it.unit_price) * 100) / 100,
+        };
+        if (it.id) sanitizedLine.id = it.id;
+        if (it.item_code) sanitizedLine.item_code = String(it.item_code).trim();
+        if (it.is_additional) sanitizedLine.is_additional = true;
+        if (it.discount_type !== undefined) sanitizedLine.discount_type = it.discount_type;
+        if (it.discount_value !== undefined) {
+          sanitizedLine.discount_value = typeof it.discount_value === 'number'
+            ? Math.round(it.discount_value * 100) / 100
+            : it.discount_value;
+        }
+
+        sanitizedItems.push(sanitizedLine);
       }
 
       const cleanDiscount = Number(discount) || 0;
@@ -499,7 +528,7 @@ export async function PATCH(req: NextRequest) {
       const { data: netTransferVal, error: rpcErr } = await supabaseAdmin.rpc('process_branch_dispatch_atomic', {
         p_order_id: id,
         p_to_tenant_id: supplyingTenantId,
-        p_items: items,
+        p_items: sanitizedItems,
         p_discount: cleanDiscount,
         p_delivery_charges: cleanDelivery,
         p_delivery_method: cleanMethod,

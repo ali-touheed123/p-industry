@@ -100,8 +100,27 @@ export default function BranchOrders({
       available_stock: number;
       dispatched_qty: number;
       unit_price: number;
+      discount_type: 'percent' | 'flat' | null;
+      discount_value: number;
     }>
   >([]);
+  const [additionalLines, setAdditionalLines] = useState<
+    Array<{
+      item_code: string;
+      item_name: string;
+      unit: string;
+      available_stock: number;
+      dispatched_qty: number;
+      unit_price: number;
+      discount_type: 'percent' | 'flat' | null;
+      discount_value: number;
+    }>
+  >([]);
+  const [showAddLinePicker, setShowAddLinePicker] = useState(false);
+  const [addLineSearch, setAddLineSearch] = useState('');
+  const [supplierStockResults, setSupplierStockResults] = useState<any[]>([]);
+  const [loadingSupplierStock, setLoadingSupplierStock] = useState(false);
+
   const [dispatchDiscountType, setDispatchDiscountType] = useState<'flat' | 'percent'>('flat');
   const [dispatchDiscountVal, setDispatchDiscountVal] = useState<number>(0);
   const [dispatchDeliveryCharges, setDispatchDeliveryCharges] = useState<number>(0);
@@ -299,6 +318,22 @@ export default function BranchOrders({
     }
   };
 
+  // Helper: line total calculation matching server ROUND(..., 2)
+  const calcLineTotal = (qty: number, rate: number, discType: 'percent' | 'flat' | null, discVal: number) => {
+    const gross = Math.round(qty * rate * 100) / 100;
+    let discAmt = 0;
+    if (discType === 'percent' && discVal > 0) {
+      discAmt = Math.round(((gross * discVal) / 100) * 100) / 100;
+    } else if (discType === 'flat' && discVal > 0) {
+      discAmt = Math.min(gross, Math.round(discVal * 100) / 100);
+    }
+    return {
+      gross,
+      discAmt,
+      total: Math.max(0, Math.round((gross - discAmt) * 100) / 100),
+    };
+  };
+
   // Open Dispatch Review Modal
   const openDispatchModal = (order: BranchOrder) => {
     const lines = (order.items || []).map((it) => {
@@ -316,10 +351,16 @@ export default function BranchOrders({
         available_stock: stock,
         dispatched_qty: defaultQty,
         unit_price: defaultRate,
+        discount_type: null,
+        discount_value: 0,
       };
     });
 
     setDispatchLines(lines);
+    setAdditionalLines([]);
+    setShowAddLinePicker(false);
+    setAddLineSearch('');
+    setSupplierStockResults([]);
     setDispatchDiscountType('flat');
     setDispatchDiscountVal(0);
     setDispatchDeliveryCharges(0);
@@ -329,18 +370,76 @@ export default function BranchOrders({
     setDispatchModalOrder(order);
   };
 
+  // Search supplier stock for adding substitute/extra items
+  const handleSearchSupplierStock = async (query: string) => {
+    if (!dispatchModalOrder) return;
+    setAddLineSearch(query);
+    setLoadingSupplierStock(true);
+    try {
+      const res = await fetch(`/api/branch-orders/${dispatchModalOrder.id}/items?q=${encodeURIComponent(query)}`);
+      const data = await res.json();
+      if (data.success) {
+        setSupplierStockResults(data.items || []);
+      } else {
+        setSupplierStockResults([]);
+      }
+    } catch (err) {
+      console.error('Failed to search supplier stock:', err);
+    } finally {
+      setLoadingSupplierStock(false);
+    }
+  };
+
+  // Add substitute / extra item from search result
+  const handleAddSubstituteItem = (item: any) => {
+    const cleanCode = (item.code || '').trim().toUpperCase();
+    if (dispatchLines.some(l => (l.item_code || '').trim().toUpperCase() === cleanCode)) {
+      setDispatchError(`"${item.name}" is already in the requested items list. Please update its quantity there.`);
+      return;
+    }
+    if (additionalLines.some(l => (l.item_code || '').trim().toUpperCase() === cleanCode)) {
+      setDispatchError(`"${item.name}" has already been added as an additional item.`);
+      return;
+    }
+    setDispatchError(null);
+    const defaultQty = 1;
+    setAdditionalLines(prev => [
+      ...prev,
+      {
+        item_code: item.code,
+        item_name: item.name,
+        unit: item.unit || item.pack_size || 'Can',
+        available_stock: Number(item.stock_qty) || 0,
+        dispatched_qty: defaultQty,
+        unit_price: Number(item.default_rate) || 0,
+        discount_type: null,
+        discount_value: 0,
+      },
+    ]);
+    setShowAddLinePicker(false);
+    setAddLineSearch('');
+    setSupplierStockResults([]);
+  };
+
   // Confirm Dispatch
   const handleConfirmDispatch = async () => {
     if (!dispatchModalOrder) return;
     setDispatchError(null);
 
     const hasShort = dispatchLines.some((l) => l.dispatched_qty < l.requested_qty);
-    if (hasShort && !dispatchNote.trim()) {
-      setDispatchError('A note to the requesting branch is required when any item is dispatched short.');
+    const hasAdditional = additionalLines.length > 0;
+    if ((hasShort || hasAdditional) && !dispatchNote.trim()) {
+      setDispatchError(
+        hasAdditional
+          ? 'A note to the requesting branch is required when extra or substitute items are added.'
+          : 'A note to the requesting branch is required when any item is dispatched short.'
+      );
       return;
     }
 
-    const totalQty = dispatchLines.reduce((s, l) => s + l.dispatched_qty, 0);
+    const totalQty =
+      dispatchLines.reduce((s, l) => s + l.dispatched_qty, 0) +
+      additionalLines.reduce((s, l) => s + l.dispatched_qty, 0);
     if (totalQty === 0) {
       setDispatchError('Cannot dispatch an order with 0 total quantity. Please reject the order instead.');
       return;
@@ -355,35 +454,99 @@ export default function BranchOrders({
         setDispatchError(`Dispatched quantity cannot exceed requested quantity for ${line.item_name}.`);
         return;
       }
+      if (line.discount_value < 0) {
+        setDispatchError(`Discount value cannot be negative for ${line.item_name}.`);
+        return;
+      }
+      if (line.discount_type === 'percent' && line.discount_value > 100) {
+        setDispatchError(`Percentage discount cannot exceed 100% for ${line.item_name}.`);
+        return;
+      }
+      const gross = Math.round(line.dispatched_qty * line.unit_price * 100) / 100;
+      if (line.discount_type === 'flat' && line.discount_value > gross) {
+        setDispatchError(`Flat discount (Rs. ${line.discount_value}) cannot exceed line total (Rs. ${gross}) for ${line.item_name}.`);
+        return;
+      }
     }
 
-    const subtotal = dispatchLines.reduce((sum, l) => sum + l.dispatched_qty * l.unit_price, 0);
+    for (const line of additionalLines) {
+      if (line.unit_price < 0) {
+        setDispatchError(`Unit price cannot be negative for ${line.item_name}.`);
+        return;
+      }
+      if (line.dispatched_qty < 1) {
+        setDispatchError(`Dispatched quantity must be at least 1 for additional item ${line.item_name}.`);
+        return;
+      }
+      if (line.available_stock > 0 && line.dispatched_qty > line.available_stock) {
+        setDispatchError(`Dispatched quantity (${line.dispatched_qty}) exceeds available stock (${line.available_stock}) for ${line.item_name}.`);
+        return;
+      }
+      if (line.discount_value < 0) {
+        setDispatchError(`Discount value cannot be negative for ${line.item_name}.`);
+        return;
+      }
+      if (line.discount_type === 'percent' && line.discount_value > 100) {
+        setDispatchError(`Percentage discount cannot exceed 100% for ${line.item_name}.`);
+        return;
+      }
+      const gross = Math.round(line.dispatched_qty * line.unit_price * 100) / 100;
+      if (line.discount_type === 'flat' && line.discount_value > gross) {
+        setDispatchError(`Flat discount (Rs. ${line.discount_value}) cannot exceed line total (Rs. ${gross}) for ${line.item_name}.`);
+        return;
+      }
+    }
+
+    const subtotalReq = dispatchLines.reduce(
+      (sum, l) => sum + calcLineTotal(l.dispatched_qty, l.unit_price, l.discount_type, l.discount_value).total,
+      0
+    );
+    const subtotalAdd = additionalLines.reduce(
+      (sum, l) => sum + calcLineTotal(l.dispatched_qty, l.unit_price, l.discount_type, l.discount_value).total,
+      0
+    );
+    const subtotal = Math.round((subtotalReq + subtotalAdd) * 100) / 100;
+
     const resolvedDiscount =
       dispatchDiscountType === 'percent'
         ? Math.round(((subtotal * dispatchDiscountVal) / 100) * 100) / 100
-        : dispatchDiscountVal;
+        : Math.round(dispatchDiscountVal * 100) / 100;
 
     if (resolvedDiscount > subtotal) {
-      setDispatchError('Discount cannot exceed subtotal.');
+      setDispatchError('Overall discount cannot exceed subtotal.');
       return;
     }
 
     setDispatchSubmitting(true);
     try {
+      const payloadItems = [
+        ...dispatchLines.map((l) => ({
+          id: l.id,
+          item_code: l.item_code,
+          dispatched_qty: l.dispatched_qty,
+          unit_price: Math.round(l.unit_price * 100) / 100,
+          discount_type: l.discount_type || undefined,
+          discount_value: l.discount_value > 0 ? Math.round(l.discount_value * 100) / 100 : undefined,
+        })),
+        ...additionalLines.map((l) => ({
+          item_code: l.item_code,
+          dispatched_qty: l.dispatched_qty,
+          unit_price: Math.round(l.unit_price * 100) / 100,
+          is_additional: true,
+          discount_type: l.discount_type || undefined,
+          discount_value: l.discount_value > 0 ? Math.round(l.discount_value * 100) / 100 : undefined,
+        })),
+      ];
+
       const res = await fetch('/api/branch-orders', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: dispatchModalOrder.id,
           status: 'dispatched',
-          items: dispatchLines.map((l) => ({
-            id: l.id,
-            item_code: l.item_code,
-            dispatched_qty: l.dispatched_qty,
-            unit_price: l.unit_price,
-          })),
+          items: payloadItems,
           discount: resolvedDiscount,
-          delivery_charges: dispatchDeliveryCharges,
+          delivery_charges: Math.round(dispatchDeliveryCharges * 100) / 100,
           delivery_method: dispatchDeliveryMethod,
           dispatch_note: dispatchNote.trim() || null,
         }),
@@ -1575,14 +1738,24 @@ export default function BranchOrders({
                                 whiteSpace: 'nowrap',
                               }}
                             >
+                              {item.is_additional && (
+                                <span style={{ background: '#EDE9FE', color: '#6D28D9', padding: '1px 5px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, marginRight: '4px' }}>
+                                  EXTRA
+                                </span>
+                              )}
                               {item.dispatched_qty !== undefined && item.dispatched_qty !== null && item.dispatched_qty !== item.qty ? (
-                                <span style={{ color: '#D97706' }}>
-                                  Qty: {item.dispatched_qty} of {item.qty} {item.unit || 'Can'}
+                                <span style={{ color: item.is_additional ? '#6D28D9' : '#D97706' }}>
+                                  {item.is_additional ? `Qty: ${item.dispatched_qty} ${item.unit || 'Can'}` : `Qty: ${item.dispatched_qty} of ${item.qty} ${item.unit || 'Can'}`}
                                 </span>
                               ) : (
                                 <span>Qty: {item.qty} {item.unit || 'Can'}</span>
                               )}
-                              {item.unit_price ? ` @ Rs. ${item.unit_price.toLocaleString()}` : ''}
+                              {item.unit_price != null ? ` @ Rs. ${Number(item.unit_price).toLocaleString()}` : ''}
+                              {item.discount_amount && Number(item.discount_amount) > 0 ? (
+                                <span style={{ color: '#16A34A', fontSize: '11px', marginLeft: '4px' }}>
+                                  (-Rs. {Number(item.discount_amount).toLocaleString()})
+                                </span>
+                              ) : null}
                             </span>
                           </div>
                         ))}
@@ -1888,14 +2061,24 @@ export default function BranchOrders({
                                 whiteSpace: 'nowrap',
                               }}
                             >
+                              {item.is_additional && (
+                                <span style={{ background: '#EDE9FE', color: '#6D28D9', padding: '1px 5px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, marginRight: '4px' }}>
+                                  EXTRA
+                                </span>
+                              )}
                               {item.dispatched_qty !== undefined && item.dispatched_qty !== null && item.dispatched_qty !== item.qty ? (
-                                <span style={{ color: '#D97706' }}>
-                                  Qty: {item.dispatched_qty} of {item.qty} {item.unit || 'Can'}
+                                <span style={{ color: item.is_additional ? '#6D28D9' : '#D97706' }}>
+                                  {item.is_additional ? `Qty: ${item.dispatched_qty} ${item.unit || 'Can'}` : `Qty: ${item.dispatched_qty} of ${item.qty} ${item.unit || 'Can'}`}
                                 </span>
                               ) : (
                                 <span>Qty: {item.qty} {item.unit || 'Can'}</span>
                               )}
-                              {item.unit_price ? ` @ Rs. ${item.unit_price.toLocaleString()}` : ''}
+                              {item.unit_price != null ? ` @ Rs. ${Number(item.unit_price).toLocaleString()}` : ''}
+                              {item.discount_amount && Number(item.discount_amount) > 0 ? (
+                                <span style={{ color: '#16A34A', fontSize: '11px', marginLeft: '4px' }}>
+                                  (-Rs. {Number(item.discount_amount).toLocaleString()})
+                                </span>
+                              ) : null}
                             </span>
                           </div>
                         ))}
@@ -2190,23 +2373,129 @@ export default function BranchOrders({
 
             {/* Line Items Table */}
             <div>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: '#334155', marginBottom: '8px' }}>
-                Verify &amp; Adjust Quantities &amp; Rates:
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                  Requested Items (Quantities, Rates & Discounts):
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !showAddLinePicker;
+                    setShowAddLinePicker(next);
+                    if (next) handleSearchSupplierStock('');
+                  }}
+                  style={{
+                    background: '#EFF6FF',
+                    border: '1px solid #BFDBFE',
+                    borderRadius: '6px',
+                    padding: '4px 10px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    color: '#1D4ED8',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <Plus size={13} />
+                  <span>Add Item / Substitute</span>
+                </button>
               </div>
+
+              {/* Add Item / Substitute Search Panel */}
+              {showAddLinePicker && (
+                <div
+                  style={{
+                    marginBottom: '12px',
+                    padding: '12px',
+                    background: '#F0F9FF',
+                    border: '1px solid #BAE6FD',
+                    borderRadius: '8px',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: '#0369A1' }}>
+                      Search Supplying Branch Stock to Add Extra / Substitute Item:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddLinePicker(false)}
+                      style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: 0 }}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    value={addLineSearch}
+                    onChange={(e) => handleSearchSupplierStock(e.target.value)}
+                    placeholder="Search by code or product name in supplying branch stock..."
+                    style={{
+                      width: '100%',
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #CBD5E1',
+                      fontSize: '12px',
+                      marginBottom: '6px',
+                    }}
+                  />
+                  {loadingSupplierStock ? (
+                    <div style={{ fontSize: '11px', color: '#64748B', padding: '6px' }}>Searching live stock...</div>
+                  ) : supplierStockResults.length === 0 ? (
+                    <div style={{ fontSize: '11px', color: '#64748B', padding: '6px' }}>
+                      {addLineSearch ? 'No in-stock items found.' : 'Type to search in-stock products.'}
+                    </div>
+                  ) : (
+                    <div style={{ maxHeight: '160px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      {supplierStockResults.map((item) => (
+                        <div
+                          key={item.id}
+                          onClick={() => handleAddSubstituteItem(item)}
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            padding: '6px 10px',
+                            background: '#FFFFFF',
+                            borderRadius: '6px',
+                            border: '1px solid #E2E8F0',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                          }}
+                        >
+                          <div>
+                            <strong>{item.name}</strong> <span style={{ color: '#64748B', fontFamily: 'monospace' }}>[{item.code}]</span>
+                            <span style={{ color: '#0284C7', marginLeft: '6px' }}>Avail: {item.stock_qty} {item.unit}</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontWeight: 600, color: '#0F172A' }}>Rs. {item.default_rate}</span>
+                            <span style={{ color: '#2563EB', fontWeight: 700, fontSize: '11px' }}>+ Add</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Main Requested Items Table */}
               <div style={{ border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                   <thead>
                     <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0', textAlign: 'left', color: '#475569' }}>
                       <th style={{ padding: '8px 12px' }}>Product</th>
                       <th style={{ padding: '8px 12px', textAlign: 'center' }}>Req / Stock</th>
-                      <th style={{ padding: '8px 12px', textAlign: 'center', width: '110px' }}>Dispatch Qty</th>
-                      <th style={{ padding: '8px 12px', textAlign: 'center', width: '120px' }}>Unit Rate (Rs.)</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'center', width: '90px' }}>Dispatch Qty</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'center', width: '100px' }}>Unit Rate (Rs.)</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'center', width: '140px' }}>Line Discount</th>
                       <th style={{ padding: '8px 12px', textAlign: 'right' }}>Line Total</th>
                     </tr>
                   </thead>
                   <tbody>
                     {dispatchLines.map((line, idx) => {
                       const isShort = line.dispatched_qty < line.requested_qty;
+                      const lineCalc = calcLineTotal(line.dispatched_qty, line.unit_price, line.discount_type, line.discount_value);
                       return (
                         <tr key={line.id} style={{ borderBottom: idx === dispatchLines.length - 1 ? 'none' : '1px solid #F1F5F9' }}>
                           <td style={{ padding: '8px 12px' }}>
@@ -2232,8 +2521,8 @@ export default function BranchOrders({
                                 );
                               }}
                               style={{
-                                width: '80px',
-                                padding: '4px 8px',
+                                width: '70px',
+                                padding: '4px 6px',
                                 textAlign: 'center',
                                 borderRadius: '6px',
                                 border: isShort ? '1px solid #F59E0B' : '1px solid #CBD5E1',
@@ -2252,7 +2541,7 @@ export default function BranchOrders({
                             <input
                               type="number"
                               min="0"
-                              step="1"
+                              step="0.01"
                               value={line.unit_price}
                               onChange={(e) => {
                                 const val = Math.max(0, parseFloat(e.target.value) || 0);
@@ -2261,18 +2550,70 @@ export default function BranchOrders({
                                 );
                               }}
                               style={{
-                                width: '100px',
-                                padding: '4px 8px',
+                                width: '85px',
+                                padding: '4px 6px',
                                 textAlign: 'right',
                                 borderRadius: '6px',
                                 border: '1px solid #CBD5E1',
                                 fontWeight: 600,
-                                fontSize: '13px',
+                                fontSize: '12px',
                               }}
                             />
                           </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '3px', justifyContent: 'center' }}>
+                              <select
+                                value={line.discount_type || ''}
+                                onChange={(e) => {
+                                  const val = e.target.value ? (e.target.value as 'percent' | 'flat') : null;
+                                  setDispatchLines((prev) =>
+                                    prev.map((l, i) => (i === idx ? { ...l, discount_type: val, discount_value: val ? l.discount_value : 0 } : l))
+                                  );
+                                }}
+                                style={{
+                                  padding: '3px 4px',
+                                  fontSize: '11px',
+                                  borderRadius: '4px',
+                                  border: '1px solid #CBD5E1',
+                                  background: '#F8FAFC',
+                                }}
+                              >
+                                <option value="">None</option>
+                                <option value="percent">%</option>
+                                <option value="flat">Rs</option>
+                              </select>
+                              {line.discount_type && (
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={line.discount_value}
+                                  onChange={(e) => {
+                                    const val = Math.max(0, parseFloat(e.target.value) || 0);
+                                    setDispatchLines((prev) =>
+                                      prev.map((l, i) => (i === idx ? { ...l, discount_value: val } : l))
+                                    );
+                                  }}
+                                  style={{
+                                    width: '60px',
+                                    padding: '3px 4px',
+                                    fontSize: '11px',
+                                    borderRadius: '4px',
+                                    border: '1px solid #CBD5E1',
+                                    textAlign: 'right',
+                                    fontWeight: 600,
+                                  }}
+                                />
+                              )}
+                            </div>
+                            {lineCalc.discAmt > 0 && (
+                              <div style={{ fontSize: '10px', color: '#16A34A', fontWeight: 600, marginTop: '2px' }}>
+                                -Rs. {lineCalc.discAmt.toLocaleString()}
+                              </div>
+                            )}
+                          </td>
                           <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: '#0F172A' }}>
-                            Rs. {(line.dispatched_qty * line.unit_price).toLocaleString()}
+                            Rs. {lineCalc.total.toLocaleString()}
                           </td>
                         </tr>
                       );
@@ -2280,6 +2621,163 @@ export default function BranchOrders({
                   </tbody>
                 </table>
               </div>
+
+              {/* Additional / Substitute Items Section */}
+              {additionalLines.length > 0 && (
+                <div style={{ marginTop: '12px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#6D28D9', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Sparkles size={14} />
+                    <span>Additional / Substitute Items Added at Dispatch ({additionalLines.length}):</span>
+                  </div>
+                  <div style={{ border: '1px solid #DDD6FE', borderRadius: '8px', overflow: 'hidden', background: '#FAF5FF' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                      <thead>
+                        <tr style={{ background: '#F3E8FF', borderBottom: '1px solid #DDD6FE', textAlign: 'left', color: '#6D28D9' }}>
+                          <th style={{ padding: '8px 12px' }}>Product</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'center' }}>Type / Avail</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'center', width: '90px' }}>Dispatch Qty</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'center', width: '100px' }}>Unit Rate (Rs.)</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'center', width: '140px' }}>Line Discount</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'right' }}>Line Total</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'center', width: '40px' }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {additionalLines.map((line, idx) => {
+                          const lineCalc = calcLineTotal(line.dispatched_qty, line.unit_price, line.discount_type, line.discount_value);
+                          return (
+                            <tr key={line.item_code} style={{ borderBottom: idx === additionalLines.length - 1 ? 'none' : '1px solid #F3E8FF' }}>
+                              <td style={{ padding: '8px 12px' }}>
+                                <div style={{ fontWeight: 600, color: '#0F172A' }}>{line.item_name}</div>
+                                <div style={{ fontSize: '11px', color: '#6D28D9', fontFamily: 'monospace' }}>{line.item_code}</div>
+                              </td>
+                              <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                                <span style={{ background: '#EDE9FE', color: '#6D28D9', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700 }}>
+                                  Extra
+                                </span>
+                                <div style={{ fontSize: '11px', color: '#475569', marginTop: '2px' }}>
+                                  Avail: {line.available_stock}
+                                </div>
+                              </td>
+                              <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={line.dispatched_qty}
+                                  onChange={(e) => {
+                                    const val = Math.max(1, parseInt(e.target.value) || 1);
+                                    setAdditionalLines((prev) =>
+                                      prev.map((l, i) => (i === idx ? { ...l, dispatched_qty: val } : l))
+                                    );
+                                  }}
+                                  style={{
+                                    width: '70px',
+                                    padding: '4px 6px',
+                                    textAlign: 'center',
+                                    borderRadius: '6px',
+                                    border: '1px solid #DDD6FE',
+                                    background: '#FFFFFF',
+                                    fontWeight: 700,
+                                    fontSize: '13px',
+                                  }}
+                                />
+                              </td>
+                              <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={line.unit_price}
+                                  onChange={(e) => {
+                                    const val = Math.max(0, parseFloat(e.target.value) || 0);
+                                    setAdditionalLines((prev) =>
+                                      prev.map((l, i) => (i === idx ? { ...l, unit_price: val } : l))
+                                    );
+                                  }}
+                                  style={{
+                                    width: '85px',
+                                    padding: '4px 6px',
+                                    textAlign: 'right',
+                                    borderRadius: '6px',
+                                    border: '1px solid #DDD6FE',
+                                    fontWeight: 600,
+                                    fontSize: '12px',
+                                  }}
+                                />
+                              </td>
+                              <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '3px', justifyContent: 'center' }}>
+                                  <select
+                                    value={line.discount_type || ''}
+                                    onChange={(e) => {
+                                      const val = e.target.value ? (e.target.value as 'percent' | 'flat') : null;
+                                      setAdditionalLines((prev) =>
+                                        prev.map((l, i) => (i === idx ? { ...l, discount_type: val, discount_value: val ? l.discount_value : 0 } : l))
+                                      );
+                                    }}
+                                    style={{
+                                      padding: '3px 4px',
+                                      fontSize: '11px',
+                                      borderRadius: '4px',
+                                      border: '1px solid #DDD6FE',
+                                      background: '#FFFFFF',
+                                    }}
+                                  >
+                                    <option value="">None</option>
+                                    <option value="percent">%</option>
+                                    <option value="flat">Rs</option>
+                                  </select>
+                                  {line.discount_type && (
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      value={line.discount_value}
+                                      onChange={(e) => {
+                                        const val = Math.max(0, parseFloat(e.target.value) || 0);
+                                        setAdditionalLines((prev) =>
+                                          prev.map((l, i) => (i === idx ? { ...l, discount_value: val } : l))
+                                        );
+                                      }}
+                                      style={{
+                                        width: '60px',
+                                        padding: '3px 4px',
+                                        fontSize: '11px',
+                                        borderRadius: '4px',
+                                        border: '1px solid #DDD6FE',
+                                        textAlign: 'right',
+                                        fontWeight: 600,
+                                      }}
+                                    />
+                                  )}
+                                </div>
+                                {lineCalc.discAmt > 0 && (
+                                  <div style={{ fontSize: '10px', color: '#16A34A', fontWeight: 600, marginTop: '2px' }}>
+                                    -Rs. {lineCalc.discAmt.toLocaleString()}
+                                  </div>
+                                )}
+                              </td>
+                              <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: '#0F172A' }}>
+                                Rs. {lineCalc.total.toLocaleString()}
+                              </td>
+                              <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => setAdditionalLines(prev => prev.filter((_, i) => i !== idx))}
+                                  style={{ background: 'none', border: 'none', color: '#DC2626', cursor: 'pointer', padding: '2px' }}
+                                  title="Remove item"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Note & Freight Adjustments Grid */}
@@ -2380,7 +2878,7 @@ export default function BranchOrders({
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                   <label style={{ fontSize: '12px', fontWeight: 700, color: '#334155' }}>
-                    Note to Requesting Branch {dispatchLines.some((l) => l.dispatched_qty < l.requested_qty) ? <span style={{ color: '#DC2626' }}>* (Required)</span> : '(Optional)'}
+                    Note to Requesting Branch {dispatchLines.some((l) => l.dispatched_qty < l.requested_qty) || additionalLines.length > 0 ? <span style={{ color: '#DC2626' }}>* (Required)</span> : '(Optional)'}
                   </label>
                   <span style={{ fontSize: '11px', color: '#94A3B8' }}>{dispatchNote.length}/500</span>
                 </div>
@@ -2389,7 +2887,7 @@ export default function BranchOrders({
                   maxLength={500}
                   value={dispatchNote}
                   onChange={(e) => setDispatchNote(e.target.value)}
-                  placeholder={dispatchLines.some((l) => l.dispatched_qty < l.requested_qty) ? 'Required: Explain why items are dispatched short...' : 'Add any dispatch comments...'}
+                  placeholder={dispatchLines.some((l) => l.dispatched_qty < l.requested_qty) || additionalLines.length > 0 ? 'Required: Explain why items are short or substitute items added...' : 'Add any dispatch comments...'}
                   style={{
                     width: '100%',
                     padding: '6px 10px',
@@ -2404,12 +2902,20 @@ export default function BranchOrders({
 
             {/* Calculation Summary Box */}
             {(() => {
-              const subtotal = dispatchLines.reduce((sum, l) => sum + l.dispatched_qty * l.unit_price, 0);
+              const subtotalReq = dispatchLines.reduce(
+                (sum, l) => sum + calcLineTotal(l.dispatched_qty, l.unit_price, l.discount_type, l.discount_value).total,
+                0
+              );
+              const subtotalAdd = additionalLines.reduce(
+                (sum, l) => sum + calcLineTotal(l.dispatched_qty, l.unit_price, l.discount_type, l.discount_value).total,
+                0
+              );
+              const subtotal = Math.round((subtotalReq + subtotalAdd) * 100) / 100;
               const resolvedDiscount =
                 dispatchDiscountType === 'percent'
                   ? Math.round(((subtotal * dispatchDiscountVal) / 100) * 100) / 100
-                  : dispatchDiscountVal;
-              const netTotal = Math.max(0, subtotal - resolvedDiscount + dispatchDeliveryCharges);
+                  : Math.round(dispatchDiscountVal * 100) / 100;
+              const netTotal = Math.max(0, Math.round((subtotal - resolvedDiscount + dispatchDeliveryCharges) * 100) / 100);
 
               return (
                 <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '10px', padding: '12px 16px' }}>

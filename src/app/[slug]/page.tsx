@@ -412,7 +412,9 @@ export default function TenantAppPage({ params }: PageProps) {
               case 'dispatched': {
                 const method = ev.data?.delivery_method ? ` · ${ev.data.delivery_method}` : '';
                 const note = ev.data?.dispatch_note ? ` · "${ev.data.dispatch_note.slice(0, 60)}"` : '';
-                message = `Order ${orderNo} dispatched!${method}${note}`;
+                const extraCount = Number(ev.data?.additional_items_count || 0);
+                const extra = extraCount > 0 ? ` · +${extraCount} extra item${extraCount > 1 ? 's' : ''}` : '';
+                message = `Order ${orderNo} dispatched!${extra}${method}${note}`;
                 break;
               }
               case 'received':

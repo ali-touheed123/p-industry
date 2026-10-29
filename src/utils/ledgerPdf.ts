@@ -22,6 +22,10 @@ export interface LedgerPdfItem {
   qty: number;
   unit_price?: number | null;
   total_price?: number | null;
+  discount_type?: 'percent' | 'flat' | null;
+  discount_value?: number | null;
+  discount_amount?: number | null;
+  is_additional?: boolean;
 }
 
 export interface LedgerPdfTx {
@@ -385,7 +389,8 @@ function drawPage(
         ctx.textAlign = 'left';
         ctx.fillStyle = '#1E293B';
         ctx.font = `12px ${MONO}`;
-        const nameTxt = it.code ? `${it.item_name} [${it.code}]` : it.item_name;
+        const prefix = it.is_additional ? '[EXTRA] ' : '';
+        const nameTxt = it.code ? `${prefix}${it.item_name} [${it.code}]` : `${prefix}${it.item_name}`;
         ctx.fillText(fit(ctx, nameTxt, IT_SHADE_X - IT_NAME_X - 10), IT_NAME_X, midY);
         ctx.fillStyle = '#475569';
         ctx.fillText(fit(ctx, it.shade_code || '—', IT_PACK_X - IT_SHADE_X - 10), IT_SHADE_X, midY);

@@ -42,6 +42,10 @@ export interface LedgerTransactionItem {
   unit_price: number | null;
   /** null for legacy branch transfer orders dispatched before new RPC */
   total_price: number | null;
+  discount_type?: 'percent' | 'flat' | null;
+  discount_value?: number | null;
+  discount_amount?: number | null;
+  is_additional?: boolean;
 }
 
 interface IbtPricingMeta {
@@ -1221,6 +1225,7 @@ export default function FinancialLedgers({
                                         <th style={{ padding: '5px 8px', textAlign: 'left', fontWeight: 700 }}>Pack</th>
                                         <th style={{ padding: '5px 8px', textAlign: 'center', fontWeight: 700 }}>Qty</th>
                                         <th style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 700 }}>Rate</th>
+                                        <th style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 700 }}>Line Disc</th>
                                         <th style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 700 }}>Total</th>
                                       </tr>
                                     </thead>
@@ -1234,6 +1239,11 @@ export default function FinancialLedgers({
                                               </span>
                                             )}
                                             {it.item_name}
+                                            {it.is_additional && (
+                                              <span style={{ background: '#EDE9FE', color: '#6D28D9', padding: '1px 5px', borderRadius: '3px', fontSize: '9px', fontWeight: 800, marginLeft: '4px' }}>
+                                                EXTRA
+                                              </span>
+                                            )}
                                           </td>
                                           <td style={{ padding: '5px 8px', color: '#475569' }}>
                                             {it.shade_code || '—'}
@@ -1246,6 +1256,15 @@ export default function FinancialLedgers({
                                           </td>
                                           <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>
                                             {it.unit_price != null ? `Rs. ${Number(it.unit_price).toLocaleString()}` : '—'}
+                                          </td>
+                                          <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>
+                                            {it.discount_amount && Number(it.discount_amount) > 0 ? (
+                                              <span style={{ color: '#16A34A', fontWeight: 600 }}>
+                                                -Rs. {Number(it.discount_amount).toLocaleString()}
+                                              </span>
+                                            ) : (
+                                              <span style={{ color: '#94A3B8' }}>—</span>
+                                            )}
                                           </td>
                                           <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A' }}>
                                             {it.total_price != null ? `Rs. ${Number(it.total_price).toLocaleString()}` : '—'}

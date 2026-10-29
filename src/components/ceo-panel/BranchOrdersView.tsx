@@ -220,6 +220,11 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
                   <tr key={o.id} style={{ borderBottom: '1px solid #E2E8F0' }}>
                     <td style={{ padding: '12px 16px', fontWeight: 700, color: '#D97706', fontFamily: 'JetBrains Mono, monospace' }}>
                       {o.order_no}
+                      {items.some((it: any) => it.is_additional) && (
+                        <span title="Extra / substitute items added at dispatch" style={{ marginLeft: '4px', background: '#EDE9FE', color: '#6D28D9', padding: '1px 5px', borderRadius: '3px', fontSize: '9px', fontWeight: 800 }}>
+                          +EXTRA
+                        </span>
+                      )}
                       {o.dispatch_note && <span title={o.dispatch_note} style={{ marginLeft: '4px', color: '#2563EB', fontSize: '10px' }}>📝</span>}
                       {o.reject_reason && <span title={o.reject_reason} style={{ marginLeft: '4px', color: '#DC2626', fontSize: '10px' }}>⚠️</span>}
                     </td>
@@ -397,13 +402,15 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
                     <th style={{ padding: '8px 12px', textAlign: 'center' }}>Req'd</th>
                     <th style={{ padding: '8px 12px', textAlign: 'center' }}>Sent</th>
                     <th style={{ padding: '8px 12px', textAlign: 'right' }}>Rate</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'right' }}>Line Disc</th>
                     <th style={{ padding: '8px 12px', textAlign: 'right' }}>Total</th>
                   </tr>
                 </thead>
                 <tbody>
                   {(selectedOrder.items || selectedOrder.branch_order_items || []).map((it: any, idx: number) => {
                     const isLegacy = it.dispatched_qty === null || it.dispatched_qty === undefined;
-                    const isShort = !isLegacy && Number(it.dispatched_qty) < Number(it.qty);
+                    const isShort = !isLegacy && !it.is_additional && Number(it.dispatched_qty) < Number(it.qty);
+                    const hasDiscount = it.discount_amount != null && Number(it.discount_amount) > 0;
                     return (
                       <tr key={idx} style={{ borderBottom: '1px solid #F1F5F9' }}>
                         <td style={{ padding: '10px 12px', color: '#64748B' }}>{idx + 1}</td>
@@ -412,18 +419,23 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
                         </td>
                         <td style={{ padding: '10px 12px', fontWeight: 600, color: '#0F172A' }}>
                           {it.item_name}
+                          {it.is_additional && (
+                            <span style={{ background: '#EDE9FE', color: '#6D28D9', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, marginLeft: '6px' }}>
+                              EXTRA
+                            </span>
+                          )}
                         </td>
                         <td style={{ padding: '10px 12px', textAlign: 'center', color: '#475569' }}>
                           {it.pack_size || it.unit || 'Can'}
                         </td>
                         <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 700, color: '#0F172A', fontFamily: 'JetBrains Mono, monospace' }}>
-                          {it.qty}
+                          {it.is_additional ? <span style={{ color: '#94A3B8' }}>0</span> : it.qty}
                         </td>
                         <td style={{ padding: '10px 12px', textAlign: 'center', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700 }}>
                           {isLegacy ? (
                             <span style={{ color: '#94A3B8' }}>—</span>
                           ) : (
-                            <span style={{ color: isShort ? '#D97706' : '#166534' }}>
+                            <span style={{ color: it.is_additional ? '#6D28D9' : isShort ? '#D97706' : '#166534' }}>
                               {it.dispatched_qty}
                               {isShort && <span style={{ fontSize: '9px', marginLeft: '3px', color: '#D97706' }}>⚠</span>}
                             </span>
@@ -431,6 +443,18 @@ export const BranchOrdersView: React.FC<BranchOrdersViewProps> = ({ branch }) =>
                         </td>
                         <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>
                           {isLegacy || it.unit_price == null ? <span style={{ color: '#94A3B8' }}>—</span> : `Rs. ${Number(it.unit_price).toLocaleString()}`}
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>
+                          {hasDiscount ? (
+                            <span style={{ color: '#16A34A', fontWeight: 600 }}>
+                              -Rs. {Number(it.discount_amount).toLocaleString()}
+                              <span style={{ fontSize: '10px', color: '#64748B', display: 'block' }}>
+                                ({it.discount_type === 'percent' ? `${it.discount_value}%` : 'Flat'})
+                              </span>
+                            </span>
+                          ) : (
+                            <span style={{ color: '#94A3B8' }}>—</span>
+                          )}
                         </td>
                         <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A' }}>
                           {isLegacy || it.total_price == null ? <span style={{ color: '#94A3B8' }}>—</span> : `Rs. ${Number(it.total_price).toLocaleString()}`}

@@ -381,8 +381,12 @@ export interface BranchOrderItem {
   unit?: string;
   qty: number;
   dispatched_qty?: number;
-  unit_price?: number;
-  total_price?: number;
+  unit_price?: number | null;
+  total_price?: number | null;
+  discount_type?: 'percent' | 'flat' | null;
+  discount_value?: number | null;
+  discount_amount?: number | null;
+  is_additional?: boolean;
   supplier_stock?: number;
   default_rate?: number;
   cost_price?: number;
