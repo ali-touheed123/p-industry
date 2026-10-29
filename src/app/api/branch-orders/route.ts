@@ -272,25 +272,57 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const order_no = `BO-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
+    let order: any = null;
+    let lastError: any = null;
+    const MAX_RETRIES = 3;
 
-    // 1. Insert the order
-    const { data: order, error: orderErr } = await supabaseAdmin
-      .from('branch_orders')
-      .insert({
-        order_no,
-        from_tenant_id,
-        to_tenant_id,
-        from_counter: from_counter || null,
-        target_counter: target_counter || null,
-        status: 'pending',
-        notes: notes || null,
-        created_by: created_by || null,
-      })
-      .select()
-      .single();
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      const order_no = `BO-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
 
-    if (orderErr) throw orderErr;
+      // 1. Insert the order
+      const { data, error } = await supabaseAdmin
+        .from('branch_orders')
+        .insert({
+          order_no,
+          from_tenant_id,
+          to_tenant_id,
+          from_counter: from_counter || null,
+          target_counter: target_counter || null,
+          status: 'pending',
+          notes: notes || null,
+          created_by: created_by || null,
+        })
+        .select()
+        .single();
+
+      if (!error && data) {
+        order = data;
+        break;
+      }
+
+      lastError = error;
+      // PostgreSQL 23505 is unique_violation on uq_branch_orders_order_no
+      if (error?.code === '23505') {
+        if (attempt < MAX_RETRIES - 1) {
+          continue; // Retry with freshly generated order_no
+        } else {
+          break; // Last attempt failed on 23505, break out to return 500
+        }
+      }
+
+      // Non-uniqueness errors throw immediately
+      throw error;
+    }
+
+    if (!order) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Failed to allocate a unique branch order number after ${MAX_RETRIES} attempts: ${lastError?.message || 'Unknown error'}`,
+        },
+        { status: 500 }
+      );
+    }
 
     // 2. Insert order items
     const orderItems = items.map((item: any) => ({

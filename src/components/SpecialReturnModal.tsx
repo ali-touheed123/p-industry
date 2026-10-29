@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, RotateCcw, Lock, AlertTriangle, CheckCircle2, DollarSign, CreditCard } from 'lucide-react';
 import { Invoice, InvoiceItem } from '@/types';
 
@@ -43,6 +43,14 @@ export default function SpecialReturnModal({
 
   // Refund tender
   const [refundMode, setRefundMode] = useState<'cash' | 'card' | 'mixed'>('cash');
+  // B6: Stable idempotency key across return retries
+  const activeReturnKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      activeReturnKeyRef.current = null;
+    }
+  }, [isOpen]);
   const [cashRefund, setCashRefund] = useState<number>(0);
   const [cardRefund, setCardRefund] = useState<number>(0);
 
@@ -214,9 +222,19 @@ export default function SpecialReturnModal({
     setSubmitting(true);
 
     try {
+      const keyToUse =
+        activeReturnKeyRef.current ||
+        (typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `idemp-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      if (!activeReturnKeyRef.current) {
+        activeReturnKeyRef.current = keyToUse;
+      }
+
       const payload = {
         tenant_id: tenantId,
         original_invoice_id: invoice.id,
+        idempotency_key: keyToUse,
         items: itemsToReturn.map((it) => ({
           original_item_id: it.original_item_id,
           item_id: it.item_id,
@@ -235,9 +253,15 @@ export default function SpecialReturnModal({
 
       const resData = await res.json();
 
+      if (res.status === 409) {
+        throw new Error(`Return Conflict: ${resData.error || 'Return payload changed during submission.'}`);
+      }
+
       if (!res.ok || !resData.success) {
         throw new Error(resData.error || 'Failed to process special return.');
       }
+
+      activeReturnKeyRef.current = null; // Clear key on success
 
       alert(
         `Special Return #${resData.return_invoice_no || ''} completed successfully.\n` +

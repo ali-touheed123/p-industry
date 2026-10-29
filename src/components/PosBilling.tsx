@@ -200,6 +200,28 @@ export default function PosBilling({
 
   // Submission & Feedback State
   const [submitting, setSubmitting] = useState<boolean>(false);
+  const isSubmittingRef = useRef<boolean>(false);
+  const activeCheckoutKeyRef = useRef<string | null>(null);
+
+  // Task B6: Cart signature tracking & stable idempotency key
+  const cartSignature = useMemo(() => {
+    return JSON.stringify({
+      items: lineItems.map((ci) => ({ id: ci.id, qty: ci.qty, rate: ci.rate, tokenAction: ci.tokenAction })),
+      discount: invoiceDiscount,
+      delivery: deliveryCharge,
+      clientId: selectedClient?.id || null,
+      customerSearch,
+      cash: cashPayment,
+      card: cardPayment,
+      bank: bankPayment,
+      others: othersPayment,
+    });
+  }, [lineItems, invoiceDiscount, deliveryCharge, selectedClient, customerSearch, cashPayment, cardPayment, bankPayment, othersPayment]);
+
+  // Reset idempotency key whenever any cart property mutates
+  useEffect(() => {
+    activeCheckoutKeyRef.current = null;
+  }, [cartSignature]);
   const [notification, setNotification] = useState<string | null>(null);
   const [printReceiptData, setPrintReceiptData] = useState<any | null>(null);
   const [showTokenRedemptionModal, setShowTokenRedemptionModal] = useState<boolean>(false);
@@ -990,8 +1012,10 @@ export default function PosBilling({
     editingInvoice ? undefined : lineItems.find((li) => isSpecialBrandItem(li.item || undefined) && !(li.specialRate && li.specialRate > 0));
 
   const handleCheckout = async (openPrint = true) => {
-    if (lineItems.length === 0 || submitting) {
-      showFeedback('Please add at least one item before checkout.');
+    if (lineItems.length === 0 || submitting || isSubmittingRef.current) {
+      if (lineItems.length === 0) {
+        showFeedback('Please add at least one item before checkout.');
+      }
       return;
     }
     if (blockForCustomerName()) {
@@ -1009,6 +1033,7 @@ export default function PosBilling({
       return;
     }
     setSubmitting(true);
+    isSubmittingRef.current = true;
 
     const roundedNetTotal = Math.round(netTotal * 100) / 100;
     const nonCashPaid = Math.round((cardPayment + bankPayment + othersPayment) * 100) / 100;
@@ -1016,6 +1041,7 @@ export default function PosBilling({
     // Hard Stop: Block checkout if non-cash tenders exceed Net Total
     if (nonCashPaid > roundedNetTotal) {
       showFeedback(`Non-cash payment (Rs. ${nonCashPaid.toLocaleString()}) exceeds Net Total (Rs. ${roundedNetTotal.toLocaleString()}). Please correct tender amounts.`);
+      isSubmittingRef.current = false;
       setSubmitting(false);
       return;
     }
@@ -1033,6 +1059,7 @@ export default function PosBilling({
     // Hard Stop: Block credit/debt sales for walk-in (no account) customers
     if (!selectedClient && isCreditSale) {
       showFeedback('Cannot sell on credit to a walk-in customer. Please select a registered customer account, or collect full payment before completing this sale.');
+      isSubmittingRef.current = false;
       setSubmitting(false);
       return;
     }
@@ -1046,6 +1073,7 @@ export default function PosBilling({
       if (limit > 0 && projectedBalance > limit) {
         const availableLimit = Math.max(0, limit - currentBal);
         showFeedback(`Insufficient credit limit. Available limit: Rs. ${availableLimit.toLocaleString()}`);
+        isSubmittingRef.current = false;
         setSubmitting(false);
         return;
       }
@@ -1134,9 +1162,15 @@ export default function PosBilling({
       const isEditingExisting = Boolean(editingInvoice?.id);
       const apiEndpoint = '/api/invoices';
       const apiMethod = isEditingExisting ? 'PATCH' : 'POST';
+
+      const keyToUse = activeCheckoutKeyRef.current || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `idemp-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      if (!activeCheckoutKeyRef.current) {
+        activeCheckoutKeyRef.current = keyToUse;
+      }
+
       const payloadToSend = isEditingExisting
         ? { id: editingInvoice.id, edit_reason: editingInvoice.edit_reason || '', ...invoicePayload }
-        : invoicePayload;
+        : { ...invoicePayload, invoice_no: undefined, idempotency_key: keyToUse };
 
       const res = await fetch(apiEndpoint, {
         method: apiMethod,
@@ -1145,8 +1179,25 @@ export default function PosBilling({
       });
 
       const data = await res.json();
+
+      if (res.status === 409) {
+        alert(`⚠️ Cart Conflict: ${data.error || 'Cart contents changed during checkout attempt.'}`);
+        activeCheckoutKeyRef.current = null;
+        return;
+      }
+
       if (data.success) {
         const finalServerInvoiceNo = data.invoice?.invoice_no || invoiceNo;
+
+        if (data.is_duplicate) {
+          if (!keyToUse) {
+            // C3 Interim legacy safety: if data.is_duplicate is true on a legacy (no key) path,
+            // do NOT show "Invoice finalized" / clear the cart. Show a clear warning instead.
+            alert(`⚠️ Duplicate Invoice Number Detected (#${finalServerInvoiceNo}). This sale was NOT recorded. Please regenerate invoice number and retry.`);
+            return;
+          }
+          showFeedback(`⚠️ Network retry detected: Invoice #${finalServerInvoiceNo} was already recorded.`);
+        }
 
         const receiptItems = lineItems.map((ci) => {
           let effectiveRate = ci.rate;
@@ -1240,12 +1291,14 @@ export default function PosBilling({
         setDeliveryCharge(0);
         setRemarks('');
         setInvoiceNo(`INV-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`);
+        activeCheckoutKeyRef.current = null;
       } else {
         alert(`Failed to save invoice: ${data.error || 'Unknown error'}`);
       }
     } catch (err: any) {
       alert(`Network error saving invoice: ${err.message}`);
     } finally {
+      isSubmittingRef.current = false;
       setSubmitting(false);
     }
   };

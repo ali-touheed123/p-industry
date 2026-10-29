@@ -110,6 +110,9 @@ export async function GET(req: NextRequest) {
       has_more: hasMore,
     });
   } catch (error: any) {
+    if (error?.message?.includes('IDEMPOTENCY_CONFLICT')) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 409 });
+    }
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
@@ -141,9 +144,10 @@ export async function POST(req: NextRequest) {
       status = 'completed',
       created_by,
       items = [],
+      idempotency_key,
     } = body;
 
-    if (!tenant_id || !invoice_no || !items.length) {
+    if (!tenant_id || (!invoice_no && !idempotency_key) || !items.length) {
       return NextResponse.json(
         { success: false, error: 'Tenant ID, Invoice No, and at least 1 item are required' },
         { status: 400 }
@@ -431,7 +435,8 @@ export async function POST(req: NextRequest) {
     // 1. Prepare Atomic Invoice Data
     const invoiceData = {
       tenant_id,
-      invoice_no: String(invoice_no).trim(),
+      invoice_no: invoice_no ? String(invoice_no).trim() : null,
+      idempotency_key: idempotency_key || null,
       client_id: client_id || null,
       client_name,
       shift_id: resolvedShiftId || shift_id || null,
@@ -495,6 +500,9 @@ export async function POST(req: NextRequest) {
     });
 
     if (rpcErr) {
+      if (rpcErr.message?.includes('IDEMPOTENCY_CONFLICT')) {
+        return NextResponse.json({ success: false, error: rpcErr.message }, { status: 409 });
+      }
       return NextResponse.json({ success: false, error: rpcErr.message }, { status: 400 });
     }
 

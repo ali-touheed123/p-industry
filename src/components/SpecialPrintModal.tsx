@@ -70,6 +70,15 @@ export default function SpecialPrintModal({
   }, [isOpen]);
 
   const [invoiceNo] = useState<string>(initialInvoiceNo);
+  // F2: Stable idempotency key — persists across retries, resets on modal close/success
+  const activeSubmitKeyRef = useRef<string | null>(null);
+  // F2: Reset idempotency key when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      activeSubmitKeyRef.current = null;
+    }
+  }, [isOpen]);
+
   const [deliveryCharge, setDeliveryCharge] = useState<number>(initialDeliveryCharge);
   const [headerNote, setHeaderNote] = useState<string>('');
   const [footerNote, setFooterNote] = useState<string>('');
@@ -296,9 +305,19 @@ export default function SpecialPrintModal({
         sendOthers = Number(othersPaid || 0);
       }
 
+      // F2: Reuse key on retry; mint fresh only on first submit
+      const keyToUse =
+        activeSubmitKeyRef.current ||
+        (typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `idemp-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      if (!activeSubmitKeyRef.current) {
+        activeSubmitKeyRef.current = keyToUse;
+      }
       const payload = {
         tenant_id: tenantId,
-        invoice_no: invoiceNo,
+        invoice_no: undefined, // Omit client-generated invoice_no so server allocates sequentially
+        idempotency_key: keyToUse,
         client_id: selectedClient?.id || null,
         client_name: selectedClient ? selectedClient.name : customerName,
         shift_id: shiftId || null,
@@ -354,6 +373,10 @@ export default function SpecialPrintModal({
 
       const resData = await res.json();
 
+      if (res.status === 409) {
+        throw new Error(`Cart Conflict: ${resData.error || 'Cart contents changed during checkout attempt.'}`);
+      }
+
       if (!res.ok || !resData.success) {
         throw new Error(resData.error || 'Failed to record special sale.');
       }
@@ -366,7 +389,7 @@ export default function SpecialPrintModal({
           paid_amount: resData.snapshot.paid_amount ?? finalPaidAmount,
           due_amount: resData.snapshot.due_amount ?? dueAmount,
           client_name: resData.snapshot.client_name || (selectedClient ? selectedClient.name : customerName),
-          invoice_no: resData.snapshot.invoice_no || invoiceNo,
+          invoice_no: resData.invoice_no || resData.snapshot?.invoice_no || resData.invoice?.invoice_no,
         };
         const specialHtml = buildSpecialReceiptHtml(
           enrichedSnapshot,
@@ -375,7 +398,8 @@ export default function SpecialPrintModal({
         printViaIframe(specialHtml);
       }
 
-      onSuccess(resData.invoice || { invoice_no: invoiceNo });
+      activeSubmitKeyRef.current = null; // F2: clear key on success
+      onSuccess(resData.invoice || { invoice_no: resData.invoice_no || resData.snapshot?.invoice_no });
       onClose();
     } catch (err: any) {
       console.error('Special sale execution error:', err);

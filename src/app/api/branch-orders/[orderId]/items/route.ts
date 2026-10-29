@@ -5,7 +5,7 @@ import { sanitizePostgRESTLike } from '@/lib/utils';
 
 export async function GET(
   req: NextRequest,
-  context: { params: Promise<{ orderId: string }> | { orderId: string } }
+  context: { params: Promise<{ orderId: string }> }
 ) {
   try {
     const session = await getSession(req);
@@ -13,8 +13,7 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Unauthorized: Valid login session required' }, { status: 401 });
     }
 
-    const params = await Promise.resolve(context.params);
-    const orderId = params?.orderId;
+    const { orderId } = await context.params;
     if (!orderId) {
       return NextResponse.json({ success: false, error: 'Order ID is required' }, { status: 400 });
     }

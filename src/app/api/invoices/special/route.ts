@@ -29,9 +29,10 @@ export async function POST(req: NextRequest) {
       items = [],
       tokens = [],
       receipt_snapshot = {},
+      idempotency_key,
     } = body;
 
-    if (!tenant_id || !invoice_no || !items.length) {
+    if (!tenant_id || (!invoice_no && !idempotency_key) || !items.length) {
       return NextResponse.json(
         { success: false, error: 'tenant_id, invoice_no, and at least 1 item are required' },
         { status: 400 }
@@ -227,7 +228,8 @@ export async function POST(req: NextRequest) {
     // 6. Build Atomic Payload & Execute create_special_invoice_atomic
     const invoiceData = {
       tenant_id,
-      invoice_no: String(invoice_no).trim(),
+      invoice_no: invoice_no ? String(invoice_no).trim() : null,
+      idempotency_key: idempotency_key || null,
       client_id: client_id || null,
       client_name: client_name || 'Walk-in Customer',
       shift_id: activeShiftId,
@@ -293,6 +295,9 @@ export async function POST(req: NextRequest) {
     });
 
     if (rpcErr) {
+      if (rpcErr.message?.includes('IDEMPOTENCY_CONFLICT')) {
+        return NextResponse.json({ success: false, error: rpcErr.message }, { status: 409 });
+      }
       return NextResponse.json({ success: false, error: rpcErr.message }, { status: 400 });
     }
 
@@ -307,6 +312,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(rpcRes);
   } catch (err: any) {
+    if (err?.message?.includes('IDEMPOTENCY_CONFLICT')) {
+      return NextResponse.json({ success: false, error: err.message }, { status: 409 });
+    }
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }

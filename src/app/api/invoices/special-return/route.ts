@@ -12,6 +12,7 @@ export async function POST(req: NextRequest) {
       shift_id,
       cash_refunded = 0,
       card_refunded = 0,
+      idempotency_key,
     } = body;
 
     if (!original_invoice_id || !tenant_id || !Array.isArray(items) || items.length === 0) {
@@ -89,14 +90,21 @@ export async function POST(req: NextRequest) {
       p_shift_id: activeShiftId,
       p_cash_refunded: Number(cash_refunded) || 0,
       p_card_refunded: Number(card_refunded) || 0,
+      p_idempotency_key: idempotency_key || null,
     });
 
     if (rpcErr) {
+      if (rpcErr.message?.includes('IDEMPOTENCY_CONFLICT')) {
+        return NextResponse.json({ success: false, error: rpcErr.message }, { status: 409 });
+      }
       return NextResponse.json({ success: false, error: rpcErr.message }, { status: 400 });
     }
 
     return NextResponse.json(rpcRes);
   } catch (err: any) {
+    if (err?.message?.includes('IDEMPOTENCY_CONFLICT')) {
+      return NextResponse.json({ success: false, error: err.message }, { status: 409 });
+    }
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
