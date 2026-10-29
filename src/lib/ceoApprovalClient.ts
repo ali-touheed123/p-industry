@@ -1,3 +1,5 @@
+import { fetchWithTimeout } from '@/lib/fetchWithTimeout';
+
 /**
  * Client-side storage + fetch helper for the CEO approval token (1 hour, per browser tab).
  * The token only unlocks the protected actions for the staff user that earned it;
@@ -66,7 +68,7 @@ export async function ceoFetch(input: string, init: RequestInit = {}, tenantId?:
   const approval = getCeoApproval(tenantId);
   const headers = new Headers(init.headers || {});
   if (approval) headers.set(CEO_APPROVAL_HEADER, approval.token);
-  const res = await fetch(input, { ...init, headers });
+  const res = await fetchWithTimeout(input, { ...init, headers, timeoutMs: 20000 });
   if (res.status === 403) {
     try {
       const body = await res.clone().json();

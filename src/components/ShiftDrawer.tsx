@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { Shift, PettyExpense, Tenant, TokenTransaction } from '@/types';
+import { fetchWithTimeout } from '@/lib/fetchWithTimeout';
 import { computeShiftCash, isCancelledInvoice, isReturnInvoice } from '@/utils/cashLedger';
 import { printViaIframe } from '@/utils/iframePrint';
 import { escapeHtml } from '@/utils/receiptRenderCore';
@@ -283,8 +284,16 @@ export default function ShiftDrawer({
   // NO Math.max clamp on expectedCash anywhere — negative must be preserved
   const expectedCash = cashBreakdown.expectedCash;
 
-  const grossSales = salesInvoices.reduce((s, i) => s + Number(i.grandTotal || i.net_total || 0), 0);
-  const totalSalesReturns = returnInvoices.reduce((s, i) => s + Number(i.grandTotal || i.net_total || 0), 0);
+  const currentShiftSales = salesInvoices.filter(i => !i.is_late_sync);
+  const lateSyncSales = salesInvoices.filter(i => Boolean(i.is_late_sync));
+  const currentShiftReturns = returnInvoices.filter(i => !i.is_late_sync);
+  const lateSyncReturns = returnInvoices.filter(i => Boolean(i.is_late_sync));
+
+  const grossSales = currentShiftSales.reduce((s, i) => s + Number(i.grandTotal || i.net_total || 0), 0);
+  const totalSalesReturns = currentShiftReturns.reduce((s, i) => s + Number(i.grandTotal || i.net_total || 0), 0);
+  const lateSyncGrossSales = lateSyncSales.reduce((s, i) => s + Number(i.grandTotal || i.net_total || 0), 0);
+  const lateSyncGrossReturns = lateSyncReturns.reduce((s, i) => s + Number(i.grandTotal || i.net_total || 0), 0);
+  const lateSyncNetSales = lateSyncGrossSales - lateSyncGrossReturns;
   const netSales = grossSales - totalSalesReturns; // No clamp — keep sign
 
   const creditSales = salesInvoices.reduce((s, i) => {
@@ -452,7 +461,8 @@ export default function ShiftDrawer({
         return;
       }
 
-      const res = await fetch('/api/expenses', {
+      const res = await fetchWithTimeout('/api/expenses', {
+        timeoutMs: 15000,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -529,7 +539,8 @@ export default function ShiftDrawer({
 
     try {
       if (shift?.id && tenantId) {
-        await fetch('/api/shifts', {
+        await fetchWithTimeout('/api/shifts', {
+          timeoutMs: 15000,
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(shiftDataToSave),
@@ -883,6 +894,7 @@ export default function ShiftDrawer({
           <div style={{ fontSize: '10.5px', color: '#64748B' }}>
             Gross: <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>Rs. {grossSales.toLocaleString()}</span>
             {totalSalesReturns > 0 && <span style={{ color: '#DC2626', marginLeft: '4px' }}>(-{totalSalesReturns.toLocaleString()})</span>}
+            {lateSyncSales.length > 0 && <div style={{ fontSize: '9.5px', color: '#D97706', marginTop: '2px' }}>+ Rs. {lateSyncNetSales.toLocaleString()} ({lateSyncSales.length} late-synced from outage)</div>}
           </div>
           {/* Feature #3: Shift-to-shift delta */}
           {sameDayDelta !== null && (
@@ -992,6 +1004,22 @@ export default function ShiftDrawer({
                   Rs. {expectedCash.toLocaleString()}
                 </span>
               </div>
+              {/* Late-synced offline activity breakdown */}
+              {(cashBreakdown.offlineLateSalesCount > 0 || cashBreakdown.offlineLateReturnsCount > 0) && (
+                <div style={{ marginTop: '8px', padding: '8px 10px', backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', borderRadius: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 700, color: '#92400E' }}>
+                    <span>Late-Synced Offline Activity:</span>
+                    <span className="font-mono">{cashBreakdown.offlineLateNetCash >= 0 ? '+' : ''}Rs. {cashBreakdown.offlineLateNetCash.toLocaleString()}</span>
+                  </div>
+                  <div style={{ fontSize: '10px', color: '#B45309', marginTop: '3px', lineHeight: '1.4' }}>
+                    {cashBreakdown.offlineLateSalesCount > 0 && <div>• {cashBreakdown.offlineLateSalesCount} sale(s) totaling +Rs. {cashBreakdown.offlineLateSalesCash.toLocaleString()}</div>}
+                    {cashBreakdown.offlineLateReturnsCount > 0 && <div>• {cashBreakdown.offlineLateReturnsCount} return(s) totaling -Rs. {cashBreakdown.offlineLateReturnsCash.toLocaleString()}</div>}
+                    <div style={{ marginTop: '3px', fontStyle: 'italic', color: '#78350F' }}>
+                      Cash was collected/refunded during an earlier offline outage. Booked into this shift for audit tracking; excluded from drawer expected cash.
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

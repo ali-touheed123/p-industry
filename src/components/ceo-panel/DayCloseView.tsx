@@ -159,8 +159,13 @@ const toShopLocalDate = (val: string | Date | null | undefined): string => {
             const salesInvs = shiftInvoices.filter((i: any) => !isReturnInvoice(i));
             const returnInvs = shiftInvoices.filter((i: any) => isReturnInvoice(i));
 
-            const grossSales = salesInvs.reduce((sum: number, i: any) => sum + Number(i.net_total || 0), 0);
-            const returnTotal = returnInvs.reduce((sum: number, i: any) => sum + Number(i.net_total || 0), 0);
+            const currentShiftSalesInvs = salesInvs.filter((i: any) => !i.is_late_sync);
+            const lateSyncSalesInvs = salesInvs.filter((i: any) => Boolean(i.is_late_sync));
+            const currentShiftReturnInvs = returnInvs.filter((i: any) => !i.is_late_sync);
+            const lateSyncReturnInvs = returnInvs.filter((i: any) => Boolean(i.is_late_sync));
+
+            const grossSales = currentShiftSalesInvs.reduce((sum: number, i: any) => sum + Number(i.net_total || 0), 0);
+            const returnTotal = currentShiftReturnInvs.reduce((sum: number, i: any) => sum + Number(i.net_total || 0), 0);
             const netShiftSales = grossSales - returnTotal;
 
             const totalExpensesAmt = shiftExpenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0);
@@ -698,6 +703,24 @@ const toShopLocalDate = (val: string | Date | null | undefined): string => {
                   {formatCurrency(financialSummary.expectedCash)}
                 </span>
               </div>
+
+              {/* Late-synced offline transactions audit note */}
+              {activeRecord.cash_breakdown && (Number(activeRecord.cash_breakdown.offlineLateSalesCash || 0) > 0 || Number(activeRecord.cash_breakdown.offlineLateReturnsCash || 0) > 0) && (
+                <div style={{ marginTop: '10px', padding: '10px', borderRadius: '6px', background: '#F8FAFC', border: '1px solid #CBD5E1' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>
+                    📝 Audit Note: Late-Synced Transactions from Outage (Net: {Number(activeRecord.cash_breakdown.offlineLateNetCash || 0) >= 0 ? '+' : ''}{formatCurrency(activeRecord.cash_breakdown.offlineLateNetCash || 0)})
+                  </div>
+                  <div style={{ fontSize: '10px', color: '#64748B', marginTop: '3px', lineHeight: '1.4' }}>
+                    {Number(activeRecord.cash_breakdown.offlineLateSalesCount || 0) > 0 && (
+                      <span>{activeRecord.cash_breakdown.offlineLateSalesCount} offline sale(s) (+{formatCurrency(activeRecord.cash_breakdown.offlineLateSalesCash)}) </span>
+                    )}
+                    {Number(activeRecord.cash_breakdown.offlineLateReturnsCount || 0) > 0 && (
+                      <span>{activeRecord.cash_breakdown.offlineLateReturnsCount} offline return(s) (-{formatCurrency(activeRecord.cash_breakdown.offlineLateReturnsCash)}) </span>
+                    )}
+                    from an earlier offline outage synced during this shift. Per accounting policy, they are booked here for tracking and excluded from drawer cash. Closed shift totals remain unaltered.
+                  </div>
+                </div>
+              )}
 
               {/* Feature #3: Same-day shift-to-shift delta */}
               {activeRecord.sameDayDelta && (

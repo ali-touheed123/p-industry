@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -22,6 +22,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Client, Supplier } from '@/types';
+import { fetchWithTimeout } from '@/lib/fetchWithTimeout';
 import { generateLedgerStatementPdf, type LedgerPdfMode } from '@/utils/ledgerPdf';
 
 interface Props {
@@ -409,7 +410,8 @@ export default function FinancialLedgers({
     try {
       const partyTypeParam = activeTab === 'clients' ? 'client' : activeTab === 'suppliers' ? 'supplier' : 'branch';
       const voucherTypeParam = activeTab === 'clients' ? 'receipt' : 'payment';
-      const res = await fetch('/api/vouchers', {
+      const res = await fetchWithTimeout('/api/vouchers', {
+        timeoutMs: 20000,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -454,7 +456,8 @@ export default function FinancialLedgers({
     setSavingLimit(true);
     try {
       const newLimit = parseFloat(editLimitValue) || 0;
-      const res = await fetch('/api/clients', {
+      const res = await fetchWithTimeout('/api/clients', {
+        timeoutMs: 20000,
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -505,7 +508,8 @@ export default function FinancialLedgers({
             city: newPartyAddress,
           };
 
-      const res = await fetch(endpoint, {
+      const res = await fetchWithTimeout(endpoint, {
+        timeoutMs: 20000,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(bodyPayload),
@@ -577,7 +581,8 @@ export default function FinancialLedgers({
         }
       }
 
-      const res = await fetch(endpoint, {
+      const res = await fetchWithTimeout(endpoint, {
+        timeoutMs: 20000,
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

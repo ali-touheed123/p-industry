@@ -1,5 +1,5 @@
 /**
- * PyntFlow Authoritative Cash Ledger Utility (Phase 1)
+ * PyntFlow Authoritative Cash Ledger Utility (Phase 1 & Phase 6)
  *
  * Single Source of Truth for Shift Expected Cash Calculation.
  * Shared across ShiftDrawer (POS register), api/shifts PATCH (server validation),
@@ -16,6 +16,14 @@
  *   - pettyExpenses
  *   - tokenCashPayouts
  *   = expectedCash
+ *
+ * Late-Sync Offline Sales Rule (Phase 6 / Owner Decision A Extended):
+ *   - Offline sales that occurred during an earlier shift and synced into the currently
+ *     open shift have is_late_sync = true.
+ *   - Their cash was received during the earlier outage, NOT in the current shift cashier's drawer.
+ *   - Therefore, they are EXCLUDED from cashSales and cashRefundsOnSalesReturns, preserving
+ *     accurate expected drawer cash.
+ *   - They are tracked separately in offlineLateSalesCash, offlineLateReturnsCash, and offlineLateNetCash.
  *
  * Rules:
  *   - One shared isCancelledInvoice: status 'cancelled' OR 'void' (case-insensitive).
@@ -48,6 +56,7 @@ export interface InvoiceLike {
   date?: string | null;
   created_at?: string | null;
   grandTotal?: number | string | null;
+  is_late_sync?: boolean | null;
 }
 
 export interface PurchaseLike {
@@ -106,6 +115,12 @@ export interface ShiftCashBreakdown {
   pettyExpenses: number;
   tokenCashPayouts: number;
   expectedCash: number;
+  // Late-synced offline tracking (excluded from expectedCash)
+  offlineLateSalesCash: number;
+  offlineLateReturnsCash: number;
+  offlineLateNetCash: number;
+  offlineLateSalesCount: number;
+  offlineLateReturnsCount: number;
   // Detail metadata for audits and UI breakdown displays
   details?: {
     forwardSalesCount: number;
@@ -116,6 +131,8 @@ export interface ShiftCashBreakdown {
     voucherPaymentCount: number;
     expenseCount: number;
     tokenPayoutCount: number;
+    offlineLateSalesCount: number;
+    offlineLateReturnsCount: number;
   };
 }
 
@@ -194,10 +211,29 @@ export function computeShiftCash(input: ComputeShiftCashInput): ShiftCashBreakdo
   let cashRefundsOnSalesReturns = 0;
   let forwardSalesCount = 0;
   let salesReturnCount = 0;
+  let offlineLateSalesCash = 0;
+  let offlineLateReturnsCash = 0;
+  let offlineLateSalesCount = 0;
+  let offlineLateReturnsCount = 0;
 
   if (Array.isArray(input.invoices)) {
     for (const inv of input.invoices) {
       if (isCancelledInvoice(inv)) continue;
+
+      // Late-synced offline sales/returns occurred during an earlier outage.
+      // Exclude them from current drawer expected cash, track separately.
+      if (inv.is_late_sync === true) {
+        if (isReturnInvoice(inv)) {
+          const refund = computeReturnCashRefund(inv);
+          offlineLateReturnsCash += refund;
+          offlineLateReturnsCount++;
+        } else {
+          const saleCash = computeInvoiceCashAmount(inv);
+          offlineLateSalesCash += saleCash;
+          offlineLateSalesCount++;
+        }
+        continue;
+      }
 
       if (isReturnInvoice(inv)) {
         const refund = computeReturnCashRefund(inv);
@@ -312,6 +348,8 @@ export function computeShiftCash(input: ComputeShiftCashInput): ShiftCashBreakdo
     pettyExpenses -
     tokenCashPayouts;
 
+  const offlineLateNetCash = offlineLateSalesCash - offlineLateReturnsCash;
+
   return {
     openingCash,
     cashSales,
@@ -323,6 +361,11 @@ export function computeShiftCash(input: ComputeShiftCashInput): ShiftCashBreakdo
     pettyExpenses,
     tokenCashPayouts,
     expectedCash,
+    offlineLateSalesCash,
+    offlineLateReturnsCash,
+    offlineLateNetCash,
+    offlineLateSalesCount,
+    offlineLateReturnsCount,
     details: {
       forwardSalesCount,
       salesReturnCount,
@@ -332,6 +375,8 @@ export function computeShiftCash(input: ComputeShiftCashInput): ShiftCashBreakdo
       voucherPaymentCount,
       expenseCount,
       tokenPayoutCount,
+      offlineLateSalesCount,
+      offlineLateReturnsCount,
     },
   };
 }

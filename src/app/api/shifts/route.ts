@@ -258,7 +258,7 @@ export async function PATCH(req: NextRequest) {
         // Invoices — shift-scoped, exclude cancelled AND void
         const { data: shiftInvoices } = await supabaseAdmin
           .from('invoices')
-          .select('net_total, paid_amount, cash_paid, payment_type, invoice_type, status')
+          .select('net_total, paid_amount, cash_paid, payment_type, invoice_type, status, is_late_sync')
           .eq('shift_id', id)
           .eq('tenant_id', tenantId)
           .not('status', 'in', '(cancelled,void,CANCELLED,VOID)');
@@ -320,6 +320,11 @@ export async function PATCH(req: NextRequest) {
           pettyExpenses: breakdown.pettyExpenses,
           tokenCashPayouts: breakdown.tokenCashPayouts,
           expectedCash: breakdown.expectedCash,
+          offlineLateSalesCash: breakdown.offlineLateSalesCash,
+          offlineLateReturnsCash: breakdown.offlineLateReturnsCash,
+          offlineLateNetCash: breakdown.offlineLateNetCash,
+          offlineLateSalesCount: breakdown.offlineLateSalesCount,
+          offlineLateReturnsCount: breakdown.offlineLateReturnsCount,
           computedAt: new Date().toISOString(),
         };
       }

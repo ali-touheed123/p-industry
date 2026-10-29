@@ -13,6 +13,7 @@ import {
   X
 } from 'lucide-react';
 import { Client } from '@/types';
+import { fetchWithTimeout, isNetworkOrTimeoutError } from '@/lib/fetchWithTimeout';
 
 interface Props {
   tenantId?: string;
@@ -235,7 +236,7 @@ export default function ClientCreditRecovery({
     setSubmittingPayment(true);
 
     try {
-      const res = await fetch('/api/vouchers', {
+      const res = await fetchWithTimeout('/api/vouchers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -250,6 +251,7 @@ export default function ClientCreditRecovery({
           remarks: `Recovery Collection — ${paymentMode}${paymentNotes ? ` (${paymentNotes})` : ''}`,
           created_by: staffName,
         }),
+        timeoutMs: 20000,
       });
 
       const data = await res.json();

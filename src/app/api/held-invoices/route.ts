@@ -47,6 +47,8 @@ export async function POST(req: NextRequest) {
       delivery_charge = 0,
       net_total = 0,
       remarks,
+      // Phase 5.3: Offline hold idempotency key (device-generated UUID)
+      local_hold_id,
     } = body;
 
     if (!tenant_id || !hold_no || !items.length) {
@@ -59,6 +61,22 @@ export async function POST(req: NextRequest) {
     const auth = await requireTenantAuth(req, tenant_id);
     if (!auth.authorized) {
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
+    // Phase 5.3: If local_hold_id provided, check for an existing duplicate before inserting.
+    // This makes offline hold sync fully idempotent — a network-retry of the same hold
+    // will return the existing record instead of creating a duplicate row.
+    if (local_hold_id) {
+      const { data: existing } = await supabaseAdmin
+        .from('held_invoices')
+        .select('id, hold_no')
+        .eq('local_hold_id', local_hold_id)
+        .eq('tenant_id', tenant_id)
+        .maybeSingle();
+
+      if (existing) {
+        return NextResponse.json({ success: true, is_duplicate: true, held_order: existing });
+      }
     }
 
     const { data: heldOrder, error } = await supabaseAdmin
@@ -75,6 +93,8 @@ export async function POST(req: NextRequest) {
         delivery_charge: Number(delivery_charge),
         net_total: Number(net_total),
         remarks: remarks || null,
+        // Phase 5.3: Store device UUID for future dedup on retry
+        ...(local_hold_id ? { local_hold_id } : {}),
       })
       .select()
       .single();

@@ -3,6 +3,7 @@
 import React, { useState, useRef, useId } from 'react';
 import { Item, Supplier } from '@/types';
 import { ceoFetch } from '@/lib/ceoApprovalClient';
+import { fetchWithTimeout } from '@/lib/fetchWithTimeout';
 import {
   Upload,
   Camera,
@@ -500,7 +501,8 @@ export default function AiInvoiceScan({
         })),
       };
 
-      const res = await fetch('/api/purchases', {
+      const res = await fetchWithTimeout('/api/purchases', {
+        timeoutMs: 25000,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(purchasePayload),

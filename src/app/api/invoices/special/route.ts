@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
-import { validateLockedRates } from '@/lib/rate-lock';
+import { validateLockedRates, HistoricalPriceMatch } from '@/lib/rate-lock';
+import { logAuditEvent } from '@/lib/audit-logs';
 import { isPlaceholderWalkInName } from '@/utils/customerName';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    const isOffline = Boolean(body.is_offline);
+    const createdAtLocal = body.created_at_local ? String(body.created_at_local) : null;
+    const historicalMatches: HistoricalPriceMatch[] = [];
+
     const {
       tenant_id,
       invoice_no,
@@ -55,7 +60,19 @@ export async function POST(req: NextRequest) {
 
     // Rate lock: printed rate on a special sale is the catalog retail price
     if (auth.session.role !== 'developer') {
-      const rateLockError = await validateLockedRates(tenant_id, items, 'sales');
+      const rateLockError = await validateLockedRates(
+        tenant_id,
+        items,
+        'sales',
+        [],
+        {
+          isOffline,
+          createdAtLocal,
+          isSpecialSale: true,
+          hasCeoOverride: Boolean(body.ceo_override_token || body.has_ceo_override),
+          collectedHistoricalMatches: historicalMatches,
+        }
+      );
       if (rateLockError) {
         return NextResponse.json({ success: false, error: rateLockError, code: 'RATE_LOCKED' }, { status: 400 });
       }
@@ -299,6 +316,30 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: false, error: rpcErr.message }, { status: 409 });
       }
       return NextResponse.json({ success: false, error: rpcErr.message }, { status: 400 });
+    }
+
+    if (!rpcRes?.is_duplicate && historicalMatches.length > 0) {
+      for (const match of historicalMatches) {
+        await logAuditEvent({
+          tenantId: tenant_id,
+          userId: effectiveUserId || null,
+          userName: printedBy || 'cashier',
+          action: 'OFFLINE_HISTORICAL_PRICE_ACCEPTED',
+          actionType: 'pos_offline_rate_lock',
+          entityType: 'invoice',
+          entityId: rpcRes?.invoice?.id || null,
+          details: {
+            invoice_no: rpcRes?.invoice?.invoice_no || invoice_no,
+            itemId: match.itemId,
+            itemName: match.itemName,
+            quotedPrice: match.quotedPrice,
+            currentCatalogPrice: match.currentPrice,
+            historicalPrice: match.historicalPrice,
+            effectiveFrom: match.effectiveFrom,
+            createdAtLocal: createdAtLocal,
+          },
+        });
+      }
     }
 
     if (rpcRes && rpcRes.snapshot) {

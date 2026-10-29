@@ -24,13 +24,38 @@ import {
   Bell,
   Ticket,
   Coins,
+  AlertTriangle,
+  ShoppingCart,
 } from 'lucide-react';
 import TokenRedemption from './TokenRedemption';
 import { formatWalkInName, stripWalkInSuffix, isPlaceholderWalkInName } from '@/utils/customerName';
+import { fetchWithTimeout, isNetworkOrTimeoutError } from '@/lib/fetchWithTimeout';
+import { reportNetworkError, reportNetworkSuccess, useConnectivity } from '@/lib/useConnectivity';
+import {
+  saveCartDraft,
+  loadCartDraft,
+  clearCartDraft,
+  validateCartDraftRates,
+  CartDraftPayload,
+  RateRevalidationResult,
+} from '@/lib/cartDraftStore';
+import {
+  addLocalHold,
+  loadLocalHolds,
+  removeLocalHold,
+  updateLocalHoldStatus,
+  clearAllLocalHolds,
+  generateOfflineHoldNo,
+  getPendingLocalHolds,
+  LocalHoldItem,
+  LOCAL_HOLD_SCHEMA_VERSION,
+} from '@/lib/localHoldStore';
 
 interface Props {
   items: Item[];
   tenantId: string;
+  branchId?: string;
+  userId?: string;
   shiftId?: string;
   onCompleteSale: (invoice: any) => void;
   staffName: string;
@@ -85,6 +110,10 @@ export interface InvoiceLineItem {
 interface HeldOrder {
   id: string;
   dbId?: string;
+  /** Set when the hold was saved locally (offline). Used as idempotency key on sync. */
+  localHoldId?: string;
+  /** True if hold exists only on this device (not yet synced to server). */
+  isLocalOnly?: boolean;
   hold_no: string;
   customerName: string;
   selectedClient: Client | null;
@@ -114,6 +143,8 @@ const SHORTCUTS = [
 export default function PosBilling({
   items: liveItems,
   tenantId,
+  branchId,
+  userId,
   shiftId,
   onCompleteSale,
   staffName,
@@ -127,6 +158,9 @@ export default function PosBilling({
   onNavigateToOrders,
   allowNegativeStock = true,
 }: Props) {
+  const effectiveUserId = userId || staffName || 'staff';
+  const effectiveBranchId = branchId || tenantId;
+
   // Mode toggle: Sales Invoice vs Return
   const [invoiceType, setInvoiceType] = useState<'sales' | 'return'>('sales');
   const [invoiceNo, setInvoiceNo] = useState<string>(
@@ -202,11 +236,181 @@ export default function PosBilling({
   const [submitting, setSubmitting] = useState<boolean>(false);
   const isSubmittingRef = useRef<boolean>(false);
   const activeCheckoutKeyRef = useRef<string | null>(null);
+  const activeSpecialCheckoutKeyRef = useRef<string | null>(null);
 
-  // Task B6: Cart signature tracking & stable idempotency key
+  // Phase 2: Verify-Before-Retry state for resilient network handling
+  const [verifyState, setVerifyState] = useState<{
+    isVerifying: boolean;
+    statusMessage?: string;
+    failedAfterRetries?: boolean;
+    errorMessage?: string;
+    retryAction?: () => void;
+  } | null>(null);
+
+  // Phase 3: Cart Auto-Save & Recovery state (Tasks 3.1–3.4, 3.8)
+  const [pendingDraft, setPendingDraft] = useState<CartDraftPayload | null>(null);
+  const [rateWarnings, setRateWarnings] = useState<RateRevalidationResult['warnings'] | null>(null);
+  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const hasInitializedDraftCheckRef = useRef<boolean>(false);
+
+  // Phase 5: Local Hold Sync — watch connectivity; on transition to online,
+  // push any pending local holds to the server.
+  const { isOnline } = useConnectivity();
+  const isSyncingLocalHoldsRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    if (!isOnline) return; // Only attempt sync when online
+    if (isSyncingLocalHoldsRef.current) return; // Already syncing
+
+    const pendingHolds = getPendingLocalHolds(tenantId, effectiveBranchId, effectiveUserId);
+    if (pendingHolds.length === 0) return;
+
+    isSyncingLocalHoldsRef.current = true;
+    (async () => {
+      for (const hold of pendingHolds) {
+        try {
+          // Mark as syncing (status update, non-blocking)
+          updateLocalHoldStatus(tenantId, effectiveBranchId, effectiveUserId, hold.localHoldId, 'syncing');
+
+          const res = await fetchWithTimeout('/api/held-invoices', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              tenant_id: hold.tenantId,
+              hold_no: hold.hold_no,
+              client_id: hold.clientId,
+              client_name: hold.clientName,
+              invoice_type: hold.invoiceType,
+              items: hold.items,
+              subtotal: hold.subtotal,
+              discount: hold.discount,
+              delivery_charge: hold.deliveryCharge,
+              net_total: hold.netTotal,
+              remarks: hold.remarks,
+              // Phase 5.3: idempotency — server dedupes on local_hold_id (UNIQUE column)
+              local_hold_id: hold.localHoldId,
+            }),
+            timeoutMs: 15000,
+          });
+
+          const data = await res.json();
+          if (res.ok && (data.success || data.is_duplicate)) {
+            // Task 5.5: Remove local copy ONLY after server confirmation
+            removeLocalHold(tenantId, effectiveBranchId, effectiveUserId, hold.localHoldId);
+            // Update in-memory held list: replace local badge entry with server entry
+            if (data.held_order?.id) {
+              setHeldOrders((prev) =>
+                prev.map((o) =>
+                  o.localHoldId === hold.localHoldId
+                    ? {
+                        ...o,
+                        id: data.held_order.id,
+                        dbId: data.held_order.id,
+                        isLocalOnly: false,
+                        localHoldId: undefined,
+                      }
+                    : o,
+                ),
+              );
+            } else {
+              // Duplicate — server already has it; remove from local list
+              setHeldOrders((prev) => prev.filter((o) => o.localHoldId !== hold.localHoldId));
+            }
+          } else {
+            // Business rule rejection (not a network error) — mark needs_attention
+            const errMsg = data.error || `Server rejected hold ${hold.hold_no}`;
+            updateLocalHoldStatus(
+              tenantId, effectiveBranchId, effectiveUserId,
+              hold.localHoldId, 'needs_attention', errMsg,
+            );
+            console.warn('[LocalHold Sync] Hold rejected by server:', errMsg);
+          }
+        } catch (syncErr: any) {
+          // Network error — reset to pending so next reconnect retries
+          updateLocalHoldStatus(tenantId, effectiveBranchId, effectiveUserId, hold.localHoldId, 'pending');
+          console.warn('[LocalHold Sync] Network error during hold sync, will retry:', syncErr?.message);
+          break; // Stop trying more holds until next connectivity event
+        }
+      }
+      isSyncingLocalHoldsRef.current = false;
+    })();
+  }, [isOnline, tenantId, effectiveBranchId, effectiveUserId]);
+
+  // Phase 3.4: On mount, detect unsaved cart draft (if not currently restoring or editing)
+  useEffect(() => {
+    if (hasInitializedDraftCheckRef.current) return;
+    hasInitializedDraftCheckRef.current = true;
+
+    if (restoringHeldOrder || editingInvoice) return;
+
+    const draft = loadCartDraft(tenantId, effectiveBranchId, effectiveUserId);
+    if (draft && (draft.cart?.lineItems?.length || draft.cart?.selectedClient || draft.cart?.customerSearch?.trim())) {
+      setPendingDraft(draft);
+    }
+  }, [tenantId, effectiveBranchId, effectiveUserId, restoringHeldOrder, editingInvoice]);
+
+  // Phase 3.3: Debounced auto-save (~500ms) on any cart change
+  useEffect(() => {
+    // If waiting on user to restore or discard draft, don't overwrite with empty initial cart!
+    if (pendingDraft) return;
+    // Don't auto-save if working on a server held order or editing an existing server invoice
+    if (restoringHeldOrder || editingInvoice) return;
+
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      saveCartDraft(tenantId, effectiveBranchId, effectiveUserId, {
+        lineItems,
+        invoiceType,
+        selectedClient,
+        customerSearch,
+        remarks,
+        invoiceDiscount,
+        deliveryCharge,
+        cashPayment,
+        cardPayment,
+        bankPayment,
+        othersPayment,
+        activeCheckoutKey: activeCheckoutKeyRef.current,
+        activeSpecialCheckoutKey: activeSpecialCheckoutKeyRef.current,
+        activeHeldOrderId,
+      });
+    }, 500);
+
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [
+    tenantId,
+    effectiveBranchId,
+    effectiveUserId,
+    lineItems,
+    invoiceType,
+    selectedClient,
+    customerSearch,
+    remarks,
+    invoiceDiscount,
+    deliveryCharge,
+    cashPayment,
+    cardPayment,
+    bankPayment,
+    othersPayment,
+    activeHeldOrderId,
+    pendingDraft,
+    restoringHeldOrder,
+    editingInvoice,
+  ]);
+
+  // Task B6 & Phase 1.1: Cart signature tracking & stable idempotency keys
   const cartSignature = useMemo(() => {
     return JSON.stringify({
-      items: lineItems.map((ci) => ({ id: ci.id, qty: ci.qty, rate: ci.rate, tokenAction: ci.tokenAction })),
+      items: lineItems.map((ci) => ({
+        id: ci.id,
+        qty: ci.qty,
+        rate: ci.rate,
+        specialRate: ci.specialRate,
+        discountPercent: ci.discountPercent,
+        tokenAction: ci.tokenAction,
+      })),
       discount: invoiceDiscount,
       delivery: deliveryCharge,
       clientId: selectedClient?.id || null,
@@ -218,9 +422,10 @@ export default function PosBilling({
     });
   }, [lineItems, invoiceDiscount, deliveryCharge, selectedClient, customerSearch, cashPayment, cardPayment, bankPayment, othersPayment]);
 
-  // Reset idempotency key whenever any cart property mutates
+  // Reset idempotency keys whenever any cart property mutates
   useEffect(() => {
     activeCheckoutKeyRef.current = null;
+    activeSpecialCheckoutKeyRef.current = null;
   }, [cartSignature]);
   const [notification, setNotification] = useState<string | null>(null);
   const [printReceiptData, setPrintReceiptData] = useState<any | null>(null);
@@ -289,6 +494,45 @@ export default function PosBilling({
   const showFeedback = (msg: string) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 3000);
+  };
+
+  // Phase 3.4 & 3.8: Handlers for restoring / discarding detected cart draft
+  const handleRestoreDraft = () => {
+    if (!pendingDraft) return;
+    const { cart } = pendingDraft;
+
+    // Phase 3.8: Re-validate rates against live catalog
+    const validation = validateCartDraftRates(cart.lineItems || [], liveItems || []);
+    if (validation.hasChanges) {
+      setRateWarnings(validation.warnings);
+    } else {
+      setRateWarnings(null);
+    }
+
+    setLineItems(cart.lineItems || []);
+    setInvoiceType(cart.invoiceType || 'sales');
+    setSelectedClient(cart.selectedClient || null);
+    setCustomerSearch(cart.customerSearch || '');
+    setRemarks(cart.remarks || '');
+    setInvoiceDiscount(Number(cart.invoiceDiscount) || 0);
+    setDeliveryCharge(Number(cart.deliveryCharge) || 0);
+    setCashPayment(Number(cart.cashPayment) || 0);
+    setCardPayment(Number(cart.cardPayment) || 0);
+    setBankPayment(Number(cart.bankPayment) || 0);
+    setOthersPayment(Number(cart.othersPayment) || 0);
+    if (cart.activeCheckoutKey) activeCheckoutKeyRef.current = cart.activeCheckoutKey;
+    if (cart.activeSpecialCheckoutKey) activeSpecialCheckoutKeyRef.current = cart.activeSpecialCheckoutKey;
+    if (cart.activeHeldOrderId) setActiveHeldOrderId(cart.activeHeldOrderId);
+
+    setPendingDraft(null);
+    showFeedback('Cart restored from previous session.');
+  };
+
+  const handleDiscardDraft = () => {
+    clearCartDraft(tenantId, effectiveBranchId, effectiveUserId);
+    setPendingDraft(null);
+    setRateWarnings(null);
+    showFeedback('Unsaved draft discarded.');
   };
 
   // 1. Fetch Clients for this tenant
@@ -479,15 +723,36 @@ export default function PosBilling({
     fetchClientHistory();
   }, [selectedClient, tenantId]);
 
-  // 2. Fetch Persistent Parked Invoices from Supabase
+  // 2. Fetch Persistent Parked Invoices from Supabase + merge local holds
   useEffect(() => {
     if (!tenantId) return;
     const fetchHeld = async () => {
+      // Always load local holds first (works offline)
+      const localHolds = loadLocalHolds(tenantId, effectiveBranchId, effectiveUserId);
+      const localMapped: HeldOrder[] = localHolds.map((h) => ({
+        id: h.localHoldId,
+        localHoldId: h.localHoldId,
+        isLocalOnly: true,
+        hold_no: h.hold_no,
+        customerName: h.clientName,
+        selectedClient: clients.find((c) => c.id === h.clientId) || null,
+        items: h.items || [],
+        invoiceType: h.invoiceType,
+        time: new Date(h.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        total: Number(h.netTotal) || 0,
+        subtotal: Number(h.subtotal) || 0,
+        discount: Number(h.discount) || 0,
+        delivery_charge: Number(h.deliveryCharge) || 0,
+        remarks: h.remarks || '',
+      }));
+
+      // Try to fetch server holds (may fail offline — that's OK)
+      let serverMapped: HeldOrder[] = [];
       try {
         const res = await fetch(`/api/held-invoices?tenant_id=${tenantId}`);
         const data = await res.json();
         if (data.success && Array.isArray(data.held_invoices)) {
-          const mapped: HeldOrder[] = data.held_invoices.map((h: any) => ({
+          serverMapped = data.held_invoices.map((h: any) => ({
             id: h.id,
             dbId: h.id,
             hold_no: h.hold_no,
@@ -498,14 +763,18 @@ export default function PosBilling({
             time: new Date(h.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             total: Number(h.net_total) || 0,
           }));
-          setHeldOrders(mapped);
         }
       } catch (err) {
-        console.error('Failed to fetch held invoices', err);
+        console.error('Failed to fetch server held invoices (may be offline)', err);
       }
+
+      // Merge: server holds first, then local-only holds appended (no duplicates)
+      // A local hold that has been synced (same local_hold_id returned by server) would have been
+      // removed from localHolds already by the sync engine — so simple concatenation is safe.
+      setHeldOrders([...serverMapped, ...localMapped]);
     };
     fetchHeld();
-  }, [tenantId, clients]);
+  }, [tenantId, clients, effectiveBranchId, effectiveUserId]);
 
   // Listen for native print completion or dismissal to cleanly clear print data
   useEffect(() => {
@@ -887,7 +1156,7 @@ export default function PosBilling({
     const customerDisplayName = selectedClient?.name || formatWalkInName(customerSearch);
 
     try {
-      const res = await fetch('/api/held-invoices', {
+      const res = await fetchWithTimeout('/api/held-invoices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -903,9 +1172,13 @@ export default function PosBilling({
           net_total: netTotal,
           remarks,
         }),
+        timeoutMs: 15000,
       });
 
       const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to place order on hold.');
+      }
       const newHeld: HeldOrder = {
         id: data.held_order?.id || holdNo,
         dbId: data.held_order?.id,
@@ -924,7 +1197,7 @@ export default function PosBilling({
 
       if (activeHeldOrderId) {
         try {
-          await fetch(`/api/held-invoices?id=${activeHeldOrderId}`, { method: 'DELETE' });
+          await fetchWithTimeout(`/api/held-invoices?id=${activeHeldOrderId}`, { method: 'DELETE', timeoutMs: 10000 });
         } catch (err) {
           console.error('Failed to clean up old held order on re-hold:', err);
         }
@@ -941,9 +1214,82 @@ export default function PosBilling({
       setInvoiceDiscount(0);
       setDeliveryCharge(0);
       setRemarks('');
+      clearCartDraft(tenantId, effectiveBranchId, effectiveUserId);
+      setRateWarnings(null);
+      reportNetworkSuccess();
+      reportNetworkSuccess();
       showFeedback(`Invoice ${invoiceNo} placed on hold in database.`);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to park order in DB', err);
+      if (isNetworkOrTimeoutError(err)) {
+        reportNetworkError();
+        // ── Phase 5.1: Network failure → save hold locally ──────────────────
+        // Generate a UUID as the stable idempotency key for this hold.
+        const crypto = globalThis.crypto || (await import('crypto')).webcrypto;
+        const localHoldId = crypto.randomUUID();
+        const offlineHoldNo = generateOfflineHoldNo();
+        const localHold: LocalHoldItem = {
+          localHoldId,
+          schemaVersion: LOCAL_HOLD_SCHEMA_VERSION,
+          tenantId,
+          branchId: effectiveBranchId,
+          userId: effectiveUserId,
+          hold_no: offlineHoldNo,
+          clientId: selectedClient?.id || null,
+          clientName: customerDisplayName,
+          invoiceType,
+          items: lineItems,
+          subtotal: itemSubtotal,
+          discount: invoiceDiscount,
+          deliveryCharge,
+          netTotal,
+          remarks,
+          createdAt: new Date().toISOString(),
+          status: 'pending',
+        };
+        // Atomic: save MUST succeed before clearing cart (Task 5.1 — never lose data)
+        const saved = addLocalHold(localHold);
+        if (!saved) {
+          showFeedback(
+            'Internet issue + could not save locally. Please check storage. Cart not cleared.',
+          );
+          return;
+        }
+        // Add to in-memory held list with local badge
+        const localHeldOrder: HeldOrder = {
+          id: localHoldId,
+          localHoldId,
+          isLocalOnly: true,
+          hold_no: offlineHoldNo,
+          customerName: customerDisplayName,
+          selectedClient,
+          items: lineItems,
+          invoiceType,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          total: netTotal,
+          subtotal: itemSubtotal,
+          discount: invoiceDiscount,
+          delivery_charge: deliveryCharge,
+          remarks,
+        };
+        setHeldOrders((prev) => [localHeldOrder, ...prev]);
+        setLineItems([]);
+        setCashPayment(0);
+        setIsCashManuallyEdited(false);
+        setCardPayment(0);
+        setBankPayment(0);
+        setOthersPayment(0);
+        setInvoiceDiscount(0);
+        setDeliveryCharge(0);
+        setRemarks('');
+        clearCartDraft(tenantId, effectiveBranchId, effectiveUserId);
+        setRateWarnings(null);
+        showFeedback(
+          `Offline: order saved on this device (${offlineHoldNo}). Will sync when connection returns.`,
+        );
+      } else {
+        showFeedback(err?.message || 'Failed to hold order.');
+      }
     }
   };
 
@@ -966,9 +1312,18 @@ export default function PosBilling({
     setDeliveryCharge(Number(order.delivery_charge) || 0);
     setRemarks(order.remarks || '');
     setHeldOrders((prev) => prev.filter((o) => o.id !== order.id));
-    if (order.dbId) {
+
+    if (order.isLocalOnly && order.localHoldId) {
+      // Task 5.4: local hold restored offline — keep it in localHoldStore as 'pending'
+      // so it still syncs to the server on reconnect. Do NOT set activeHeldOrderId
+      // (there's no server DB row to delete yet). The sync engine will push it, and
+      // after server success the local copy is removed automatically.
+      // We do NOT call removeLocalHold here because the hold hasn't synced yet.
+    } else if (order.dbId) {
+      // Server hold: track the DB id so we delete it on checkout
       setActiveHeldOrderId(order.dbId);
     }
+
     setIsCashManuallyEdited(false);
     setShowHeldModal(false);
     showFeedback(`Restored order for ${order.customerName}.`);
@@ -976,7 +1331,10 @@ export default function PosBilling({
 
   const handleDeleteHeld = async (order: HeldOrder) => {
     setHeldOrders((prev) => prev.filter((o) => o.id !== order.id));
-    if (order.dbId) {
+    if (order.isLocalOnly && order.localHoldId) {
+      // Remove from local store (user explicitly discarded an offline hold)
+      removeLocalHold(tenantId, effectiveBranchId, effectiveUserId, order.localHoldId);
+    } else if (order.dbId) {
       try {
         await fetch(`/api/held-invoices?id=${order.dbId}`, { method: 'DELETE' });
       } catch (err) {
@@ -997,6 +1355,8 @@ export default function PosBilling({
     setDeliveryCharge(0);
     setRemarks('');
     setActiveHeldOrderId(null);
+    clearCartDraft(tenantId, effectiveBranchId, effectiveUserId);
+    setRateWarnings(null);
     if (editingInvoice) {
       onClearEditingInvoice?.();
       setInvoiceNo(`INV-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`);
@@ -1172,16 +1532,56 @@ export default function PosBilling({
         ? { id: editingInvoice.id, edit_reason: editingInvoice.edit_reason || '', ...invoicePayload }
         : { ...invoicePayload, invoice_no: undefined, idempotency_key: keyToUse };
 
-      const res = await fetch(apiEndpoint, {
-        method: apiMethod,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payloadToSend),
-      });
+      // Phase 2: Verify-Before-Retry loop with timeout
+      let res: Response | null = null;
+      let lastNetworkErr: any = null;
+      const MAX_VERIFY_ATTEMPTS = 2;
+
+      for (let attempt = 0; attempt <= MAX_VERIFY_ATTEMPTS; attempt++) {
+        try {
+          if (attempt > 0) {
+            setVerifyState({
+              isVerifying: true,
+              statusMessage: 'Verifying sale with server… Please wait / Sale check ho rahi hai, baraye mehrbani intezar karein…',
+            });
+            await new Promise((r) => setTimeout(r, 1500));
+          }
+
+          res = await fetchWithTimeout(apiEndpoint, {
+            method: apiMethod,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payloadToSend),
+            timeoutMs: 20000,
+          });
+
+          lastNetworkErr = null;
+          break;
+        } catch (fetchErr: any) {
+          lastNetworkErr = fetchErr;
+          if (!isNetworkOrTimeoutError(fetchErr)) {
+            throw fetchErr;
+          }
+          reportNetworkError();
+          console.warn(`[Checkout] Network issue on attempt ${attempt + 1}:`, fetchErr.message);
+        }
+      }
+
+      setVerifyState(null);
+
+      if (lastNetworkErr || !res) {
+        setVerifyState({
+          isVerifying: false,
+          failedAfterRetries: true,
+          errorMessage: 'Connection lost. Sale could not be confirmed. (Internet band hai — sale abhi confirm nahi hui. Dobara enter mat karein; "Retry" dabayein ya offline save karein.)',
+          retryAction: () => handleCheckout(openPrint),
+        });
+        return;
+      }
 
       const data = await res.json();
 
       if (res.status === 409) {
-        alert(`⚠️ Cart Conflict: ${data.error || 'Cart contents changed during checkout attempt.'}`);
+        showFeedback(`⚠️ Cart Conflict: ${data.error || 'Cart contents changed during checkout attempt.'}`);
         activeCheckoutKeyRef.current = null;
         return;
       }
@@ -1190,13 +1590,7 @@ export default function PosBilling({
         const finalServerInvoiceNo = data.invoice?.invoice_no || invoiceNo;
 
         if (data.is_duplicate) {
-          if (!keyToUse) {
-            // C3 Interim legacy safety: if data.is_duplicate is true on a legacy (no key) path,
-            // do NOT show "Invoice finalized" / clear the cart. Show a clear warning instead.
-            alert(`⚠️ Duplicate Invoice Number Detected (#${finalServerInvoiceNo}). This sale was NOT recorded. Please regenerate invoice number and retry.`);
-            return;
-          }
-          showFeedback(`⚠️ Network retry detected: Invoice #${finalServerInvoiceNo} was already recorded.`);
+          showFeedback('Sale successfully recorded! (Sale pehle hi record ho chuki hai)');
         }
 
         const receiptItems = lineItems.map((ci) => {
@@ -1271,7 +1665,7 @@ export default function PosBilling({
         // BUG-03 FIX: Delete held invoice from database only after checkout is successfully completed
         if (activeHeldOrderId) {
           try {
-            await fetch(`/api/held-invoices?id=${activeHeldOrderId}`, { method: 'DELETE' });
+            await fetchWithTimeout(`/api/held-invoices?id=${activeHeldOrderId}`, { method: 'DELETE', timeoutMs: 10000 });
           } catch (delHeldErr) {
             console.error('Failed to remove held invoice after checkout:', delHeldErr);
           }
@@ -1292,11 +1686,24 @@ export default function PosBilling({
         setRemarks('');
         setInvoiceNo(`INV-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`);
         activeCheckoutKeyRef.current = null;
+        clearCartDraft(tenantId, effectiveBranchId, effectiveUserId);
+        setRateWarnings(null);
+        reportNetworkSuccess();
       } else {
-        alert(`Failed to save invoice: ${data.error || 'Unknown error'}`);
+        showFeedback(`Failed to save invoice: ${data.error || 'Unknown error'}`);
       }
     } catch (err: any) {
-      alert(`Network error saving invoice: ${err.message}`);
+      console.error('Checkout error:', err);
+      if (isNetworkOrTimeoutError(err)) {
+        setVerifyState({
+          isVerifying: false,
+          failedAfterRetries: true,
+          errorMessage: 'Connection lost. Sale could not be confirmed. (Internet band hai — sale abhi confirm nahi hui. Dobara enter mat karein; "Retry" dabayein ya offline save karein.)',
+          retryAction: () => handleCheckout(openPrint),
+        });
+      } else {
+        showFeedback(`Error: ${err.message || 'Failed to complete sale'}`);
+      }
     } finally {
       isSubmittingRef.current = false;
       setSubmitting(false);
@@ -1318,7 +1725,7 @@ export default function PosBilling({
   // Special Save & Print: saves via /api/invoices/special and opens the browser print preview directly (no modal).
   // Receipt prints the cart `rate` (original); customer is charged the Special Rate (per unit) minus Disc %.
   const handleSpecialDirect = async () => {
-    if (!canUseSpecialReceipt || submitting) return;
+    if (!canUseSpecialReceipt || submitting || isSubmittingRef.current) return;
     if (blockForCustomerName()) return;
     {
       const missingSpecial = specialBrandLineMissingRate();
@@ -1343,6 +1750,7 @@ export default function PosBilling({
       showFeedback('Special sale mein invoice discount allowed nahi. Line Disc % ya Special Rate use karein.');
       return;
     }
+    isSubmittingRef.current = true;
     setSubmitting(true);
 
     const specialLines = lineItems.map((ci) => {
@@ -1362,6 +1770,7 @@ export default function PosBilling({
 
     if (nonCashPaid > roundedNetTotal) {
       showFeedback(`Non-cash payment (Rs. ${nonCashPaid.toLocaleString()}) exceeds Net Total (Rs. ${roundedNetTotal.toLocaleString()}). Please correct tender amounts.`);
+      isSubmittingRef.current = false;
       setSubmitting(false);
       return;
     }
@@ -1374,6 +1783,7 @@ export default function PosBilling({
 
     if (!selectedClient && finalDue > 0) {
       showFeedback('Cannot sell on credit to a walk-in customer. Please select a registered customer account, or collect full payment before completing this sale.');
+      isSubmittingRef.current = false;
       setSubmitting(false);
       return;
     }
@@ -1382,6 +1792,7 @@ export default function PosBilling({
       const limit = Number(selectedClient.credit_limit) || 0;
       if (limit > 0 && currentBal + finalDue > limit) {
         showFeedback(`Insufficient credit limit. Available limit: Rs. ${Math.max(0, limit - currentBal).toLocaleString()}`);
+        isSubmittingRef.current = false;
         setSubmitting(false);
         return;
       }
@@ -1396,9 +1807,20 @@ export default function PosBilling({
     else if (cardPayment > 0) resolvedPaymentType = 'card';
     else if (bankPayment > 0) resolvedPaymentType = 'bank';
 
+    // Phase 1.1 & 1.2: Stable idempotency key across retries
+    const keyToUse =
+      activeSpecialCheckoutKeyRef.current ||
+      (typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `idemp-spl-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    if (!activeSpecialCheckoutKeyRef.current) {
+      activeSpecialCheckoutKeyRef.current = keyToUse;
+    }
+
     const payload = {
       tenant_id: tenantId,
       invoice_no: invoiceNo,
+      idempotency_key: keyToUse,
       client_id: selectedClient?.id || null,
       client_name: customerDisplayName,
       shift_id: shiftId || null,
@@ -1446,13 +1868,61 @@ export default function PosBilling({
       },
     };
 
-    try {
-      const res = await fetch('/api/invoices/special', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+    // Phase 2: Verify-Before-Retry loop with timeout for special sale
+    let res: Response | null = null;
+    let lastNetworkErr: any = null;
+    const MAX_VERIFY_ATTEMPTS = 2;
+
+    for (let attempt = 0; attempt <= MAX_VERIFY_ATTEMPTS; attempt++) {
+      try {
+        if (attempt > 0) {
+          setVerifyState({
+            isVerifying: true,
+            statusMessage: 'Verifying sale with server… Please wait / Sale check ho rahi hai, baraye mehrbani intezar karein…',
+          });
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+
+        res = await fetchWithTimeout('/api/invoices/special', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          timeoutMs: 20000,
+        });
+
+        lastNetworkErr = null;
+        break;
+      } catch (fetchErr: any) {
+        lastNetworkErr = fetchErr;
+        if (!isNetworkOrTimeoutError(fetchErr)) {
+          throw fetchErr;
+        }
+        reportNetworkError();
+        console.warn(`[Special Direct] Network issue on attempt ${attempt + 1}:`, fetchErr.message);
+      }
+    }
+
+    setVerifyState(null);
+
+    if (lastNetworkErr || !res) {
+      setVerifyState({
+        isVerifying: false,
+        failedAfterRetries: true,
+        errorMessage: 'Connection lost. Sale could not be confirmed. (Internet band hai — sale abhi confirm nahi hui. Dobara enter mat karein; "Retry" dabayein ya offline save karein.)',
+        retryAction: () => handleSpecialDirect(),
       });
+      return;
+    }
+
+    try {
       const resData = await res.json();
+
+      if (res.status === 409) {
+        showFeedback(`⚠️ Cart Conflict: ${resData.error || 'Cart contents changed during special checkout attempt.'}`);
+        activeSpecialCheckoutKeyRef.current = null;
+        return;
+      }
+
       if (!res.ok || !resData.success) {
         throw new Error(resData.error || 'Failed to record special sale.');
       }
@@ -1475,7 +1945,7 @@ export default function PosBilling({
 
       if (activeHeldOrderId) {
         try {
-          await fetch(`/api/held-invoices?id=${activeHeldOrderId}`, { method: 'DELETE' });
+          await fetchWithTimeout(`/api/held-invoices?id=${activeHeldOrderId}`, { method: 'DELETE', timeoutMs: 10000 });
         } catch (delHeldErr) {
           console.error('Failed to remove held invoice after special checkout:', delHeldErr);
         }
@@ -1492,11 +1962,30 @@ export default function PosBilling({
       setOthersPayment(0);
       setIsCashManuallyEdited(false);
       setInvoiceNo(`INV-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`);
-      showFeedback(`Special Invoice #${savedInvoice.invoice_no || ''} completed and printed.`);
+      activeSpecialCheckoutKeyRef.current = null; // Clear key on success (Phase 1.1)
+      clearCartDraft(tenantId, effectiveBranchId, effectiveUserId);
+      setRateWarnings(null);
+      reportNetworkSuccess();
+
+      if (resData.is_duplicate) {
+        showFeedback('Sale successfully recorded! (Sale pehle hi record ho chuki hai)');
+      } else {
+        showFeedback(`Special Invoice #${savedInvoice.invoice_no || ''} completed and printed.`);
+      }
     } catch (err: any) {
       console.error('Special sale execution error:', err);
-      showFeedback(err.message || 'Special sale failed. Please try again.');
+      if (isNetworkOrTimeoutError(err)) {
+        setVerifyState({
+          isVerifying: false,
+          failedAfterRetries: true,
+          errorMessage: 'Connection lost. Sale could not be confirmed. (Internet band hai — sale abhi confirm nahi hui. Dobara enter mat karein; "Retry" dabayein ya offline save karein.)',
+          retryAction: () => handleSpecialDirect(),
+        });
+      } else {
+        showFeedback(err.message || 'Special sale failed. Please try again.');
+      }
     } finally {
+      isSubmittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -1585,6 +2074,291 @@ export default function PosBilling({
         <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 60, background: '#0F172A', color: '#ffffff', padding: '10px 16px', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', border: '1px solid #334155', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 600 }}>
           <CheckCircle2 style={{ width: 16, height: 16, color: '#F97316' }} />
           {notification}
+        </div>
+      )}
+
+      {/* Phase 2: Cashier-Friendly Verifying Modal (Task 2.4) */}
+      {verifyState?.isVerifying && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.65)',
+          backdropFilter: 'blur(3px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '14px',
+            padding: '24px 32px',
+            maxWidth: '460px',
+            width: '90%',
+            textAlign: 'center',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
+            border: '2px solid #F97316',
+          }}>
+            <div style={{
+              width: 40,
+              height: 40,
+              border: '4px solid #E2E8F0',
+              borderTop: '4px solid #F97316',
+              borderRadius: '50%',
+              animation: 'spin 1s linear infinite',
+              margin: '0 auto 14px',
+            }} />
+            <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#0F172A', marginBottom: '6px' }}>
+              Verifying sale with server… Please wait
+            </h3>
+            <p style={{ fontSize: '13px', color: '#64748B', margin: 0 }}>
+              (Sale check ho rahi hai, baraye mehrbani intezar karein…)
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Phase 2: Cashier-Friendly Connection Lost Modal (Task 2.4) */}
+      {verifyState?.failedAfterRetries && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.75)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '16px',
+            padding: '24px 28px',
+            maxWidth: '500px',
+            width: '92%',
+            boxShadow: '0 25px 50px rgba(0,0,0,0.35)',
+            border: '2px solid #DC2626',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
+              <div style={{ width: 42, height: 42, borderRadius: '50%', background: '#FEE2E2', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <AlertTriangle style={{ width: 22, height: 22, color: '#DC2626' }} />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '16px', fontWeight: 800, color: '#991B1B', margin: 0 }}>
+                  Connection Lost / Internet Band Hai
+                </h3>
+                <p style={{ fontSize: '11px', color: '#64748B', margin: '2px 0 0' }}>
+                  Sale could not be confirmed with server
+                </p>
+              </div>
+            </div>
+
+            <div style={{ background: '#FFF1F2', border: '1px solid #FECDD3', borderRadius: '8px', padding: '12px 14px', marginBottom: '16px' }}>
+              <p style={{ fontSize: '13px', fontWeight: 600, color: '#9F1239', lineHeight: 1.5, margin: 0 }}>
+                {verifyState.errorMessage}
+              </p>
+            </div>
+
+            <p style={{ fontSize: '12px', color: '#475569', marginBottom: '18px', lineHeight: 1.4 }}>
+              <strong>Aapka cart mehfooz hai.</strong> Dobara bill banane ki zaroorat nahi. Connection check karein aur &quot;Try Again&quot; dabayein.
+            </p>
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => setVerifyState(null)}
+                style={{
+                  padding: '9px 16px',
+                  borderRadius: '8px',
+                  border: '1px solid #CBD5E1',
+                  background: '#F1F5F9',
+                  color: '#334155',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Keep Cart & Check Net / Cart Mehfooz Rakhein
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const retry = verifyState.retryAction;
+                  setVerifyState(null);
+                  if (retry) retry();
+                }}
+                style={{
+                  padding: '9px 18px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: '#EA580C',
+                  color: '#ffffff',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Try Again / Dobara Koshish Karein
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Phase 3.4: Restore Unsaved Cart Modal */}
+      {pendingDraft && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.72)',
+          backdropFilter: 'blur(3px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '16px',
+            padding: '24px 28px',
+            maxWidth: '480px',
+            width: '92%',
+            boxShadow: '0 25px 50px rgba(0,0,0,0.3)',
+            border: '2px solid #2563EB',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
+              <div style={{
+                width: 42,
+                height: 42,
+                borderRadius: '10px',
+                background: '#EFF6FF',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                <ShoppingCart style={{ width: 22, height: 22, color: '#2563EB' }} />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
+                  Unsaved Cart Found
+                </h3>
+                <p style={{ fontSize: '12px', color: '#64748B', margin: '2px 0 0' }}>
+                  (Pichli gher-mehfooz sale dastyab hai)
+                </p>
+              </div>
+            </div>
+
+            <div style={{
+              background: '#F8FAFC',
+              border: '1px solid #E2E8F0',
+              borderRadius: '10px',
+              padding: '12px 14px',
+              marginBottom: '16px',
+              fontSize: '13px',
+              color: '#334155',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                <span style={{ color: '#64748B' }}>Items in cart:</span>
+                <span style={{ fontWeight: 600 }}>{pendingDraft.cart.lineItems?.length || 0} product(s)</span>
+              </div>
+              {pendingDraft.cart.customerSearch && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span style={{ color: '#64748B' }}>Customer:</span>
+                  <span style={{ fontWeight: 600 }}>{pendingDraft.cart.customerSearch}</span>
+                </div>
+              )}
+              {pendingDraft.cart.selectedClient && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span style={{ color: '#64748B' }}>Client:</span>
+                  <span style={{ fontWeight: 600 }}>{pendingDraft.cart.selectedClient.name}</span>
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748B' }}>Autosaved:</span>
+                <span style={{ fontWeight: 500, fontSize: '11px', color: '#64748B' }}>
+                  {new Date(pendingDraft.updatedAt).toLocaleTimeString()} ({new Date(pendingDraft.updatedAt).toLocaleDateString()})
+                </span>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '13px', color: '#475569', marginBottom: '18px', lineHeight: 1.4 }}>
+              A cart from an unexpected browser refresh or previous session was recovered. Would you like to restore it or start fresh?
+            </p>
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={handleDiscardDraft}
+                style={{
+                  padding: '9px 16px',
+                  borderRadius: '8px',
+                  border: '1px solid #CBD5E1',
+                  background: '#F1F5F9',
+                  color: '#475569',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Discard / Mita Dein
+              </button>
+              <button
+                type="button"
+                onClick={handleRestoreDraft}
+                style={{
+                  padding: '9px 18px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: '#2563EB',
+                  color: '#ffffff',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Restore Cart / Cart Wapis Laein
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Phase 3.8: Rate Revalidation Warnings Banner */}
+      {rateWarnings && rateWarnings.length > 0 && (
+        <div style={{
+          background: '#FFFBEB',
+          borderBottom: '1px solid #FDE68A',
+          padding: '10px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontSize: '12px',
+          color: '#92400E',
+          zIndex: 50,
+          position: 'relative',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <AlertTriangle style={{ width: 16, height: 16, color: '#D97706', flexShrink: 0 }} />
+            <span>
+              <strong>Price update in catalog:</strong> {rateWarnings.length} product(s) in this restored cart have different prices in the catalog today (e.g. {rateWarnings[0].productName}: cart Rs.{rateWarnings[0].cartRate} vs catalog Rs.{rateWarnings[0].catalogRate}). Your quoted draft rates have been retained.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setRateWarnings(null)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#92400E',
+              fontWeight: 700,
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              marginLeft: '12px',
+            }}
+          >
+            Acknowledge (OK)
+          </button>
         </div>
       )}
 
@@ -3112,13 +3886,18 @@ export default function PosBilling({
                 heldOrders.map((order) => (
                   <div
                     key={order.id}
-                    style={{ padding: '10px 12px', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px' }}
+                    style={{ padding: '10px 12px', background: order.isLocalOnly ? '#FFFBEB' : '#F8FAFC', border: `1px solid ${order.isLocalOnly ? '#FCD34D' : '#E2E8F0'}`, borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px' }}
                   >
                     <div>
                       <div style={{ fontWeight: 700, color: '#0F172A' }}>{order.customerName}</div>
                       <div style={{ fontSize: '11px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace' }}>
                         {order.items.length} items · Parked at {order.time}
                       </div>
+                      {order.isLocalOnly && (
+                        <div style={{ fontSize: '10px', color: '#D97706', fontWeight: 600, marginTop: '2px' }}>
+                          📱 Saved on this device (not synced yet)
+                        </div>
+                      )}
                       <div style={{ fontWeight: 700, fontFamily: 'JetBrains Mono, monospace', color: '#0F172A', marginTop: '4px' }}>
                         Rs. {order.total.toLocaleString()}
                       </div>

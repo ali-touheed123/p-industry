@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Item, Tenant, BranchOrder } from '@/types';
+import { fetchWithTimeout } from '@/lib/fetchWithTimeout';
 import {
   Search,
   Package,
@@ -283,7 +284,8 @@ export default function BranchOrders({
         qty: ci.qty,
       }));
 
-      const res = await fetch('/api/branch-orders', {
+      const res = await fetchWithTimeout('/api/branch-orders', {
+        timeoutMs: 20000,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -538,7 +540,8 @@ export default function BranchOrders({
         })),
       ];
 
-      const res = await fetch('/api/branch-orders', {
+      const res = await fetchWithTimeout('/api/branch-orders', {
+        timeoutMs: 20000,
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -588,7 +591,8 @@ export default function BranchOrders({
 
     setRejectSubmitting(true);
     try {
-      const res = await fetch('/api/branch-orders', {
+      const res = await fetchWithTimeout('/api/branch-orders', {
+        timeoutMs: 20000,
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -617,7 +621,8 @@ export default function BranchOrders({
     if (actionInProgressId) return;
     setActionInProgressId(orderId);
     try {
-      const res = await fetch('/api/branch-orders', {
+      const res = await fetchWithTimeout('/api/branch-orders', {
+        timeoutMs: 20000,
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: orderId, status: newStatus }),

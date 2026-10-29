@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
 import { sanitizePostgRESTLike } from '@/lib/utils';
-import { validateLockedRates } from '@/lib/rate-lock';
+import { validateLockedRates, HistoricalPriceMatch } from '@/lib/rate-lock';
+import { logAuditEvent } from '@/lib/audit-logs';
 import { isPlaceholderWalkInName } from '@/utils/customerName';
 
 // GET: Fetch invoices for a tenant / branch or shift with date filtering and search
@@ -147,6 +148,20 @@ export async function POST(req: NextRequest) {
       idempotency_key,
     } = body;
 
+    const isOffline = Boolean(body.is_offline);
+    const createdAtLocal = body.created_at_local ? String(body.created_at_local) : null;
+    const deviceId = body.device_id ? String(body.device_id) : null;
+    const localReceiptNo = body.local_receipt_no ? String(body.local_receipt_no) : null;
+    const offlineSchemaVersion = body.offline_schema_version ? Number(body.offline_schema_version) : null;
+    const historicalMatches: HistoricalPriceMatch[] = [];
+
+    if (localReceiptNo && !deviceId) {
+      return NextResponse.json(
+        { success: false, error: 'device_id is required when local_receipt_no is present', code: 'DEVICE_ID_REQUIRED' },
+        { status: 400 }
+      );
+    }
+
     if (!tenant_id || (!invoice_no && !idempotency_key) || !items.length) {
       return NextResponse.json(
         { success: false, error: 'Tenant ID, Invoice No, and at least 1 item are required' },
@@ -233,7 +248,19 @@ export async function POST(req: NextRequest) {
 
     // 0.05 Rate lock: sale rates must match the catalog retail price (returns exempt)
     if (auth.session.role !== 'developer') {
-      const rateLockError = await validateLockedRates(tenant_id, items, invoice_type);
+      const rateLockError = await validateLockedRates(
+        tenant_id,
+        items,
+        invoice_type,
+        [],
+        {
+          isOffline,
+          createdAtLocal,
+          isSpecialSale: false,
+          hasCeoOverride: Boolean(body.ceo_override_token || body.has_ceo_override),
+          collectedHistoricalMatches: historicalMatches,
+        }
+      );
       if (rateLockError) {
         return NextResponse.json({ success: false, error: rateLockError, code: 'RATE_LOCKED' }, { status: 400 });
       }
@@ -432,6 +459,59 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Offline shift reconciliation: keep open shift, fallback to currently open shift as late-sync, or wait
+    let finalShiftId = resolvedShiftId || shift_id || null;
+    let isLateSync = false;
+    let originalShiftId: string | null = null;
+
+    if (isOffline) {
+      const queuedShiftId = shift_id || null;
+      let originalShiftIsOpen = false;
+
+      if (queuedShiftId) {
+        const { data: qShift } = await supabaseAdmin
+          .from('shifts')
+          .select('id, status')
+          .eq('id', queuedShiftId)
+          .eq('tenant_id', tenant_id)
+          .maybeSingle();
+
+        if (qShift && qShift.status === 'open') {
+          originalShiftIsOpen = true;
+          finalShiftId = queuedShiftId;
+          isLateSync = false;
+          originalShiftId = null;
+        }
+      }
+
+      if (!originalShiftIsOpen) {
+        const { data: openShift } = await supabaseAdmin
+          .from('shifts')
+          .select('id')
+          .eq('tenant_id', tenant_id)
+          .eq('status', 'open')
+          .order('start_time', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (openShift) {
+          finalShiftId = openShift.id;
+          isLateSync = true;
+          originalShiftId = queuedShiftId;
+        } else {
+          return NextResponse.json(
+            {
+              success: false,
+              waiting_for_shift: true,
+              error: 'Cannot sync offline sale: No register shift is currently open. Sale will sync automatically once a shift is opened.',
+              code: 'WAITING_FOR_OPEN_SHIFT',
+            },
+            { status: 422 }
+          );
+        }
+      }
+    }
+
     // 1. Prepare Atomic Invoice Data
     const invoiceData = {
       tenant_id,
@@ -439,7 +519,7 @@ export async function POST(req: NextRequest) {
       idempotency_key: idempotency_key || null,
       client_id: client_id || null,
       client_name,
-      shift_id: resolvedShiftId || shift_id || null,
+      shift_id: finalShiftId,
       original_invoice_id: body.original_invoice_id || null,
       date,
       subtotal: parsedSubtotal,
@@ -458,6 +538,13 @@ export async function POST(req: NextRequest) {
       status,
       created_by: created_by || null,
       printed_as: 'regular',
+      is_offline: isOffline,
+      created_at_local: createdAtLocal,
+      device_id: deviceId,
+      local_receipt_no: localReceiptNo,
+      offline_schema_version: offlineSchemaVersion,
+      is_late_sync: isLateSync,
+      original_shift_id: originalShiftId,
     };
 
     // 2. Prepare Atomic Invoice Items
@@ -503,7 +590,41 @@ export async function POST(req: NextRequest) {
       if (rpcErr.message?.includes('IDEMPOTENCY_CONFLICT')) {
         return NextResponse.json({ success: false, error: rpcErr.message }, { status: 409 });
       }
+      if (rpcErr.message?.includes('OFFLINE_RECEIPT_DUPLICATE')) {
+        return NextResponse.json({ success: false, error: rpcErr.message, code: 'OFFLINE_RECEIPT_DUPLICATE' }, { status: 409 });
+      }
+      if (rpcErr.message?.includes('OFFLINE_TIME_FUTURE')) {
+        return NextResponse.json({ success: false, error: rpcErr.message, code: 'OFFLINE_TIME_FUTURE' }, { status: 422 });
+      }
+      if (rpcErr.message?.includes('OFFLINE_TIME_TOO_OLD')) {
+        return NextResponse.json({ success: false, error: rpcErr.message, code: 'OFFLINE_TIME_TOO_OLD', needs_attention: true }, { status: 422 });
+      }
       return NextResponse.json({ success: false, error: rpcErr.message }, { status: 400 });
+    }
+
+    // Write audit log for accepted historical rates ONLY on first creation (never on duplicate retry)
+    if (!atomicResult?.is_duplicate && historicalMatches.length > 0) {
+      for (const match of historicalMatches) {
+        await logAuditEvent({
+          tenantId: tenant_id,
+          userId: auth.session.userId || null,
+          userName: auth.session.username || 'cashier',
+          action: 'OFFLINE_HISTORICAL_PRICE_ACCEPTED',
+          actionType: 'pos_offline_rate_lock',
+          entityType: 'invoice',
+          entityId: atomicResult?.invoice?.id || null,
+          details: {
+            invoice_no: atomicResult?.invoice?.invoice_no,
+            itemId: match.itemId,
+            itemName: match.itemName,
+            quotedPrice: match.quotedPrice,
+            currentCatalogPrice: match.currentPrice,
+            historicalPrice: match.historicalPrice,
+            effectiveFrom: match.effectiveFrom,
+            createdAtLocal: createdAtLocal,
+          },
+        });
+      }
     }
 
     return NextResponse.json({

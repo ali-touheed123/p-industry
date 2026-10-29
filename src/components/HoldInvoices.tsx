@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { fetchWithTimeout } from '@/lib/fetchWithTimeout';
 import { HeldInvoice } from '@/types';
 import {
   Search,
@@ -82,7 +83,7 @@ export default function HoldInvoices({
     }
 
     try {
-      const res = await fetch(`/api/held-invoices?id=${order.id}`, { method: 'DELETE' });
+      const res = await fetchWithTimeout(`/api/held-invoices?id=${order.id}`, { method: 'DELETE', timeoutMs: 10000 });
       const data = await res.json();
       if (data.success) {
         setHeldOrders((prev) => prev.filter((o) => o.id !== order.id));

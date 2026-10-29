@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Item, Supplier } from '@/types';
+import { fetchWithTimeout, isNetworkOrTimeoutError } from '@/lib/fetchWithTimeout';
 import {
   Search,
   Plus,
@@ -429,7 +430,8 @@ export default function PurchasesView({
       // ── Network fetch ──────────────────────────────────────────────────────
       let res: Response;
       try {
-        res = await fetch('/api/purchases', {
+        res = await fetchWithTimeout('/api/purchases', {
+          timeoutMs: 25000,
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

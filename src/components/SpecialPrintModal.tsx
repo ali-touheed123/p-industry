@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { printViaIframe } from '@/utils/iframePrint';
 import { buildSpecialReceiptHtml } from '@/utils/receiptAdapters';
+import { fetchWithTimeout, isNetworkOrTimeoutError } from '@/lib/fetchWithTimeout';
 import type { InvoiceLineItem } from '@/components/PosBilling';
 import type { Client } from '@/types';
 
@@ -365,10 +366,11 @@ export default function SpecialPrintModal({
         },
       };
 
-      const res = await fetch('/api/invoices/special', {
+      const res = await fetchWithTimeout('/api/invoices/special', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        timeoutMs: 20000,
       });
 
       const resData = await res.json();

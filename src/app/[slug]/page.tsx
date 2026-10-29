@@ -26,8 +26,11 @@ const TokenLedger = dynamic(() => import('@/components/TokenLedger'), { loading:
 const TokenManagementView = dynamic(() => import('@/components/TokenManagementView'), { loading: () => <ViewFallback /> });
 const BranchReceiptSettings = dynamic(() => import('@/components/BranchReceiptSettings'), { loading: () => <ViewFallback /> });
 import { clearAllBulkDrafts } from '@/lib/bulkDraftStore';
+import { clearAllCartDrafts } from '@/lib/cartDraftStore';
+import { clearAllLocalHolds } from '@/lib/localHoldStore';
 import { useCeoApproval } from '@/components/CeoPasswordModal';
 import { clearCeoApproval } from '@/lib/ceoApprovalClient';
+import { useConnectivity } from '@/lib/useConnectivity';
 
 import {
   ShoppingCart,
@@ -75,7 +78,8 @@ export default function TenantAppPage({ params }: PageProps) {
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [isOnline, setIsOnline] = useState(true);
+  const connectivity = useConnectivity();
+  const isOnline = connectivity.isOnline;
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -115,11 +119,11 @@ export default function TenantAppPage({ params }: PageProps) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   useEffect(() => {
-    const up = () => setIsOnline(true);
-    const down = () => setIsOnline(false);
-    window.addEventListener('online', up);
-    window.addEventListener('offline', down);
-    return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down); };
+    // Phase 4: Replaced cosmetic listener with real active useConnectivity hook
+
+
+
+
   }, []);
 
   useEffect(() => {
@@ -172,6 +176,8 @@ export default function TenantAppPage({ params }: PageProps) {
       await fetch('/api/auth/logout', { method: 'POST' });
     } catch {}
     clearAllBulkDrafts();
+    clearAllCartDrafts();
+    clearAllLocalHolds();
     clearCeoApproval();
     setCurrentUser(null);
   };
@@ -567,9 +573,9 @@ export default function TenantAppPage({ params }: PageProps) {
             <h1 className="headline-md" style={{ marginBottom: '4px', color: '#0F172A' }}>{tenant.name}</h1>
             <p className="text-muted body-md">{isShop ? 'Pyntflow Retail & Wholesale POS' : 'Warehouse & Godown Management'}</p>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem', marginTop: '0.75rem' }}>
-              <span className={`status-pill ${isOnline ? 'online' : 'offline'}`}>
+              <span className={`status-pill ${connectivity.isOnline ? 'online' : (connectivity.isDegraded ? 'degraded' : 'offline')}`}>
                 {isOnline ? <Wifi style={{ width: 12, height: 12 }} /> : <WifiOff style={{ width: 12, height: 12 }} />}
-                {isOnline ? 'Cloud Database Connected' : 'Offline Mode Active'}
+                {connectivity.isOnline ? 'Cloud Database Connected' : (connectivity.isDegraded ? 'Network Unstable (Degraded)' : 'Offline Mode Active')}
               </span>
             </div>
           </div>
@@ -638,6 +644,8 @@ export default function TenantAppPage({ params }: PageProps) {
             await fetch('/api/auth/logout', { method: 'POST' });
           } catch {}
           clearAllBulkDrafts();
+    clearAllCartDrafts();
+          clearAllLocalHolds();
           if (currentUser?.role === 'ceo') {
             setCurrentUser(null);
           } else {
@@ -868,9 +876,9 @@ export default function TenantAppPage({ params }: PageProps) {
                 {isManualRefreshing ? 'Syncing...' : 'Refresh'}
               </button>
 
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 600, color: isOnline ? '#16A34A' : '#DC2626', background: isOnline ? '#DCFCE7' : '#FEE2E2', padding: '3px 9px', borderRadius: '6px', border: isOnline ? '1px solid #BBF7D0' : '1px solid #FECACA' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 600, color: connectivity.isOnline ? '#16A34A' : (connectivity.isDegraded ? '#D97706' : '#DC2626'), background: connectivity.isOnline ? '#DCFCE7' : (connectivity.isDegraded ? '#FEF3C7' : '#FEE2E2'), padding: '3px 9px', borderRadius: '6px', border: connectivity.isOnline ? '1px solid #BBF7D0' : (connectivity.isDegraded ? '1px solid #FDE68A' : '1px solid #FECACA') }}>
                 {isOnline ? <Wifi style={{ width: 12, height: 12 }} /> : <WifiOff style={{ width: 12, height: 12 }} />}
-                {isOnline ? 'Online' : 'Offline'}
+                {connectivity.isOnline ? 'Online' : (connectivity.isDegraded ? 'Slow Net' : 'Offline')}
               </span>
 
               {totalSales > 0 && (
@@ -892,6 +900,81 @@ export default function TenantAppPage({ params }: PageProps) {
               </button>
             </div>
           </header>
+        )}
+
+        {/* Phase 4.5: Real Connectivity Detection Banner (Offline / Degraded) */}
+        {connectivity.isOffline && (
+          <div style={{
+            background: '#FEF2F2',
+            borderBottom: '1px solid #FECACA',
+            padding: '9px 18px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            fontSize: '12px',
+            color: '#991B1B',
+            zIndex: 100,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <WifiOff style={{ width: 16, height: 16, color: '#DC2626', flexShrink: 0 }} />
+              <span>
+                <strong>Offline Mode Active:</strong> Internet disconnected or server unreachable. Sales continue locally; carts and data remain safe on this device.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => connectivity.probeNow()}
+              style={{
+                padding: '3px 10px',
+                borderRadius: '6px',
+                background: '#FFFFFF',
+                border: '1px solid #FCA5A5',
+                color: '#991B1B',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Re-check Connection
+            </button>
+          </div>
+        )}
+
+        {connectivity.isDegraded && (
+          <div style={{
+            background: '#FFFBEB',
+            borderBottom: '1px solid #FDE68A',
+            padding: '9px 18px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            fontSize: '12px',
+            color: '#92400E',
+            zIndex: 100,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Wifi style={{ width: 16, height: 16, color: '#D97706', flexShrink: 0 }} />
+              <span>
+                <strong>Slow Connection:</strong> Network latency is high{connectivity.latencyMs ? ` (${connectivity.latencyMs}ms)` : ''} or intermittent. POS verify-before-retry is safeguarding operations.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => connectivity.probeNow()}
+              style={{
+                padding: '3px 10px',
+                borderRadius: '6px',
+                background: '#FFFFFF',
+                border: '1px solid #FCD34D',
+                color: '#92400E',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Check Again
+            </button>
+          </div>
         )}
 
         {/* Dynamic Screen View */}
@@ -950,6 +1033,8 @@ export default function TenantAppPage({ params }: PageProps) {
             <PosBilling
               items={items}
               tenantId={tenant.id}
+              branchId={tenant.id}
+              userId={currentUser?.id || currentUser?.username || 'staff'}
               shiftId={activeShift?.id}
               tenantName={tenant.name}
               staffName={currentUser?.full_name || 'Staff'}

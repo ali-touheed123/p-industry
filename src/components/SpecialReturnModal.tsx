@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, RotateCcw, Lock, AlertTriangle, CheckCircle2, DollarSign, CreditCard } from 'lucide-react';
+import { fetchWithTimeout } from '@/lib/fetchWithTimeout';
 import { Invoice, InvoiceItem } from '@/types';
 
 export interface SpecialReturnModalProps {
@@ -245,10 +246,11 @@ export default function SpecialReturnModal({
         card_refunded: refundMode === 'cash' ? 0 : cardRefund,
       };
 
-      const res = await fetch('/api/invoices/special-return', {
+      const res = await fetchWithTimeout('/api/invoices/special-return', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        timeoutMs: 20000,
       });
 
       const resData = await res.json();
