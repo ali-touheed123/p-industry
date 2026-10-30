@@ -169,3 +169,4 @@ test('Phase 8.3: Editing offline or unsynced invoice is blocked', () => {
   // Online but unsynced offline invoice -> blocked until synced
   assert.deepEqual(canEditInvoice({ isOnline: true, invoice: { id: 'inv-3', is_offline: true, synced_at: null } }), { allowed: false, reason: 'unsynced_offline' });
 });
+

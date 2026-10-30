@@ -10,7 +10,7 @@
 
 ## 1. What Is Done (Phases 1 through 6 Status)
 
-### Status: Phase 8 (Invoice Edit Idempotency + Version Lock) COMPLETED & VERIFIED (2026-10-30)
+### Status: All Offline Development & Test Matrix Complete (Phase 1–8 & 10) (2026-10-30)
 
 ### Core Capabilities Live on Database & Application:
 - **Phase 1 (Special Receipt Idempotency):** Duplicate submit protection, fingerprint validation, idempotent return (`is_duplicate: true`).
@@ -52,15 +52,19 @@
   - **Edit Idempotency Deduplication (`edit_idempotency_key`):** PATCH requests pass `edit_idempotency_key`. Under row lock, repeated requests return `is_duplicate: true` without re-reverting inventory or multiplying client balance deltas.
   - **Online-Only Edit Guard:** Attempting to edit an invoice while offline or editing an unsynced offline sale is strictly blocked in `PosBilling.tsx` and `SalesHistory.tsx` to prevent multi-device ledger divergences.
   - **Test Suite:** 4 passing unit tests in `scripts/test-phase8-invoice-edit.mjs`.
+- **Phase 10 (Full Test Matrix & Operator Manual Guide):**
+  - **Automated Matrix Test Suite (`scripts/test-phase10-matrix.mjs`):** 14/14 automated tests passing across scenarios T1–T15 (FIFO sync, idempotency dedup, exponential backoff, shortcode generation, 401 session expiry, 200-sale backlog, poison items, Web Locks mutual exclusion, and optimistic lock version conflicts).
+  - **Operator & Testing Guide (`OFFLINE_OPERATION_AND_TEST_GUIDE.md`):** Bilingual manual guide (Roman Urdu + English) and 7-step test checklist explicitly targeted at testing tenants `/example` and `/example-branch-2` (with zero mutations to production `tph`).
 
 ---
 
 ## 2. What Is Next (Remaining Work)
 
-1. **Phase 9 — Truth in Marketing:**
-   - Copy adjustments in marketing pages to reflect honest offline resiliency.
-2. **Phase 10 — End-to-End Test Matrix & Final Sign-off:**
-   - Multi-device offline/online concurrency matrix and acceptance verification.
+1. **Owner Interactive Smoke Testing on Test Branches:**
+   - Run manual verification on test tenant `/example` (Tenant ID `2a9dbd7e-0c33-462e-adbd-b25083674248`) and sister branch `/example-branch-2` (Tenant ID `b8064358-b581-4221-ba75-ccdb056d5c00`) using the 7-step checklist in `OFFLINE_OPERATION_AND_TEST_GUIDE.md`.
+   - **Important:** Never touch or modify production `tph` shop.
+2. **Phase 9 — Truth in Marketing (Optional / On Demand):**
+   - Copy adjustments in marketing pages can be updated when owner decides to go live.
 
 ---
 

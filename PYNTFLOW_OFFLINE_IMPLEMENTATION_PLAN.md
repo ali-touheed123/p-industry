@@ -16,8 +16,8 @@
 - Phase 6 (Offline Sales Queue + Auto-Sync): Sales + special sales complete; payments (outbox type 'payment') and acceptance tests 6.10 pending (2026-10-30)
 - Phase 7 (Offline Session Grace + Local Shift): COMPLETED 2026-10-30 — DB migration APPLIED & VERIFIED, code implemented & tested
 - Phase 8 (Invoice Edit Idempotency + Conflict Policy): COMPLETED 2026-10-30 — DB migration APPLIED & VERIFIED, code implemented & tested
-- Phase 9 (Truth in Marketing): Not started (zero DB changes required)
-- Phase 10 (Full Test Matrix + Sign-off): Not started (zero DB changes required)
+- Phase 9 (Truth in Marketing): Skipped per owner request (2026-10-30)
+- Phase 10 (Full Test Matrix + Sign-off): COMPLETED 2026-10-30 — Full automated matrix T1–T15 passing (scripts/test-phase10-matrix.mjs) & OFFLINE_OPERATION_AND_TEST_GUIDE.md published
 
 ### Migrations
 - *(None required for Phase 1 — Server route `/api/invoices/special` and RPC `create_special_invoice_atomic` already had full idempotency enforcement in migration `20261029_03_sales_invoice_numbering_and_idempotency.sql`)*
@@ -624,8 +624,8 @@ To ensure system-wide ledger and inventory integrity, PYNTFLOW adopts a strict *
 | T14 | Quota full / storage cleared | User warned; no silent loss |
 | T15 | Online flow regression | Normal checkout, special, returns, holds unchanged |
 
-- [ ] **10.1** Write automated tests where possible (sync engine logic, idempotency, backoff, FIFO) and a manual checklist for the rest.
-- [ ] **10.2** Final report to owner: what works offline, what still doesn't, known risks.
+- [x] **10.1** Write automated tests where possible (sync engine logic, idempotency, backoff, FIFO) and a manual checklist for the rest. *(scripts/test-phase10-matrix.mjs + OFFLINE_OPERATION_AND_TEST_GUIDE.md)*
+- [x] **10.2** Final report to owner: what works offline, what still doesn't, known risks. *(Documented in OFFLINE_OPERATION_AND_TEST_GUIDE.md & session handoff)*
 
 ---
 
