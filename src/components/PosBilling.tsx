@@ -50,6 +50,12 @@ import {
   LocalHoldItem,
   LOCAL_HOLD_SCHEMA_VERSION,
 } from '@/lib/localHoldStore';
+import { initSyncEngine, syncOfflineQueue } from '@/lib/syncEngine';
+import {
+  enqueueOfflineSale,
+  deductOfflineStock,
+  getOfflineStockOverlay,
+} from '@/lib/offlineQueueStore';
 
 interface Props {
   items: Item[];
@@ -256,6 +262,13 @@ export default function PosBilling({
   // Phase 5: Local Hold Sync — watch connectivity; on transition to online,
   // push any pending local holds to the server.
   const { isOnline } = useConnectivity();
+
+  // Phase 6: Initialize automatic offline sync engine
+  useEffect(() => {
+    if (tenantId) {
+      return initSyncEngine(tenantId);
+    }
+  }, [tenantId]);
   const isSyncingLocalHoldsRef = useRef<boolean>(false);
 
   useEffect(() => {
@@ -1027,16 +1040,18 @@ export default function PosBilling({
     const currentQtyInCart = existingIndex >= 0 ? lineItems[existingIndex].qty : 0;
     const totalQtyRequested = currentQtyInCart + requestedQty;
 
-    // Stock validation for normal sales
+    // Stock validation for normal sales (including offline overlay deduction)
     if (invoiceType === 'sales') {
-      const availableStock = prod.stock_qty ?? 0;
-      if (totalQtyRequested > availableStock) {
+      const offlineOverlay = getOfflineStockOverlay(tenantId);
+      const pendingOfflineDeduction = offlineOverlay[prod.id] || 0;
+      const effectiveStock = (prod.stock_qty ?? 0) - pendingOfflineDeduction;
+      if (totalQtyRequested > effectiveStock) {
         if (!allowNegativeStock) {
-          showFeedback(`Insufficient stock! Available: ${availableStock} ${prod.unit || 'PCS'}`);
+          showFeedback(`Insufficient stock! Available: ${effectiveStock} ${prod.unit || 'PCS'}${pendingOfflineDeduction > 0 ? ' (adjusted for pending offline sales)' : ''}`);
           return;
         }
         // Negative stock allowed — warn but proceed
-        showFeedback(`⚠️ Stock will go negative (${availableStock - totalQtyRequested} ${prod.unit || 'PCS'}). Sale proceeding...`);
+        showFeedback(`⚠️ Stock will go negative (${effectiveStock - totalQtyRequested} ${prod.unit || 'PCS'}). Sale proceeding...`);
       }
     }
 
@@ -1532,6 +1547,105 @@ export default function PosBilling({
         ? { id: editingInvoice.id, edit_reason: editingInvoice.edit_reason || '', ...invoicePayload }
         : { ...invoicePayload, invoice_no: undefined, idempotency_key: keyToUse };
 
+      // Phase 6: Direct offline checkout fallback helper
+      const executeOfflineSaleCheckout = async () => {
+        try {
+          const rateSnapshot: Record<string, number> = {};
+          lineItems.forEach((ci) => {
+            if (ci.item?.id) rateSnapshot[ci.item.id] = ci.rate;
+          });
+
+          const { localReceiptNo } = await enqueueOfflineSale({
+            type: 'sale',
+            tenantId,
+            branchId: effectiveBranchId,
+            userId: effectiveUserId,
+            payload: payloadToSend,
+            rateSnapshot,
+          });
+
+          deductOfflineStock(tenantId, lineItems.map((li) => ({ item_id: li.item?.id, qty: li.qty })));
+
+          const receiptItems = lineItems.map((ci) => {
+            let effectiveRate = ci.rate;
+            if (invoiceType === 'return' && ci.hasToken && ci.tokenReturnedWithBucket === false) {
+              effectiveRate = Math.max(0, effectiveRate - (ci.tokenValue || 0));
+            }
+            return {
+              ...ci,
+              rate: effectiveRate,
+              unit_price: effectiveRate,
+            };
+          });
+
+          const offlineInvoice: any = {
+            ...payloadToSend,
+            invoice_no: localReceiptNo,
+            local_receipt_no: localReceiptNo,
+            is_offline: true,
+            grandTotal: netTotal,
+            subTotal: itemSubtotal,
+            discount: invoiceDiscount,
+            delivery_charge: deliveryCharge,
+            paid_amount: finalPaid,
+            due_amount: finalDue,
+            payment_type: determinedPaymentType,
+            cash_paid: actualCashRetained,
+            card_paid: cardPayment,
+            bank_paid: bankPayment,
+            others_paid: othersPayment,
+            change_returned: cashChangeReturned,
+            date: invoiceDate,
+            time: new Date().toLocaleTimeString(),
+            items: receiptItems,
+            client_name: customerDisplayName,
+            tenantName,
+            staffName,
+          };
+
+          onCompleteSale(offlineInvoice);
+
+          if (openPrint) {
+            setPrintReceiptData(offlineInvoice);
+            const iframeHtml = buildPosThermalHtml(offlineInvoice, tenantName, staffName, assignedTemplate);
+            printViaIframe(iframeHtml);
+          }
+
+          if (activeHeldOrderId) {
+            removeLocalHold(tenantId, effectiveBranchId, effectiveUserId, activeHeldOrderId);
+            setActiveHeldOrderId(null);
+          }
+
+          setLineItems([]);
+          setSelectedClient(null);
+          setCustomerSearch('');
+          setCashPayment(0);
+          setIsCashManuallyEdited(false);
+          setCardPayment(0);
+          setBankPayment(0);
+          setOthersPayment(0);
+          setInvoiceDiscount(0);
+          setDeliveryCharge(0);
+          setRemarks('');
+          setInvoiceNo(`INV-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`);
+          activeCheckoutKeyRef.current = null;
+          clearCartDraft(tenantId, effectiveBranchId, effectiveUserId);
+          setRateWarnings(null);
+          setVerifyState(null);
+
+          showFeedback(`Offline sale recorded (#${localReceiptNo}). Will sync automatically when connected.`);
+        } catch (enqueueErr: any) {
+          console.error('[Offline Checkout Error]', enqueueErr);
+          showFeedback(`Offline queue failed: ${enqueueErr?.message || 'Storage error'}. Cart has been preserved.`);
+        }
+      };
+
+      // If terminal is already offline, save directly without waiting for timeouts
+      if (!isOnline && !isEditingExisting) {
+        await executeOfflineSaleCheckout();
+        return;
+      }
+
       // Phase 2: Verify-Before-Retry loop with timeout
       let res: Response | null = null;
       let lastNetworkErr: any = null;
@@ -1569,10 +1683,14 @@ export default function PosBilling({
       setVerifyState(null);
 
       if (lastNetworkErr || !res) {
+        if (!isEditingExisting) {
+          await executeOfflineSaleCheckout();
+          return;
+        }
         setVerifyState({
           isVerifying: false,
           failedAfterRetries: true,
-          errorMessage: 'Connection lost. Sale could not be confirmed. (Internet band hai — sale abhi confirm nahi hui. Dobara enter mat karein; "Retry" dabayein ya offline save karein.)',
+          errorMessage: 'Connection lost. Sale could not be confirmed. (Internet band hai — sale abhi confirm nahi hui. Dobara enter mat karein; "Retry" dabayein.)',
           retryAction: () => handleCheckout(openPrint),
         });
         return;
@@ -1868,6 +1986,73 @@ export default function PosBilling({
       },
     };
 
+    // Phase 6: Direct offline special checkout fallback helper
+    const executeOfflineSpecialCheckout = async () => {
+      try {
+        const rateSnapshot: Record<string, number> = {};
+        lineItems.forEach((ci) => {
+          if (ci.item?.id) rateSnapshot[ci.item.id] = ci.rate;
+        });
+
+        const { localReceiptNo } = await enqueueOfflineSale({
+          type: 'special_sale',
+          tenantId,
+          branchId: effectiveBranchId,
+          userId: effectiveUserId,
+          payload,
+          rateSnapshot,
+        });
+
+        deductOfflineStock(tenantId, lineItems.map((li) => ({ item_id: li.item?.id, qty: li.qty })));
+
+        const enrichedSnapshot: any = {
+          ...payload,
+          invoice_no: localReceiptNo,
+          local_receipt_no: localReceiptNo,
+          is_offline: true,
+          payment_type: resolvedPaymentType,
+          paid_amount: finalPaid,
+          due_amount: finalDue,
+          client_name: customerDisplayName,
+          show_sales_return: true,
+        };
+
+        const specialHtml = buildSpecialReceiptHtml(enrichedSnapshot, assignedTemplate);
+        printViaIframe(specialHtml);
+
+        onCompleteSale(enrichedSnapshot);
+
+        if (activeHeldOrderId) {
+          removeLocalHold(tenantId, effectiveBranchId, effectiveUserId, activeHeldOrderId);
+          setActiveHeldOrderId(null);
+        }
+
+        setLineItems([]);
+        setSelectedClient(null);
+        setCustomerSearch('');
+        setCashPayment(0);
+        setIsCashManuallyEdited(false);
+        setCardPayment(0);
+        setBankPayment(0);
+        setOthersPayment(0);
+        setDeliveryCharge(0);
+        setRemarks('');
+        activeSpecialCheckoutKeyRef.current = null;
+        clearCartDraft(tenantId, effectiveBranchId, effectiveUserId);
+        setVerifyState(null);
+
+        showFeedback(`Offline Special Sale recorded (#${localReceiptNo}). Will sync automatically when connected.`);
+      } catch (enqueueErr: any) {
+        console.error('[Offline Special Checkout Error]', enqueueErr);
+        showFeedback(`Offline special queue failed: ${enqueueErr?.message || 'Storage error'}. Cart preserved.`);
+      }
+    };
+
+    if (!isOnline) {
+      await executeOfflineSpecialCheckout();
+      return;
+    }
+
     // Phase 2: Verify-Before-Retry loop with timeout for special sale
     let res: Response | null = null;
     let lastNetworkErr: any = null;
@@ -1905,12 +2090,7 @@ export default function PosBilling({
     setVerifyState(null);
 
     if (lastNetworkErr || !res) {
-      setVerifyState({
-        isVerifying: false,
-        failedAfterRetries: true,
-        errorMessage: 'Connection lost. Sale could not be confirmed. (Internet band hai — sale abhi confirm nahi hui. Dobara enter mat karein; "Retry" dabayein ya offline save karein.)',
-        retryAction: () => handleSpecialDirect(),
-      });
+      await executeOfflineSpecialCheckout();
       return;
     }
 

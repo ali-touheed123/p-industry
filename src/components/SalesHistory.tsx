@@ -458,6 +458,7 @@ export default function SalesHistory({
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchNo = inv.invoice_no?.toLowerCase().includes(q);
+        const matchLocalReceipt = inv.local_receipt_no?.toLowerCase().includes(q);
         const matchClient = inv.client_name?.toLowerCase().includes(q);
         const matchRemarks = inv.remarks?.toLowerCase().includes(q);
         const invoiceItems = inv.invoice_items || inv.items;
@@ -466,7 +467,7 @@ export default function SalesHistory({
           it.item_code?.toLowerCase().includes(q) ||
           it.shade_code?.toLowerCase().includes(q)
         );
-        if (!matchNo && !matchClient && !matchRemarks && !matchItem) {
+        if (!matchNo && !matchLocalReceipt && !matchClient && !matchRemarks && !matchItem) {
           return false;
         }
       }
@@ -616,6 +617,7 @@ export default function SalesHistory({
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase();
           const matchNo = inv.invoice_no?.toLowerCase().includes(q);
+          const matchLocalReceipt = inv.local_receipt_no?.toLowerCase().includes(q);
           const matchClient = inv.client_name?.toLowerCase().includes(q);
           const matchRemarks = inv.remarks?.toLowerCase().includes(q);
           const invoiceItems = inv.invoice_items || inv.items;
@@ -624,7 +626,7 @@ export default function SalesHistory({
             it.item_code?.toLowerCase().includes(q) ||
             it.shade_code?.toLowerCase().includes(q)
           );
-          if (!matchNo && !matchClient && !matchRemarks && !matchItem) {
+          if (!matchNo && !matchLocalReceipt && !matchClient && !matchRemarks && !matchItem) {
             return false;
           }
         }

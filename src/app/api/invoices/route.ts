@@ -86,7 +86,7 @@ export async function GET(req: NextRequest) {
       // FIX FINDING-API-007: strip PostgREST meta-characters before interpolation
       const safeSearch = sanitizePostgRESTLike(search);
       if (safeSearch) {
-        query = query.or(`invoice_no.ilike.%${safeSearch}%,client_name.ilike.%${safeSearch}%`);
+        query = query.or(`invoice_no.ilike.%${safeSearch}%,client_name.ilike.%${safeSearch}%,local_receipt_no.ilike.%${safeSearch}%`);
       }
     }
 

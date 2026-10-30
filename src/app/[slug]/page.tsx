@@ -31,6 +31,8 @@ import { clearAllLocalHolds } from '@/lib/localHoldStore';
 import { useCeoApproval } from '@/components/CeoPasswordModal';
 import { clearCeoApproval } from '@/lib/ceoApprovalClient';
 import { useConnectivity } from '@/lib/useConnectivity';
+import { OfflineStatusPill } from '@/components/OfflineQueueModal';
+import { getOutboxSummary } from '@/lib/offlineQueueStore';
 
 import {
   ShoppingCart,
@@ -172,9 +174,27 @@ export default function TenantAppPage({ params }: PageProps) {
   };
 
   const handleLogout = async () => {
+    if (tenant?.id) {
+      try {
+        const summary = await getOutboxSummary(tenant.id);
+        if (summary.totalUnsynced > 0) {
+          const confirmLogout = window.confirm(
+            `You have ${summary.totalUnsynced} unsynced offline sale(s). Logging out will NOT delete them, but they cannot sync until someone logs in again. Continue?`
+          );
+          if (!confirmLogout) return;
+        }
+      } catch (err) {
+        console.warn('Failed to check outbox on logout', err);
+      }
+    }
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
     } catch {}
+    if (typeof window !== 'undefined' && tenant?.id) {
+      const branchKey = (currentUser as any)?.branch_id || 'main';
+      localStorage.removeItem(`branch_orders_last_seen:${tenant.id}:${branchKey}`);
+      localStorage.removeItem(`branch_orders_last_seen_${tenant.id}`);
+    }
     clearAllBulkDrafts();
     clearAllCartDrafts();
     clearAllLocalHolds();
@@ -361,7 +381,8 @@ export default function TenantAppPage({ params }: PageProps) {
     if (!tenant?.id) return;
     if (typeof window !== 'undefined' && !navigator.onLine) return;
     try {
-      const storageKey = `branch_orders_last_seen_${tenant.id}`;
+      const branchKey = (currentUser as any)?.branch_id || 'main';
+      const storageKey = `branch_orders_last_seen:${tenant.id}:${branchKey}`;
       let storedSince = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null;
 
       // On first load without a stored timestamp, anchor to the newest server event/timestamp (no history replay)
@@ -640,11 +661,29 @@ export default function TenantAppPage({ params }: PageProps) {
         todaySales={totalSales}
         auditLogs={auditLogs}
         onLogout={async () => {
+          if (tenant?.id) {
+            try {
+              const summary = await getOutboxSummary(tenant.id);
+              if (summary.totalUnsynced > 0) {
+                const confirmLogout = window.confirm(
+                  `You have ${summary.totalUnsynced} unsynced offline sale(s). Logging out will NOT delete them, but they cannot sync until someone logs in again. Continue?`
+                );
+                if (!confirmLogout) return;
+              }
+            } catch (err) {
+              console.warn('Failed to check outbox on CEO logout', err);
+            }
+          }
           try {
             await fetch('/api/auth/logout', { method: 'POST' });
           } catch {}
+          if (typeof window !== 'undefined' && tenant?.id) {
+            const branchKey = (currentUser as any)?.branch_id || 'main';
+            localStorage.removeItem(`branch_orders_last_seen:${tenant.id}:${branchKey}`);
+            localStorage.removeItem(`branch_orders_last_seen_${tenant.id}`);
+          }
           clearAllBulkDrafts();
-    clearAllCartDrafts();
+          clearAllCartDrafts();
           clearAllLocalHolds();
           if (currentUser?.role === 'ceo') {
             setCurrentUser(null);
@@ -876,10 +915,7 @@ export default function TenantAppPage({ params }: PageProps) {
                 {isManualRefreshing ? 'Syncing...' : 'Refresh'}
               </button>
 
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 600, color: connectivity.isOnline ? '#16A34A' : (connectivity.isDegraded ? '#D97706' : '#DC2626'), background: connectivity.isOnline ? '#DCFCE7' : (connectivity.isDegraded ? '#FEF3C7' : '#FEE2E2'), padding: '3px 9px', borderRadius: '6px', border: connectivity.isOnline ? '1px solid #BBF7D0' : (connectivity.isDegraded ? '1px solid #FDE68A' : '1px solid #FECACA') }}>
-                {isOnline ? <Wifi style={{ width: 12, height: 12 }} /> : <WifiOff style={{ width: 12, height: 12 }} />}
-                {connectivity.isOnline ? 'Online' : (connectivity.isDegraded ? 'Slow Net' : 'Offline')}
-              </span>
+              <OfflineStatusPill tenantId={tenant.id} />
 
               {totalSales > 0 && (
                 <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '11px', color: '#0F172A', background: '#F1F5F9', padding: '3px 8px', borderRadius: '6px', border: '1px solid #E2E8F0' }}>
