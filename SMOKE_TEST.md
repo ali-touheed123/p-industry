@@ -104,3 +104,4 @@
    - Reconnect internet only *after* Shift 1 has been closed and Shift 2 is opened.
    - Confirm sale syncs into Shift 2 with flag `is_late_sync = true`.
    - Check Shift Drawer for Shift 2: Verify the sale's cash is **EXCLUDED** from Shift 2's expected drawer cash and appears in the distinct amber *"Late-synced offline sales"* panel.
+

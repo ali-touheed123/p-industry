@@ -14,10 +14,10 @@
 - Phase 4 (Real Connectivity Detection): Approved by owner (2026-10-29)
 - Phase 5 (Local Hold Fallback): Approved by owner (2026-10-30)
 - Phase 6 (Offline Sales Queue + Auto-Sync): Sales + special sales complete; payments (outbox type 'payment') and acceptance tests 6.10 pending (2026-10-30)
-- Phase 7 (Offline Session Grace + Local Shift): Staged / Migration Prepared (2026-10-30)
-- Phase 8 (Invoice Edit Idempotency + Conflict Policy): Staged / Migration Prepared (2026-10-30)
-- Phase 9 (Truth in Marketing): Not started
-- Phase 10 (Full Test Matrix + Sign-off): Not started
+- Phase 7 (Offline Session Grace + Local Shift): DB migration APPLIED 2026-10-30 — CODE NOT STARTED
+- Phase 8 (Invoice Edit Idempotency + Conflict Policy): DB migration APPLIED 2026-10-30 — CODE NOT STARTED
+- Phase 9 (Truth in Marketing): Not started (zero DB changes required)
+- Phase 10 (Full Test Matrix + Sign-off): Not started (zero DB changes required)
 
 ### Migrations
 - *(None required for Phase 1 — Server route `/api/invoices/special` and RPC `create_special_invoice_atomic` already had full idempotency enforcement in migration `20261029_03_sales_invoice_numbering_and_idempotency.sql`)*
@@ -25,7 +25,10 @@
 - `20261030_02_invoices_offline_sync_columns.sql` — **APPLIED (2026-10-30)** — `is_offline`, `created_at_local`, `device_id`, `local_receipt_no`, `synced_at`, `offline_schema_version` added to `invoices` with UNIQUE partial index `idx_invoices_offline_dedup` and search index `idx_invoices_local_receipt_search`.
 - `20261030_03_items_price_history.sql` — **APPLIED & VERIFIED (2026-10-30)** — `items_price_history` table created with RLS enabled, write restricted to trigger/service_role only, trigger with `search_path = public, pg_temp` guarding NULL retail_price, idempotent seed seeded 4,655 existing items. Rollback: `supabase/rollback/rollback_20261030_03_items_price_history.sql`.
 - `20261030_04_invoices_late_sync_shift_columns.sql` — **APPLIED & VERIFIED (2026-10-30)** — Added `is_late_sync BOOLEAN NOT NULL DEFAULT false` and `original_shift_id UUID NULL REFERENCES public.shifts(id) ON DELETE SET NULL` to `invoices` with partial index `idx_invoices_shift_late_sync`. Rollback: `supabase/rollback/rollback_20261030_04_invoices_late_sync_shift_columns.sql`.
-- `20261030_05_create_invoice_atomic_v2_offline.sql` — **APPLIED & VERIFIED (2026-10-30)** — Full v2 of `create_invoice_atomic` active on live database. Handles all 8 offline columns, shift-independent payload fingerprint, legacy fingerprint fallback, post-duplicate time-safety validations (OFFLINE_TIME_FUTURE / OFFLINE_TIME_TOO_OLD), OFFLINE_RECEIPT_DUPLICATE constraint exception mapping. Tested across all 7 sandbox test scenarios + time-safety checks. Rollback: `supabase/rollback/rollback_20261030_05_create_invoice_atomic_v2.sql`.
+- `20261030_05_create_invoice_atomic_v2_offline.sql` — **APPLIED & VERIFIED (2026-10-30)**
+- `20261030_07_shifts_local_shift_offline_sync.sql` — **APPLIED & VERIFIED (2026-10-30)** — Adds `local_shift_id UUID`, `is_offline`, `device_id`, `synced_at` to `shifts`. Unique partial index `idx_shifts_local_shift_dedup`. Applied before Phase 7 code. Rollback: `supabase/migrations/offline/rollback_20261030_07_shifts_local_shift.sql`.
+- `20261030_06_vouchers_idempotency_and_offline_sync.sql` — **APPLIED & VERIFIED (2026-10-30)** — Adds 8 offline columns to `vouchers`, 4 partial indexes, upgrades `create_voucher_atomic` to v2 (idempotency, time safety, shift reconciliation, PKT date fix). Applied before Phase 6 payment outbox code. Rollback: `supabase/migrations/offline/rollback_20261030_06_vouchers_idempotency.sql`.
+- `20261030_08_invoices_version_and_update_atomic_v2.sql` — **APPLIED & VERIFIED (2026-10-30)** — Adds `version INT DEFAULT 1` and `edit_idempotency_key UUID` to `invoices`, unique partial index, drops old 4-arg `update_invoice_atomic` and replaces with 6-arg v2 (optimistic lock, idempotency under row lock). Applied before Phase 8 code. Rollback: `supabase/migrations/offline/rollback_20261030_08_invoices_version.sql`. — Full v2 of `create_invoice_atomic` active on live database. Handles all 8 offline columns, shift-independent payload fingerprint, legacy fingerprint fallback, post-duplicate time-safety validations (OFFLINE_TIME_FUTURE / OFFLINE_TIME_TOO_OLD), OFFLINE_RECEIPT_DUPLICATE constraint exception mapping. Tested across all 7 sandbox test scenarios + time-safety checks. Rollback: `supabase/rollback/rollback_20261030_05_create_invoice_atomic_v2.sql`.
 
 ### Owner Decisions (Locked)
 - **A. Late-synced shifts**: If original shift open → keep it (is_late_sync=false). If closed → book into currently open shift (is_late_sync=true, original_shift_id set). No open shift → 422 WAITING_FOR_OPEN_SHIFT.
@@ -42,13 +45,15 @@
 
 ### Migration Handoff & Database Audit (2026-10-30)
 
-All remaining database migrations for Phases 6–8 have been audited, designed, and staged under `supabase/migrations/offline/` (**NONE ARE APPLIED TO THE LIVE DB YET**):
+All database migrations for Phases 6–8 have been audited, applied, and verified on the live DB (2026-10-30). **CODE for Phases 7, 8, 9, 10 has NOT been written yet — only DB is ready.**
+
+> **CURRENT STATE (2026-10-30):** DB is ahead of the code. Phases 7 and 8 can start coding immediately without any further DB changes.
 
 | # | Staged Migration | Target Phase | DB Changes Needed? | Status | Purpose & Exact DB Scope |
 |---|---|---|---|---|---|
 | **06** | `20261030_06_vouchers_idempotency_and_offline_sync.sql` | Phase 6/9 (Payment Outbox) | **YES** | **APPLIED & VERIFIED 2026-10-30** | Fixes missing idempotency on customer payments. Adds `idempotency_key`, `is_offline`, `created_at_local`, `device_id`, `local_receipt_no` to `vouchers`. Upgrades `create_voucher_atomic` (v2) to return existing voucher on duplicate retry without double-deducting client balance. |
-| **07** | `20261030_07_shifts_local_shift_offline_sync.sql` | Phase 7 (Offline Shift) | **YES** | Staged / NOT APPLIED | Reconciles locally opened register shifts. Adds `local_shift_id UUID`, `is_offline`, `device_id`, `synced_at` to `shifts` with unique partial index `idx_shifts_local_shift_dedup`. Queued offline sales retain valid FK references. |
-| **08** | `20261030_08_invoices_version_and_update_atomic_v2.sql` | Phase 8 (Invoice Edit Concurrency) | **YES** | Staged / NOT APPLIED | Optimistic concurrency control for invoice edits. Adds `version INT DEFAULT 1` and `edit_idempotency_key UUID` to `invoices`. Upgrades `update_invoice_atomic` (v2) to reject stale edits with `INVOICE_VERSION_CONFLICT` (409) and deduplicate retries. |
+| **07** | `20261030_07_shifts_local_shift_offline_sync.sql` | Phase 7 (Offline Shift) | **YES** | **APPLIED & VERIFIED 2026-10-30 — CODE NOT STARTED** | Reconciles locally opened register shifts. Adds `local_shift_id UUID`, `is_offline`, `device_id`, `synced_at` to `shifts` with unique partial index `idx_shifts_local_shift_dedup`. Queued offline sales retain valid FK references. |
+| **08** | `20261030_08_invoices_version_and_update_atomic_v2.sql` | Phase 8 (Invoice Edit Concurrency) | **YES** | **APPLIED & VERIFIED 2026-10-30 — CODE NOT STARTED** | Optimistic concurrency control for invoice edits. Adds `version INT DEFAULT 1` and `edit_idempotency_key UUID` to `invoices`. Upgrades `update_invoice_atomic` (v2) to reject stale edits with `INVOICE_VERSION_CONFLICT` (409) and deduplicate retries. |
 | **—** | CEO Discard of `needs_attention` items | Phase 6 | **NO** | Zero DB Changes | Fully handled by existing `audit_logs` table (`entity_type: 'offline_queue'`, `action: 'OFFLINE_QUEUE_DISCARDED'`, `details: {...}`). |
 | **—** | Stale-Sale CEO Override (>7 days) | Phase 6 | **NO** | Zero DB Changes | Route catches `OFFLINE_TIME_TOO_OLD`, unlocked via CEO password modal, logged to `audit_logs` (`OFFLINE_STALE_SALE_APPROVED`). |
 | **—** | Truth in Marketing | Phase 9 | **NO** | Zero DB Changes | Purely front-end landing page copy adjustments. |
