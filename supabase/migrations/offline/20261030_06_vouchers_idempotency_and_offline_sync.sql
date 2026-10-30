@@ -166,21 +166,6 @@ BEGIN
   v_device_id := NULLIF(trim(COALESCE(p_voucher_data->>'device_id', '')), '');
   v_local_receipt_no := NULLIF(trim(COALESCE(p_voucher_data->>'local_receipt_no', '')), '');
 
-  -- ── 3. Time Safety Check (Offline Sales & Vouchers) ─────────────────────────
-  IF v_is_offline AND v_created_at_local IS NOT NULL THEN
-    -- Future time guard: clock skew > 5 minutes
-    IF v_created_at_local > NOW() + INTERVAL '5 minutes' THEN
-      RAISE EXCEPTION 'OFFLINE_TIME_FUTURE: Local voucher creation timestamp (%) is more than 5 minutes in the future',
-        v_created_at_local;
-    END IF;
-
-    -- Too old guard: older than 7 days
-    IF v_created_at_local < NOW() - INTERVAL '7 days' THEN
-      RAISE EXCEPTION 'OFFLINE_TIME_TOO_OLD: Local voucher creation timestamp (%) is older than 7 days and cannot be synced automatically',
-        v_created_at_local;
-    END IF;
-  END IF;
-
   -- ── 4. Idempotency Check & Fingerprint Conflict Detection ─────────────────
   IF p_voucher_data ? 'idempotency_key' AND NULLIF(trim(p_voucher_data->>'idempotency_key'), '') IS NOT NULL THEN
     v_idempotency_key := (p_voucher_data->>'idempotency_key')::UUID;
@@ -253,6 +238,21 @@ BEGIN
           'new_party_balance', NULL
         );
       END IF;
+    END IF;
+  END IF;
+
+  -- ── 3. Time Safety Check (Offline Sales & Vouchers) ─────────────────────────
+  IF v_is_offline AND v_created_at_local IS NOT NULL THEN
+    -- Future time guard: clock skew > 5 minutes
+    IF v_created_at_local > NOW() + INTERVAL '5 minutes' THEN
+      RAISE EXCEPTION 'OFFLINE_TIME_FUTURE: Local voucher creation timestamp (%) is more than 5 minutes in the future',
+        v_created_at_local;
+    END IF;
+
+    -- Too old guard: older than 7 days
+    IF v_created_at_local < NOW() - INTERVAL '7 days' THEN
+      RAISE EXCEPTION 'OFFLINE_TIME_TOO_OLD: Local voucher creation timestamp (%) is older than 7 days and cannot be synced automatically',
+        v_created_at_local;
     END IF;
   END IF;
 
