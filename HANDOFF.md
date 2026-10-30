@@ -1,7 +1,7 @@
 # PYNTFLOW POS — Offline Mode Engineering Handoff
 
 **Repository:** `d:\bestow\p-industry`  
-**Active Development Branch:** `feat/offline-mode`  
+**Active Development Branch:** `main` (feat/offline-mode and fix/karachi-dates merged)  
 **Live Supabase Project ID:** `ignspvajzblmsbertmmv`  
 **Primary Architecture Plan:** [`PYNTFLOW_OFFLINE_IMPLEMENTATION_PLAN.md`](file:///d:/bestow/p-industry/PYNTFLOW_OFFLINE_IMPLEMENTATION_PLAN.md)  
 **Date of Handoff:** 2026-10-30
@@ -25,6 +25,9 @@
     - Migration 03 (`20261030_03_items_price_history.sql`): Item price audit history, RLS locked down, trigger with explicit `search_path`, 4,655 items seeded.
     - Migration 04 (`20261030_04_invoices_late_sync_shift_columns.sql`): `is_late_sync` and `original_shift_id` columns with partial index.
     - Migration 05 (`20261030_05_create_invoice_atomic_v2_offline.sql`): Full v2 RPC with shift-independent fingerprint, legacy fingerprint fallback, post-duplicate time safety checks, and `OFFLINE_RECEIPT_DUPLICATE` mapping.
+    - **Migration 07 (`20261030_07_shifts_local_shift_offline_sync.sql`): APPLIED & VERIFIED 2026-10-30.** Adds `local_shift_id`, `is_offline`, `device_id`, `synced_at` to `shifts`.
+    - **Migration 06 (`20261030_06_vouchers_idempotency_and_offline_sync.sql`): APPLIED & VERIFIED 2026-10-30.** Adds 8 offline columns to `vouchers`, 4 indexes, upgrades `create_voucher_atomic` to v2.
+    - **Migration 08 (`20261030_08_invoices_version_and_update_atomic_v2.sql`): APPLIED & VERIFIED 2026-10-30.** Adds `version`, `edit_idempotency_key` to `invoices`, upgrades `update_invoice_atomic` to v2 (6-arg), drops old 4-arg overload.
   - **Client Storage & Sync:**
     - Native IndexedDB store `pyntflow-offline` (`outbox` and `meta` stores in [`offlineQueueStore.ts`](file:///d:/bestow/p-industry/src/lib/offlineQueueStore.ts)).
     - Automatic `<deviceShortCode>-<seq>` receipt numbering with standard customer receipts (no confusing "Temporary" watermarks).

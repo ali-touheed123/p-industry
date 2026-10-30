@@ -3,9 +3,9 @@
 This directory contains the forward migrations, rollback scripts, and standalone transactional SQL tests for the remaining offline mode phases of **PYNTFLOW POS**.
 
 > [!IMPORTANT]
-> **NO MIGRATIONS IN THIS DIRECTORY ARE APPLIED TO THE DATABASE YET.**  
-> They are strictly prepared, reviewed, and staged for when the shop owner approves progressing into the respective phases.  
-> Always take a manual Supabase backup immediately before applying any migration.
+> **Migrations 06, 07, and 08 were APPLIED to the live DB on 2026-10-30 (owner authorized, manual backup taken first).**  
+> Migrations for Phase 9 and Phase 10 are NOT YET APPLIED.
+> Always take a manual Supabase backup immediately before applying any future migration.
 
 ---
 
@@ -13,9 +13,9 @@ This directory contains the forward migrations, rollback scripts, and standalone
 
 | # | Migration File | Phase | Status | Depends On | Code Coupling | Rollback Script | Test Script |
 |---|---|---|---|---|---|---|---|
-| **06** | `20261030_06_vouchers_idempotency_and_offline_sync.sql` | Phase 6 / Phase 9 (Payment Outbox) | **NOT APPLIED** | `20261013_03` | Deploy together with outbox type `'payment'` in `syncEngine.ts` and `vouchers/route.ts` | `rollback_20261030_06_vouchers_idempotency.sql` | `test_20261030_06_vouchers_idempotency.sql` |
-| **07** | `20261030_07_shifts_local_shift_offline_sync.sql` | Phase 7 (Offline Shift Open) | **NOT APPLIED** | `20261030_04` | Deploy together with `handleOpenShift` local fallback and `shifts/route.ts` UUID handling | `rollback_20261030_07_shifts_local_shift.sql` | `test_20261030_07_shifts_local_shift.sql` |
-| **08** | `20261030_08_invoices_version_and_update_atomic_v2.sql` | Phase 8 (Invoice Edit Idempotency & Version Lock) | **NOT APPLIED** | `20261007_01` | Deploy together with `invoices/route.ts` PATCH `expected_version` validation and 409 mapping | `rollback_20261030_08_invoices_version.sql` | `test_20261030_08_invoices_version.sql` |
+| **06** | `20261030_06_vouchers_idempotency_and_offline_sync.sql` | Phase 6 / Phase 9 (Payment Outbox) | **APPLIED 2026-10-30** | `20261013_03` | Deploy together with outbox type `'payment'` in `syncEngine.ts` and `vouchers/route.ts` | `rollback_20261030_06_vouchers_idempotency.sql` | `test_20261030_06_vouchers_idempotency.sql` |
+| **07** | `20261030_07_shifts_local_shift_offline_sync.sql` | Phase 7 (Offline Shift Open) | **APPLIED 2026-10-30** | `20261030_04` | Deploy together with `handleOpenShift` local fallback and `shifts/route.ts` UUID handling | `rollback_20261030_07_shifts_local_shift.sql` | `test_20261030_07_shifts_local_shift.sql` |
+| **08** | `20261030_08_invoices_version_and_update_atomic_v2.sql` | Phase 8 (Invoice Edit Idempotency & Version Lock) | **APPLIED 2026-10-30** | `20261007_01` | Deploy together with `invoices/route.ts` PATCH `expected_version` validation and 409 mapping | `rollback_20261030_08_invoices_version.sql` | `test_20261030_08_invoices_version.sql` |
 
 ---
 
