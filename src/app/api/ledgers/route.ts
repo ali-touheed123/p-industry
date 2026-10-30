@@ -48,6 +48,7 @@ export async function GET(req: NextRequest) {
           total_price: it.total_price || (it.qty * it.unit_price),
         }));
 
+
         if (isReturn) {
           // B4: credit = items-returned net_total MINUS cash already received back from supplier.
           // Cash received on return: cash_paid if > 0, else paid_amount if payment_type is cash/empty.
@@ -99,6 +100,9 @@ export async function GET(req: NextRequest) {
         const netTotal = Number(inv.net_total || 0);
         const paidAmt = Number(inv.paid_amount || 0);
         const dueAmt = Number(inv.due_amount || 0);
+        const offlineNote = inv.local_receipt_no ? ` [Slip #${inv.local_receipt_no}]` : '';
+        const effDate = inv.date || (inv.created_at_local ? new Date(inv.created_at_local).toISOString().split('T')[0] : new Date(inv.created_at).toISOString().split('T')[0]);
+        const effTimestamp = inv.created_at_local ? new Date(inv.created_at_local).getTime() : new Date(inv.created_at).getTime();
         const mappedItems = (inv.invoice_items || []).map((it: any) => ({
           item_name: it.item_name || it.name,
           code: it.item_code || it.code,
@@ -122,11 +126,11 @@ export async function GET(req: NextRequest) {
           const cashNote = cashRefunded > 0 ? ` · Cash refunded: Rs. ${cashRefunded.toLocaleString()}` : '';
           return {
             id: inv.id,
-            date: inv.date || new Date(inv.created_at).toISOString().split('T')[0],
-            timestamp: new Date(inv.created_at).getTime(),
+            date: effDate,
+            timestamp: effTimestamp,
             type: 'RET',
             typeClass: 'badge-credit',
-            desc: `${inv.invoice_no} (SALES RETURN) — Rs. ${netTotal.toLocaleString()}${cashNote}`,
+            desc: `${inv.invoice_no}${offlineNote} (SALES RETURN) — Rs. ${netTotal.toLocaleString()}${cashNote}`,
             debit: 0,
             credit: returnCredit,
             items: mappedItems,
@@ -135,11 +139,11 @@ export async function GET(req: NextRequest) {
 
         return {
           id: inv.id,
-          date: inv.date || new Date(inv.created_at).toISOString().split('T')[0],
-          timestamp: new Date(inv.created_at).getTime(),
+          date: effDate,
+          timestamp: effTimestamp,
           type: 'INV',
           typeClass: 'badge-target',
-          desc: `${inv.invoice_no} (${inv.payment_type?.toUpperCase() || 'SALE'}) — Total: Rs. ${netTotal.toLocaleString()}, Paid: Rs. ${paidAmt.toLocaleString()}`,
+          desc: `${inv.invoice_no}${offlineNote} (${inv.payment_type?.toUpperCase() || 'SALE'}) — Total: Rs. ${netTotal.toLocaleString()}, Paid: Rs. ${paidAmt.toLocaleString()}`,
           debit: dueAmt,
           credit: 0,
           items: mappedItems,

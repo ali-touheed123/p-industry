@@ -161,6 +161,14 @@ export interface Invoice {
   created_at: string;
   items?: InvoiceItem[];
   invoice_items?: InvoiceItem[];
+  is_offline?: boolean;
+  created_at_local?: string;
+  device_id?: string;
+  local_receipt_no?: string;
+  synced_at?: string;
+  offline_schema_version?: number;
+  is_late_sync?: boolean;
+  original_shift_id?: string;
 }
 
 export interface InvoiceItem {

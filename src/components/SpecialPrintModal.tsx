@@ -16,6 +16,7 @@ import {
 import { printViaIframe } from '@/utils/iframePrint';
 import { buildSpecialReceiptHtml } from '@/utils/receiptAdapters';
 import { fetchWithTimeout, isNetworkOrTimeoutError } from '@/lib/fetchWithTimeout';
+import { enqueueOfflineSale, deductOfflineStock } from '@/lib/offlineQueueStore';
 import type { InvoiceLineItem } from '@/components/PosBilling';
 import type { Client } from '@/types';
 
@@ -367,12 +368,65 @@ export default function SpecialPrintModal({
         },
       };
 
-      const res = await fetchWithTimeout('/api/invoices/special', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        timeoutMs: 20000,
-      });
+      // Phase 6: Direct offline special checkout helper
+      const executeOfflineSpecial = async () => {
+        const rateSnapshot: Record<string, number> = {};
+        lines.forEach((l) => {
+          if (l.item_id) rateSnapshot[l.item_id] = l.unit_price;
+        });
+
+        const { localReceiptNo } = await enqueueOfflineSale({
+          type: 'special_sale',
+          tenantId,
+          branchId: null,
+          userId: staffName || null,
+          payload,
+          rateSnapshot,
+        });
+
+        deductOfflineStock(tenantId, lines.map((l) => ({ item_id: l.item_id, qty: l.qty })));
+
+        const enrichedSnapshot: any = {
+          ...payload,
+          invoice_no: localReceiptNo,
+          local_receipt_no: localReceiptNo,
+          is_offline: true,
+          payment_type: resolvedPaymentType,
+          paid_amount: finalPaidAmount,
+          due_amount: dueAmount,
+          client_name: selectedClient ? selectedClient.name : (customerName || 'Walk-in Customer'),
+          show_sales_return: true,
+        };
+
+        const specialHtml = buildSpecialReceiptHtml(enrichedSnapshot, undefined);
+        printViaIframe(specialHtml);
+
+        activeSubmitKeyRef.current = null;
+        onSuccess(enrichedSnapshot);
+        onClose();
+      };
+
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        await executeOfflineSpecial();
+        return;
+      }
+
+      let res: Response | null = null;
+      try {
+        res = await fetchWithTimeout('/api/invoices/special', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          timeoutMs: 20000,
+        });
+      } catch (fetchErr: any) {
+        if (isNetworkOrTimeoutError(fetchErr)) {
+          console.warn('[SpecialModal] Network down. Enqueueing offline special sale:', fetchErr.message);
+          await executeOfflineSpecial();
+          return;
+        }
+        throw fetchErr;
+      }
 
       const resData = await res.json();
 

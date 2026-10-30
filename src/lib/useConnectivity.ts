@@ -80,6 +80,19 @@ export async function probeHealth(endpoint: string = '/api/health'): Promise<{
     const latency = Date.now() - startTime;
 
     if (res.ok) {
+      try {
+        const data = await res.json();
+        if (data && typeof data.ts === 'number') {
+          const approxClientMidpoint = startTime + Math.round(latency / 2);
+          const offsetMs = data.ts - approxClientMidpoint;
+          // Asynchronously record calibrated offset
+          import('./offlineQueueStore').then(({ setServerClockOffset }) => {
+            setServerClockOffset(offsetMs).catch(() => {});
+          });
+        }
+      } catch {
+        // non-fatal
+      }
       return { ok: true, latencyMs: latency, status: res.status };
     }
     return { ok: false, latencyMs: latency, status: res.status };

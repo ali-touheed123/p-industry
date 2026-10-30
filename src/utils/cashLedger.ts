@@ -82,6 +82,7 @@ export interface VoucherLike {
   payment_mode?: string | null; // 'Cash' | 'Bank' | 'Cheque'
   shift_id?: string | null;
   created_at?: string | null;
+  is_late_sync?: boolean | null;
 }
 
 export interface ExpenseLike {
@@ -118,9 +119,11 @@ export interface ShiftCashBreakdown {
   // Late-synced offline tracking (excluded from expectedCash)
   offlineLateSalesCash: number;
   offlineLateReturnsCash: number;
+  offlineLateVouchersCash: number;
   offlineLateNetCash: number;
   offlineLateSalesCount: number;
   offlineLateReturnsCount: number;
+  offlineLateVouchersCount: number;
   // Detail metadata for audits and UI breakdown displays
   details?: {
     forwardSalesCount: number;
@@ -133,6 +136,7 @@ export interface ShiftCashBreakdown {
     tokenPayoutCount: number;
     offlineLateSalesCount: number;
     offlineLateReturnsCount: number;
+    offlineLateVouchersCount: number;
   };
 }
 
@@ -280,10 +284,13 @@ export function computeShiftCash(input: ComputeShiftCashInput): ShiftCashBreakdo
 
   // 3. Vouchers (Cash Receipts and Cash Payments)
   // Rule: Only include vouchers with shift_id (vouchers without shift_id are kept out of cash ledger).
+  // Late-sync rule: Vouchers with is_late_sync = true belong to earlier outage/shift; exclude from drawer expected cash.
   let voucherCashReceipts = 0;
   let voucherCashPayments = 0;
   let voucherReceiptCount = 0;
   let voucherPaymentCount = 0;
+  let offlineLateVouchersCash = 0;
+  let offlineLateVouchersCount = 0;
 
   if (Array.isArray(input.vouchers)) {
     for (const v of input.vouchers) {
@@ -296,6 +303,18 @@ export function computeShiftCash(input: ComputeShiftCashInput): ShiftCashBreakdo
 
       const vType = (v.voucher_type || '').toLowerCase().trim();
       const amt = Number(v.amount || 0);
+
+      // Late-synced vouchers occurred during an earlier outage/shift.
+      // Exclude them from current drawer expected cash, track separately.
+      if (v.is_late_sync === true) {
+        if (vType === 'receipt') {
+          offlineLateVouchersCash += amt;
+        } else if (vType === 'payment') {
+          offlineLateVouchersCash -= amt;
+        }
+        offlineLateVouchersCount++;
+        continue;
+      }
 
       if (vType === 'receipt') {
         voucherCashReceipts += amt;
@@ -348,7 +367,7 @@ export function computeShiftCash(input: ComputeShiftCashInput): ShiftCashBreakdo
     pettyExpenses -
     tokenCashPayouts;
 
-  const offlineLateNetCash = offlineLateSalesCash - offlineLateReturnsCash;
+  const offlineLateNetCash = offlineLateSalesCash - offlineLateReturnsCash + offlineLateVouchersCash;
 
   return {
     openingCash,
@@ -363,9 +382,11 @@ export function computeShiftCash(input: ComputeShiftCashInput): ShiftCashBreakdo
     expectedCash,
     offlineLateSalesCash,
     offlineLateReturnsCash,
+    offlineLateVouchersCash,
     offlineLateNetCash,
     offlineLateSalesCount,
     offlineLateReturnsCount,
+    offlineLateVouchersCount,
     details: {
       forwardSalesCount,
       salesReturnCount,
@@ -377,6 +398,7 @@ export function computeShiftCash(input: ComputeShiftCashInput): ShiftCashBreakdo
       tokenPayoutCount,
       offlineLateSalesCount,
       offlineLateReturnsCount,
+      offlineLateVouchersCount,
     },
   };
 }
