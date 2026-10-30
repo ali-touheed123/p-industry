@@ -1,4 +1,5 @@
 'use client';
+import { karachiToday } from '@/lib/karachiDate';
 
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
@@ -127,7 +128,7 @@ export default function ShiftDrawer({
     if (closedShiftSnapshot || closedShiftData) return;
     const fetchShiftData = async () => {
       try {
-        const todayIso = new Date().toISOString().split('T')[0];
+        const todayIso = karachiToday();
         const [purchasesRes, invoicesRes, expensesRes, tokensRes, vouchersRes] = await Promise.all([
           fetch(`/api/purchases?tenant_id=${tenantId}${shift?.id ? `&shift_id=${shift.id}` : `&start_date=${todayIso}`}`),
           fetch(`/api/invoices?tenant_id=${tenantId}${shift?.id ? `&shift_id=${shift.id}` : `&start_date=${todayIso}`}`),

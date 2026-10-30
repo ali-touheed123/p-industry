@@ -1,3 +1,4 @@
+import { karachiToday } from '@/lib/karachiDate';
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
@@ -343,7 +344,7 @@ If any value is unreadable or missing, set that specific field to null. Do NOT w
         current_balance: Number(s.current_balance) || 0,
       })),
       invoice_no: extractedData.invoice_no || '',
-      invoice_date: extractedData.invoice_date || new Date().toISOString().split('T')[0],
+      invoice_date: extractedData.invoice_date || karachiToday(),
       items: processedItems,
       subtotal: extractedData.subtotal !== null && extractedData.subtotal !== undefined ? Number(extractedData.subtotal) : computedSubtotal,
       discount: discount,

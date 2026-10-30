@@ -1,3 +1,4 @@
+import { karachiToday } from '@/lib/karachiDate';
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
@@ -8,7 +9,7 @@ import { requireTenantAuth } from '@/lib/session';
  * Space: 61,440 combinations per date per prefix.
  */
 function generateVoucherCode(prefix: string, dateStr: string): string {
-  const datePart = (dateStr || new Date().toISOString().split('T')[0]).replace(/-/g, '');
+  const datePart = (dateStr || karachiToday()).replace(/-/g, '');
   const randPart = Math.floor(0x1000 + Math.random() * 0xf000).toString(16).toUpperCase();
   return `${prefix}-${datePart}-${randPart}`;
 }
@@ -85,7 +86,7 @@ export async function POST(req: NextRequest) {
       created_by,
       applied_token_ids = [],
       token_allocations = null,
-      date = new Date().toISOString().split('T')[0],
+      date = karachiToday(),
     } = body;
 
     const cashAmt = Math.max(0, Number(amount) || 0);

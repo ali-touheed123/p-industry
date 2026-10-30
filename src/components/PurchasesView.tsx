@@ -1,4 +1,5 @@
 'use client';
+import { karachiToday } from '@/lib/karachiDate';
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Item, Supplier } from '@/types';
@@ -122,7 +123,7 @@ export default function PurchasesView({
   // Task 7.3 & Residual-002: Collision-resistant timestamp + 4 hex random digits (~61,440 space/day)
   const [purchaseInvNo, setPurchaseInvNo] = useState<string>(generatePurchaseInvoiceNo);
   const [invoiceDate, setInvoiceDate] = useState<string>(
-    () => new Date().toISOString().split('T')[0]
+    () => karachiToday()
   );
   const [selectedCompany, setSelectedCompany] = useState<string>('');
   // Task 7.3 & Residual-002: Collision-resistant PO identifier

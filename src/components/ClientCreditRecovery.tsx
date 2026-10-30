@@ -1,4 +1,5 @@
 'use client';
+import { karachiToday } from '@/lib/karachiDate';
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -204,7 +205,7 @@ export default function ClientCreditRecovery({
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    const dateStr = new Date().toISOString().split('T')[0];
+    const dateStr = karachiToday();
     link.setAttribute('download', `Aging_Report_${tenantName.replace(/\s+/g, '_')}_${dateStr}.csv`);
     document.body.appendChild(link);
     link.click();

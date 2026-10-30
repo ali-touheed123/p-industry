@@ -1,3 +1,4 @@
+import { karachiToday } from '@/lib/karachiDate';
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
@@ -110,7 +111,7 @@ export async function POST(req: NextRequest) {
 
     // If client was created with a previous/opening balance, record an opening balance voucher
     if (initialBalance > 0 && client) {
-      const today = new Date().toISOString().split('T')[0];
+      const today = karachiToday();
       await supabaseAdmin
         .from('vouchers')
         .insert({
@@ -191,7 +192,7 @@ export async function PATCH(req: NextRequest) {
           .eq('voucher_no', voucherNo)
           .maybeSingle();
 
-        const today = new Date().toISOString().split('T')[0];
+        const today = karachiToday();
         if (existingVoucher) {
           // Update existing OB voucher amount
           await supabaseAdmin

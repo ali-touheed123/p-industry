@@ -1,3 +1,4 @@
+import { karachiToday } from '@/lib/karachiDate';
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
@@ -57,7 +58,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, kpis: [] });
     }
 
-    const todayDate = today || new Date().toISOString().split('T')[0];
+    const todayDate = today || karachiToday();
 
     const { data: kpiData, error: rpcErr } = await supabaseAdmin.rpc('get_ceo_branches_kpi_summary', {
       p_tenant_ids: allowedTenantIds,
@@ -81,7 +82,7 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const tenantIdsParam = searchParams.get('tenant_ids');
-    const today = searchParams.get('today') || new Date().toISOString().split('T')[0];
+    const today = searchParams.get('today') || karachiToday();
 
     const tenantIds = tenantIdsParam ? tenantIdsParam.split(',').map(s => s.trim()).filter(Boolean) : [];
 

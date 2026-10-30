@@ -1,4 +1,5 @@
 'use client';
+import { karachiToday } from '@/lib/karachiDate';
 
 import StockAdjustmentGrid from './StockAdjustmentGrid';
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
@@ -1444,7 +1445,7 @@ export default function StockInventory({
         return;
       }
       await exportToXlsx(
-        `Inventory_${tenantName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`,
+        `Inventory_${tenantName.replace(/\s+/g, '_')}_${karachiToday()}`,
         fullList,
         [
           { header: 'Product Code', type: 'String', width: 14, getValue: (i) => i.code || '—' },

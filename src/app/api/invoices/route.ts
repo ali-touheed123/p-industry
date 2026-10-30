@@ -1,3 +1,4 @@
+import { karachiToday } from '@/lib/karachiDate';
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireTenantAuth } from '@/lib/session';
@@ -128,7 +129,7 @@ export async function POST(req: NextRequest) {
       client_id,
       client_name = 'Walk-in Customer',
       shift_id,
-      date = new Date().toISOString().split('T')[0],
+      date = karachiToday(),
       subtotal = 0,
       discount = 0,
       delivery_charge = 0,

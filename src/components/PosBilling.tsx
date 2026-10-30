@@ -1,4 +1,5 @@
 'use client';
+import { karachiToday } from '@/lib/karachiDate';
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { printViaIframe } from '@/utils/iframePrint';
@@ -167,7 +168,7 @@ export default function PosBilling({
     () => `INV-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`
   );
   const [invoiceDate, setInvoiceDate] = useState<string>(
-    () => new Date().toISOString().split('T')[0]
+    () => karachiToday()
   );
 
   // Customer & details
@@ -1824,7 +1825,7 @@ export default function PosBilling({
       client_id: selectedClient?.id || null,
       client_name: customerDisplayName,
       shift_id: shiftId || null,
-      date: new Date().toISOString().split('T')[0],
+      date: karachiToday(),
       subtotal: linesTotal,
       discount: 0,
       delivery_charge: Number(deliveryCharge || 0),

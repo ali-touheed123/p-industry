@@ -1,4 +1,5 @@
 'use client';
+import { karachiToday } from '@/lib/karachiDate';
 
 import React, { useState, useEffect, useMemo } from 'react';
 import {
@@ -224,7 +225,7 @@ export default function BranchReceiptSettings({
       tenantAddress: templateJson.header.customAddress?.trim() || tenantAddress || 'Branch Address',
       tenantPhone: templateJson.header.customPhone?.trim() || tenantPhone || '+92 300 0000000',
       invoiceNo: 'TEST-0042',
-      date: new Date().toISOString().split('T')[0],
+      date: karachiToday(),
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       clientName: 'Walk-in Customer (Test)',
       staffName: staffName || 'Counter Staff',

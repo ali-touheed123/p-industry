@@ -1,4 +1,5 @@
 'use client';
+import { karachiToday } from '@/lib/karachiDate';
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
@@ -322,7 +323,7 @@ export default function SpecialPrintModal({
         client_id: selectedClient?.id || null,
         client_name: selectedClient ? selectedClient.name : customerName,
         shift_id: shiftId || null,
-        date: new Date().toISOString().split('T')[0],
+        date: karachiToday(),
         subtotal: chargedTotal - Number(deliveryCharge || 0), // Option A POS Rule: subtotal = charged total
         discount: 0, // Option A Content Rule: strictly 0
         delivery_charge: Number(deliveryCharge || 0),

@@ -1,3 +1,4 @@
+import { karachiToday } from '@/lib/karachiDate';
 import { renderReceiptDocument, normalizeSpecialTemplate } from '@/utils/receiptRenderCore';
 import type { RenderReceiptData, RenderReceiptItem } from '@/utils/receiptRenderCore';
 import type { ReceiptTemplate } from '@/types/receipt';
@@ -231,7 +232,7 @@ export function buildSpecialReceiptHtml(
     tenantPhone: normTemplate.template_json.header.customPhone || '',
     invoiceType: snapshot.invoice_type || 'sales',
     invoiceNo: snapshot.invoice_no || '',
-    date: snapshot.date || new Date().toISOString().split('T')[0],
+    date: snapshot.date || karachiToday(),
     time: snapshot.time || undefined,
     clientName: snapshot.client_name || undefined,
     paymentMethod: resolvedPaymentMethod,
