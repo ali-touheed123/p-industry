@@ -10,7 +10,7 @@
 
 ## 1. What Is Done (Phases 1 through 6 Status)
 
-### Status: Sales + special sales complete; payments (outbox type 'payment') and acceptance tests 6.10 pending (2026-10-30)
+### Status: Phase 7 (Offline Session Grace + Local Shift) COMPLETED & VERIFIED (2026-10-30)
 
 ### Core Capabilities Live on Database & Application:
 - **Phase 1 (Special Receipt Idempotency):** Duplicate submit protection, fingerprint validation, idempotent return (`is_duplicate: true`).
@@ -40,6 +40,13 @@
     - [`OfflineStatusPill`](file:///d:/bestow/p-industry/src/components/OfflineQueueModal.tsx) mounted in POS navigation header.
     - [`OfflineQueueModal`](file:///d:/bestow/p-industry/src/components/OfflineQueueModal.tsx) with "Sync Now", individual "Retry", "Export JSON", and CEO password-gated "Discard".
     - `local_receipt_no` searchable in `/api/invoices`, [`SalesHistory.tsx`](file:///d:/bestow/p-industry/src/components/SalesHistory.tsx), and [`/api/ledgers`](file:///d:/bestow/p-industry/src/app/api/ledgers/route.ts) (`[Slip #<local_receipt_no>]`).
+- **Phase 7 (Offline Session Grace + Local Shift):**
+  - **24-Hour Session Grace Window (`src/lib/sessionGrace.ts`):** Cached claims in `sessionStorage` allow POS to continue billing offline for up to 24 hours from last server check. After 24h, full-screen bilingual lock modal enforces online re-login. Passwords never cached.
+  - **Offline Shift Store (`src/lib/offlineShiftStore.ts`):** When server is unreachable during shift open, a local shift marker is persisted in localStorage.
+  - **FIFO Head Sync (`src/lib/offlineQueueStore.ts` & `src/lib/syncEngine.ts`):** `shift_open` outbox item is prioritized at the head of the outbox (earlier timestamp) and synced before any queued sales.
+  - **Overlapping Shift Adoption (Task 7.6):** 409 conflict on shift open adopts the existing open shift on the server, remapping all queued sales and marking them `is_late_sync: true` (excluded from active cashier drawer in `cashLedger.ts`).
+  - **Offline Shift Close Guard:** Closing a shift while offline is strictly blocked client-side in `ShiftDrawer.tsx` with clear user warning.
+  - **Test Suite:** 5 passing unit tests in `scripts/test-phase7-offline-shift.mjs`.
 
 ---
 

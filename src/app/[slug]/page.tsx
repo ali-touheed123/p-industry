@@ -33,6 +33,21 @@ import { clearCeoApproval } from '@/lib/ceoApprovalClient';
 import { useConnectivity } from '@/lib/useConnectivity';
 import { OfflineStatusPill } from '@/components/OfflineQueueModal';
 import { getOutboxSummary } from '@/lib/offlineQueueStore';
+import {
+  recordServerVerification,
+  getGraceStatus,
+  clearGrace,
+} from '@/lib/sessionGrace';
+import {
+  getOfflineShift,
+  saveOfflineShift,
+  clearOfflineShift,
+} from '@/lib/offlineShiftStore';
+import {
+  generateUUID,
+  enqueueOfflineShiftOpen,
+  getDeviceMeta,
+} from '@/lib/offlineQueueStore';
 
 import {
   ShoppingCart,
@@ -120,13 +135,31 @@ export default function TenantAppPage({ params }: PageProps) {
   const [editingInvoice, setEditingInvoice] = useState<any | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
+  // Phase 7: Offline shift & grace window state
+  const [offlineShiftActive, setOfflineShiftActive] = useState(false);
+  const [offlineShiftLocalId, setOfflineShiftLocalId] = useState<string | null>(null);
+  const [graceLocked, setGraceLocked] = useState(false);
+  const [graceHoursLeft, setGraceHoursLeft] = useState<number | null>(null);
+
   useEffect(() => {
-    // Phase 4: Replaced cosmetic listener with real active useConnectivity hook
-
-
-
-
-  }, []);
+    // Phase 7: Restore offline shift if one was saved while offline
+    if (tenant?.id && currentUser?.id) {
+      const marker = getOfflineShift(tenant.id, currentUser.id);
+      if (marker && marker.status === 'pending_sync') {
+        setActiveShift({
+          id: marker.localShiftId,
+          tenant_id: marker.tenantId,
+          status: 'open',
+          opening_cash: marker.openingCash,
+          start_time: marker.openedAtLocal,
+          opened_by: marker.userId,
+          is_local: true,
+        } as any);
+        setOfflineShiftActive(true);
+        setOfflineShiftLocalId(marker.localShiftId);
+      }
+    }
+  }, [tenant?.id, currentUser?.id]);
 
   useEffect(() => {
     const fetchTenant = async () => {
@@ -199,6 +232,14 @@ export default function TenantAppPage({ params }: PageProps) {
     clearAllCartDrafts();
     clearAllLocalHolds();
     clearCeoApproval();
+    // Phase 7: Clear grace on logout
+    if (tenant?.id && currentUser?.id) {
+      clearGrace(tenant.id, currentUser.id);
+    }
+    setOfflineShiftActive(false);
+    setOfflineShiftLocalId(null);
+    setGraceLocked(false);
+    setGraceHoursLeft(null);
     setCurrentUser(null);
   };
 
@@ -217,6 +258,20 @@ export default function TenantAppPage({ params }: PageProps) {
       } else {
         setCurrentUser(data.user);
         const targetTenantId = tenant?.id || data.user.tenant?.id || data.user.tenant_id || slug;
+        // Phase 7: Record server verification on successful login
+        if (data.user?.id && targetTenantId) {
+          recordServerVerification(targetTenantId, data.user.id, {
+            role: data.user.role,
+            tenantId: targetTenantId,
+            tenantSlug: slug,
+            branchId: data.user.branch_id || null,
+            userId: data.user.id,
+            username: data.user.username || '',
+            canUseSpecialReceipt: Boolean(data.user.can_use_special_receipt),
+          });
+          setGraceLocked(false);
+          setGraceHoursLeft(null);
+        }
         await refreshItems(targetTenantId);
         if (data.user.role !== 'ceo' && data.user.role !== 'developer') {
           // FIX FINDING-POS-005: Re-verify active shift status directly from server to prevent race condition
@@ -288,6 +343,62 @@ export default function TenantAppPage({ params }: PageProps) {
       ? `Handover: Prev shift closed Rs.${prevClosing.toLocaleString()}, Counted Rs.${openingAmt.toLocaleString()}, Variance ${(handoverVariance ?? 0) >= 0 ? '+' : ''}Rs.${(handoverVariance ?? 0).toLocaleString()}`
       : 'First shift of the day';
 
+    // Phase 7 — If already offline, skip network call and open local shift directly
+    if (connectivity.isOffline) {
+      try {
+        const deviceMeta = await getDeviceMeta();
+        const localShiftId = generateUUID();
+        const openedAtLocal = new Date(Date.now() + (deviceMeta.clockOffsetMs || 0)).toISOString();
+
+        saveOfflineShift({
+          localShiftId,
+          tenantId: tenant.id,
+          branchId: currentUser?.branch_id || null,
+          userId: currentUser?.id || 'unknown',
+          openedBy: currentUser?.full_name || currentUser?.username || 'Staff',
+          openingCash: openingAmt,
+          openedAtLocal,
+          deviceId: deviceMeta.deviceId,
+          status: 'pending_sync',
+          schemaVersion: 1,
+        });
+
+        await enqueueOfflineShiftOpen({
+          localShiftId,
+          tenantId: tenant.id,
+          branchId: currentUser?.branch_id || null,
+          userId: currentUser?.id || 'unknown',
+          openedBy: currentUser?.full_name || currentUser?.username || 'Staff',
+          openingCash: openingAmt,
+          openedAtLocal,
+          deviceId: deviceMeta.deviceId,
+        });
+
+        const offlineShiftObj = {
+          id: localShiftId,
+          tenant_id: tenant.id,
+          status: 'open',
+          opening_cash: openingAmt,
+          start_time: openedAtLocal,
+          opened_by: currentUser?.id || null,
+          is_local: true,
+        } as any;
+
+        setActiveShift(offlineShiftObj);
+        setOfflineShiftActive(true);
+        setOfflineShiftLocalId(localShiftId);
+        setLastClosedShift(null);
+        setShowOpenShiftModal(false);
+        setShiftOpenError(null);
+        return;
+      } catch (offlineErr: any) {
+        setShiftOpenError('Could not open shift offline. Please check local storage.');
+        return;
+      } finally {
+        setShiftOpening(false);
+      }
+    }
+
     try {
       const res = await fetch('/api/shifts', {
         method: 'POST',
@@ -307,14 +418,79 @@ export default function TenantAppPage({ params }: PageProps) {
         setActiveShift(data.shift);
         setLastClosedShift(null);
         setShowOpenShiftModal(false);
+        setOfflineShiftActive(false);
+        setOfflineShiftLocalId(null);
+        if (currentUser?.id && tenant.id) {
+          recordServerVerification(tenant.id, currentUser.id, {
+            role: currentUser.role,
+            tenantId: tenant.id,
+            tenantSlug: slug,
+            branchId: currentUser.branch_id || null,
+            userId: currentUser.id,
+            username: currentUser.username || '',
+            canUseSpecialReceipt: Boolean(currentUser.can_use_special_receipt),
+          });
+        }
+      } else if (res.status === 409 && data.existing_shift_id) {
+        // Adopt existing shift on server (Task 7.6)
+        setActiveShift({ id: data.existing_shift_id, status: 'open', tenant_id: tenant.id } as any);
+        setLastClosedShift(null);
+        setShowOpenShiftModal(false);
+        setOfflineShiftActive(false);
+        setOfflineShiftLocalId(null);
       } else {
-        // BUG-05 FIX: Never generate fictitious Date.now() mock shift on failure.
-        // Keep modal open and display explicit retry alert to prevent orphaned transactions.
         setShiftOpenError(data.error || 'Server rejected shift creation. Please retry.');
       }
     } catch (err: any) {
-      // BUG-05 FIX: Never generate fictitious mock shift on network failure.
-      setShiftOpenError(`Network error connecting to shift server: ${err?.message || 'Check connection and retry'}`);
+      // Network failure -> fallback to local offline shift marker (Task 7.3)
+      try {
+        const deviceMeta = await getDeviceMeta();
+        const localShiftId = generateUUID();
+        const openedAtLocal = new Date(Date.now() + (deviceMeta.clockOffsetMs || 0)).toISOString();
+
+        saveOfflineShift({
+          localShiftId,
+          tenantId: tenant.id,
+          branchId: currentUser?.branch_id || null,
+          userId: currentUser?.id || 'unknown',
+          openedBy: currentUser?.full_name || currentUser?.username || 'Staff',
+          openingCash: openingAmt,
+          openedAtLocal,
+          deviceId: deviceMeta.deviceId,
+          status: 'pending_sync',
+          schemaVersion: 1,
+        });
+
+        await enqueueOfflineShiftOpen({
+          localShiftId,
+          tenantId: tenant.id,
+          branchId: currentUser?.branch_id || null,
+          userId: currentUser?.id || 'unknown',
+          openedBy: currentUser?.full_name || currentUser?.username || 'Staff',
+          openingCash: openingAmt,
+          openedAtLocal,
+          deviceId: deviceMeta.deviceId,
+        });
+
+        const offlineShiftObj = {
+          id: localShiftId,
+          tenant_id: tenant.id,
+          status: 'open',
+          opening_cash: openingAmt,
+          start_time: openedAtLocal,
+          opened_by: currentUser?.id || null,
+          is_local: true,
+        } as any;
+
+        setActiveShift(offlineShiftObj);
+        setOfflineShiftActive(true);
+        setOfflineShiftLocalId(localShiftId);
+        setLastClosedShift(null);
+        setShowOpenShiftModal(false);
+        setShiftOpenError(null);
+      } catch (offlineErr: any) {
+        setShiftOpenError(`Network error and offline shift failed: ${err?.message || offlineErr?.message}`);
+      }
     } finally {
       setShiftOpening(false);
     }
@@ -495,6 +671,24 @@ export default function TenantAppPage({ params }: PageProps) {
   }, [lifecycleToast]);
 
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+
+  // Phase 7: Check 24-hour grace window periodically while offline
+  useEffect(() => {
+    if (!currentUser?.id || !tenant?.id) return;
+    const checkGrace = () => {
+      const status = getGraceStatus(tenant.id!, currentUser.id);
+      if (connectivity.isOffline) {
+        setGraceHoursLeft(status.hoursRemaining);
+        setGraceLocked(!status.withinGrace);
+      } else {
+        setGraceLocked(false);
+        setGraceHoursLeft(null);
+      }
+    };
+    checkGrace();
+    const interval = setInterval(checkGrace, 60000);
+    return () => clearInterval(interval);
+  }, [currentUser?.id, tenant?.id, connectivity.isOffline]);
 
   const handleGlobalRefresh = async () => {
     setIsManualRefreshing(true);
@@ -936,6 +1130,120 @@ export default function TenantAppPage({ params }: PageProps) {
               </button>
             </div>
           </header>
+        )}
+
+        {/* Phase 7: Session Grace Lock Modal (24 Hours Expired) */}
+        {graceLocked && (
+          <div style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.85)',
+            backdropFilter: 'blur(8px)',
+            zIndex: 99999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+          }}>
+            <div style={{
+              background: '#FFFFFF',
+              borderRadius: '16px',
+              padding: '2rem',
+              maxWidth: '480px',
+              width: '100%',
+              textAlign: 'center',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            }}>
+              <div style={{
+                width: '64px',
+                height: '64px',
+                borderRadius: '50%',
+                background: '#FEF2F2',
+                color: '#DC2626',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 1.25rem',
+                fontSize: '28px',
+              }}>
+                🔒
+              </div>
+              <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#0F172A', marginBottom: '8px' }}>
+                Session Grace Expired
+              </h2>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: '#64748B', marginBottom: '12px' }}>
+                سیشن کی مدت ختم (24 گھنٹے)
+              </div>
+              <p style={{ fontSize: '13px', color: '#64748B', lineHeight: 1.6, marginBottom: '0.75rem' }}>
+                You have been offline for over 24 hours. For security policy compliance, the register is locked until you reconnect to the server and verify your identity.
+              </p>
+              <p style={{ fontSize: '12px', color: '#64748B', lineHeight: 1.6, marginBottom: '1.5rem', background: '#F8FAFC', padding: '8px 12px', borderRadius: '8px' }}>
+                Aap 24 ghantay se zayed offline rahay hain. Security policy ke teht POS lock ho gaya hai. Dobara internet se connect karein.
+              </p>
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => connectivity.probeNow()}
+                  style={{
+                    background: '#0F172A',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    padding: '10px 18px',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Check Connection / دوبارہ چیک کریں
+                </button>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  style={{
+                    background: '#F1F5F9',
+                    color: '#475569',
+                    border: '1px solid #E2E8F0',
+                    padding: '10px 18px',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Log Out / لاگ آؤٹ
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Phase 7: Offline Shift Banner */}
+        {(offlineShiftActive || (activeShift as any)?.is_local) && (
+          <div style={{
+            background: '#FEF3C7',
+            borderBottom: '1px solid #FCD34D',
+            padding: '8px 18px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            fontSize: '12px',
+            color: '#92400E',
+            fontWeight: 600,
+            zIndex: 100,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>⚡</span>
+              <span>
+                <strong>Offline Shift Active:</strong> Register shift was opened offline. Sales will be queued and synced automatically once connected. Shift close requires online connection.
+              </span>
+            </div>
+            {graceHoursLeft !== null && (
+              <span style={{ fontSize: '11px', color: '#B45309' }}>
+                ⏳ Session grace: {graceHoursLeft}h remaining
+              </span>
+            )}
+          </div>
         )}
 
         {/* Phase 4.5: Real Connectivity Detection Banner (Offline / Degraded) */}

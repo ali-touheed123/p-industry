@@ -144,6 +144,11 @@ export async function POST(req: NextRequest) {
       handover_variance = null,
       handover_notes,
       notes,
+      // Phase 7: Offline shift fields
+      is_offline = false,
+      device_id = null,
+      local_shift_id = null,
+      opened_at_local = null,
     } = body;
 
     if (!rawTenantId) {
@@ -191,6 +196,11 @@ export async function POST(req: NextRequest) {
         start_time: new Date().toISOString(),
         status: 'open',
         notes: notes || 'Counter Shift Opened',
+        // Phase 7: Offline shift reconciliation fields (M07)
+        is_offline: Boolean(is_offline),
+        device_id: device_id || null,
+        local_shift_id: local_shift_id || null,
+        synced_at: is_offline ? new Date().toISOString() : null,
       })
       .select()
       .single();

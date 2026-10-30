@@ -22,7 +22,13 @@ import {
   updateOutboxItem,
   removeOutboxItem,
   getOutboxSummary,
+  patchSalesLocalShiftId,
 } from './offlineQueueStore';
+import {
+  markOfflineShiftSynced,
+  markOfflineShiftAdopted,
+  markOfflineShiftFailed,
+} from './offlineShiftStore';
 
 type SyncListener = () => void;
 const listeners: Set<SyncListener> = new Set();
@@ -154,6 +160,115 @@ async function processQueueInternal(tenantId: string): Promise<{
     notifySyncUpdates();
 
     try {
+      // ── SHIFT OPEN ITEM HANDLING (Phase 7: FIFO Head) ──────────────────
+      if (item.type === 'shift_open') {
+        const res = await fetchWithTimeout('/api/shifts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(item.payload),
+          timeoutMs: 25000,
+        });
+
+        let resData: any = {};
+        try {
+          resData = await res.json();
+        } catch {
+          resData = { error: 'Invalid response from server' };
+        }
+
+        // 1. Success: shift created on server
+        if (res.ok && resData.success && resData.shift?.id) {
+          const serverShiftId = resData.shift.id;
+          if (item.userId) {
+            markOfflineShiftSynced(item.tenantId, item.userId, serverShiftId);
+          }
+          if (item.localShiftId) {
+            await patchSalesLocalShiftId(item.tenantId, item.localShiftId, serverShiftId, false);
+          }
+          await updateOutboxItem(item.id, {
+            status: 'synced',
+            syncedAt: new Date().toISOString(),
+            lastError: null,
+          });
+          await removeOutboxItem(item.id);
+          synced++;
+          notifySyncUpdates();
+          continue;
+        }
+
+        // 2. 409 Conflict: register already has an open shift -> adopt it (Task 7.6)
+        if (res.status === 409 && resData.existing_shift_id) {
+          const existingShiftId = resData.existing_shift_id;
+          if (item.userId) {
+            markOfflineShiftAdopted(item.tenantId, item.userId, existingShiftId);
+          }
+          if (item.localShiftId) {
+            // Adopt existing shift and flag sales as is_late_sync
+            await patchSalesLocalShiftId(item.tenantId, item.localShiftId, existingShiftId, true);
+          }
+          await updateOutboxItem(item.id, {
+            status: 'synced',
+            syncedAt: new Date().toISOString(),
+            lastError: null,
+          });
+          await removeOutboxItem(item.id);
+          synced++;
+          notifySyncUpdates();
+          continue;
+        }
+
+        // 3. 401 Session Expired
+        if (res.status === 401) {
+          await updateOutboxItem(item.id, {
+            status: 'pending',
+            lastError: {
+              code: 'AUTH_REQUIRED',
+              message: 'Session expired. Please log in again to sync shift.',
+              at: new Date().toISOString(),
+            },
+          });
+          failed++;
+          notifySyncUpdates();
+          break;
+        }
+
+        // 4. Permanent rejection (4xx other than 409)
+        if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
+          if (item.userId) {
+            markOfflineShiftFailed(item.tenantId, item.userId);
+          }
+          await updateOutboxItem(item.id, {
+            status: 'needs_attention',
+            lastError: {
+              code: resData.code || `HTTP_${res.status}`,
+              message: resData.error || 'Server validation rejected shift open.',
+              at: new Date().toISOString(),
+            },
+          });
+          needsAttention++;
+          notifySyncUpdates();
+          continue;
+        }
+
+        // 5. 5xx Server Error -> backoff
+        const nextAttempts = (item.attempts || 0) + 1;
+        const delayMs = calculateBackoffMs(nextAttempts);
+        await updateOutboxItem(item.id, {
+          status: 'pending',
+          attempts: nextAttempts,
+          nextRetryAt: new Date(Date.now() + delayMs).toISOString(),
+          lastError: {
+            code: `HTTP_${res.status}`,
+            message: resData.error || `Server error ${res.status} opening shift. Retrying in ${Math.round(delayMs / 1000)}s.`,
+            at: new Date().toISOString(),
+          },
+        });
+        failed++;
+        notifySyncUpdates();
+        break;
+      }
+
+      // ── INVOICE SALE ITEM HANDLING (Standard) ──────────────────────────
       const endpoint = item.type === 'special_sale' ? '/api/invoices/special' : '/api/invoices';
 
       const res = await fetchWithTimeout(endpoint, {

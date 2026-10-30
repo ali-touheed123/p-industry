@@ -24,7 +24,7 @@ export const OFFLINE_DB_NAME = 'pyntflow-offline';
 export const OFFLINE_DB_VERSION = 1;
 export const OFFLINE_SCHEMA_VERSION = 1;
 
-export type OutboxItemType = 'sale' | 'special_sale';
+export type OutboxItemType = 'sale' | 'special_sale' | 'shift_open';
 export type OutboxItemStatus =
   | 'pending'
   | 'syncing'
@@ -54,6 +54,8 @@ export interface OutboxItem {
   } | null;
   syncedInvoiceNo?: string | null;
   syncedAt?: string | null;
+  /** For sales queued under an offline shift — the client-side localShiftId */
+  localShiftId?: string | null;
 }
 
 export interface DeviceMeta {
@@ -223,6 +225,7 @@ export interface EnqueueSaleOptions {
   userId?: string | null;
   payload: any;
   rateSnapshot?: Record<string, number>;
+  localShiftId?: string | null;
 }
 
 /**
@@ -293,6 +296,7 @@ export async function enqueueOfflineSale(options: EnqueueSaleOptions): Promise<{
         attempts: 0,
         nextRetryAt: null,
         lastError: null,
+        localShiftId: options.localShiftId || options.payload?.local_shift_id || options.payload?.shift_id || null,
       };
 
       outboxStore.put(item);
@@ -445,4 +449,104 @@ export function clearOfflineStockOverlay(tenantId: string): void {
   } catch {
     // ignore
   }
+}
+
+export interface EnqueueShiftOpenOptions {
+  localShiftId: string;       // client-generated UUID
+  tenantId: string;
+  branchId?: string | null;
+  userId: string;
+  openedBy: string;
+  openingCash: number;
+  openedAtLocal: string;      // ISO, calibrated
+  deviceId: string;
+}
+
+/**
+ * Enqueue a shift_open item at the HEAD of the outbox (earliest createdAtLocal).
+ *
+ * Sync engine processes outbox FIFO by createdAtLocal — by using a timestamp
+ * slightly in the past (minus 1ms) we ensure shift_open is always processed
+ * before any sales that reference the same localShiftId.
+ *
+ * This function does NOT increment the receipt sequence — shifts don't need one.
+ */
+export async function enqueueOfflineShiftOpen(options: EnqueueShiftOpenOptions): Promise<OutboxItem> {
+  const db = await openOfflineDB();
+  const id = options.localShiftId; // use localShiftId as the idempotency key
+
+  const item: OutboxItem = {
+    id,
+    type: 'shift_open',
+    tenantId: options.tenantId,
+    branchId: options.branchId || null,
+    userId: options.userId,
+    deviceId: options.deviceId,
+    localReceiptNo: '', // shifts don't need a receipt number
+    // Timestamp 1ms before the openedAtLocal so FIFO sort always places this first
+    createdAtLocal: new Date(new Date(options.openedAtLocal).getTime() - 1).toISOString(),
+    schemaVersion: OFFLINE_SCHEMA_VERSION,
+    payload: {
+      tenant_id: options.tenantId,
+      opened_by: options.userId,
+      opening_cash: options.openingCash,
+      is_offline: true,
+      device_id: options.deviceId,
+      local_shift_id: options.localShiftId,
+      opened_at_local: options.openedAtLocal,
+      notes: `Offline shift opened by ${options.openedBy}`,
+    },
+    localShiftId: options.localShiftId,
+    status: 'pending',
+    attempts: 0,
+    nextRetryAt: null,
+    lastError: null,
+  };
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('outbox', 'readwrite');
+    const store = tx.objectStore('outbox');
+    store.put(item);
+    tx.oncomplete = () => resolve(item);
+    tx.onerror = () => reject(tx.error || new Error('Failed to enqueue offline shift open.'));
+  });
+}
+
+/**
+ * Update the shift_id in all pending/failed sales that reference a given localShiftId.
+ * Called after a shift_open sync resolves to a serverShiftId.
+ */
+export async function patchSalesLocalShiftId(
+  tenantId: string,
+  localShiftId: string,
+  serverShiftId: string,
+  isLateSync: boolean
+): Promise<void> {
+  const items = await getOutboxItems(tenantId);
+  const db = await openOfflineDB();
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('outbox', 'readwrite');
+    const store = tx.objectStore('outbox');
+
+    for (const item of items) {
+      if (
+        item.localShiftId === localShiftId &&
+        (item.status === 'pending' || item.status === 'failed')
+      ) {
+        const updated: OutboxItem = {
+          ...item,
+          payload: {
+            ...item.payload,
+            shift_id: serverShiftId,
+            is_late_sync: isLateSync ? true : item.payload.is_late_sync,
+          },
+        };
+        store.put(updated);
+      }
+    }
+
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error('Failed to patch sales with server shift ID.'));
+  });
 }

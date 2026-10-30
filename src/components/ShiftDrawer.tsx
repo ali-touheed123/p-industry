@@ -496,6 +496,12 @@ export default function ShiftDrawer({
 
   // Close & Reconcile Shift — BUG FIX #7: No more native confirm()
   const handleCloseShift = async () => {
+    // Phase 7: Offline shift close is blocked in v1
+    if ((shift as any)?.is_local) {
+      alert('Cannot close an offline shift while offline. Please connect to internet and allow shift to sync first.');
+      return;
+    }
+
     setShowCloseConfirmModal(false);
     setIsClosing(true);
 
@@ -720,8 +726,11 @@ export default function ShiftDrawer({
     }
   };
 
-  // Whether close button should be enabled
-  const canClose = !isClosing && !isShiftClosed && hasCashInput;
+  // Phase 7: Offline shift check
+  const isLocalShift = Boolean((shift as any)?.is_local);
+
+  // Whether close button should be enabled (cannot close while shift is local-only)
+  const canClose = !isClosing && !isShiftClosed && hasCashInput && !isLocalShift;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', height: '100%', paddingBottom: '1rem' }}>
@@ -742,6 +751,27 @@ export default function ShiftDrawer({
         }}>
           <span style={{ fontSize: '16px' }}>🔒</span>
           This shift has been closed and reconciled. No further changes can be made. Open a new shift to continue.
+        </div>
+      )}
+
+      {/* Phase 7: Local Offline Shift Banner */}
+      {isLocalShift && (
+        <div style={{
+          background: '#FFFBEB',
+          border: '1px solid #FDE68A',
+          borderRadius: '8px',
+          padding: '10px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          fontSize: '13px',
+          fontWeight: 700,
+          color: '#92400E',
+        }}>
+          <span style={{ fontSize: '16px' }}>⚡</span>
+          <span>
+            <strong>Offline Shift (Local Register):</strong> This shift was opened while offline and will sync automatically when connected. Register close is disabled until synced.
+          </span>
         </div>
       )}
 
@@ -824,7 +854,7 @@ export default function ShiftDrawer({
               opacity: canClose ? 1 : 0.5,
               cursor: canClose ? 'pointer' : 'not-allowed',
             }}
-            title={isShiftClosed ? 'Shift already closed' : !hasCashInput ? 'Enter counted cash first' : 'Reconcile & Close Register'}
+            title={isShiftClosed ? 'Shift already closed' : isLocalShift ? 'Cannot close offline shift — reconnect to sync first' : !hasCashInput ? 'Enter counted cash first' : 'Reconcile & Close Register'}
           >
             <span>🔒</span>
             {isClosing ? 'Closing Shift...' : isShiftClosed ? 'Shift Closed' : 'Close & Reconcile'}
