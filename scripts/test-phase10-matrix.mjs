@@ -367,3 +367,4 @@ test('T15: Stale invoice edit gets 409 INVOICE_VERSION_CONFLICT without overwrit
   assert.equal(updated.version, 4);
   assert.equal(updated.net_total, 5500);
 });
+

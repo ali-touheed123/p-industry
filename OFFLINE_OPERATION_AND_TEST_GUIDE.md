@@ -126,3 +126,4 @@ Execute these 7 steps on `http://localhost:3000/example`:
 3. **Stuck Items (Poison Pills):**
    - If a business rule violation occurs, the item sits safely in `needs_attention`.
    - *Advice:* CEO should review the `Needs Attention` tab weekly to resolve any credit-limit or catalog mismatches.
+
