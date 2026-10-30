@@ -558,6 +558,14 @@ CREATE INDEX IF NOT EXISTS idx_invoices_shift_late_sync
 - [ ] **7.3** Local shift: if the shift cannot be opened because the server is unreachable, allow an **"offline shift"** marker stored locally; sales queued under it; on reconnect the real shift-open is sent first (FIFO head), then the sales.
 - [ ] **7.4** Keep BUG-05 safety: never fabricate a *server-recognised* shift without sync; the offline shift must be reconciled and can be rejected by the server.
 - [ ] **7.5** Revocation trade-off: document clearly; limit the grace window; on reconnect revoked users' queued data goes to `needs_attention` for owner review instead of being auto-accepted.
+- [ ] **7.6** **Reconciliation & Attribution Policy for Overlapping Shifts (Locked Design):**
+  - When an offline shift syncs, the server checks if an open shift already exists for that tenant/branch (`idx_single_open_shift_per_tenant`).
+  - If an open shift exists, `/api/shifts` returns HTTP `409 Conflict` with `{ existing_shift_id, shift_user_id, shift_user_name }`.
+  - **Attribution & Re-mapping Rule:** The syncing terminal adopts the existing open shift (`shift_id := existing_shift_id`) for grouping. However, **sales and cashier accountability are NEVER misattributed**:
+    1. Every invoice and voucher retains its own authentic `created_by` (the cashier who billed it offline) and `device_id`.
+    2. `original_shift_id` stores the local offline shift reference, and `is_late_sync = true` marks the transaction as synced late into the currently open shift.
+    3. The cash drawer expected cash calculation in `cashLedger.ts` **excludes** all `is_late_sync = true` cash, so Cashier B is never penalized or held accountable in their drawer balance for Cashier A's offline sales.
+    4. In DayCloseView and shift summaries, late-synced transactions appear in a distinct **"Late-Synced Offline Sales from Cashier A (Terminal X)"** panel for transparent multi-user reconciliation.
 
 ### Acceptance criteria
 - Open shop with internet down → open offline shift → sell → internet returns → shift + sales sync in correct order.
