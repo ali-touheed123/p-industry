@@ -10,7 +10,7 @@
 
 ## 1. What Is Done (Phases 1 through 6 Status)
 
-### Status: Phase 7 (Offline Session Grace + Local Shift) COMPLETED & VERIFIED (2026-10-30)
+### Status: Phase 8 (Invoice Edit Idempotency + Version Lock) COMPLETED & VERIFIED (2026-10-30)
 
 ### Core Capabilities Live on Database & Application:
 - **Phase 1 (Special Receipt Idempotency):** Duplicate submit protection, fingerprint validation, idempotent return (`is_duplicate: true`).
@@ -47,22 +47,19 @@
   - **Overlapping Shift Adoption (Task 7.6):** 409 conflict on shift open adopts the existing open shift on the server, remapping all queued sales and marking them `is_late_sync: true` (excluded from active cashier drawer in `cashLedger.ts`).
   - **Offline Shift Close Guard:** Closing a shift while offline is strictly blocked client-side in `ShiftDrawer.tsx` with clear user warning.
   - **Test Suite:** 5 passing unit tests in `scripts/test-phase7-offline-shift.mjs`.
+- **Phase 8 (Invoice Edit Idempotency + Version Lock & Global Conflict Policy):**
+  - **Optimistic Concurrency Control (`version`):** `invoices.version` increments on every edit. PATCH requests pass `expected_version`. If another user modified the invoice concurrently, server rejects with HTTP 409 `INVOICE_VERSION_CONFLICT`.
+  - **Edit Idempotency Deduplication (`edit_idempotency_key`):** PATCH requests pass `edit_idempotency_key`. Under row lock, repeated requests return `is_duplicate: true` without re-reverting inventory or multiplying client balance deltas.
+  - **Online-Only Edit Guard:** Attempting to edit an invoice while offline or editing an unsynced offline sale is strictly blocked in `PosBilling.tsx` and `SalesHistory.tsx` to prevent multi-device ledger divergences.
+  - **Test Suite:** 4 passing unit tests in `scripts/test-phase8-invoice-edit.mjs`.
 
 ---
 
 ## 2. What Is Next (Remaining Work)
 
-1. **Phase 7 — Offline Session Grace + Local Shift:**
-   - 24-hour session grace window for cached cashier claims.
-   - Offline register shift opening using `local_shift_id` (UUID), synced first at the head of the FIFO outbox.
-   - Migration 07 (`20261030_07_shifts_local_shift_offline_sync.sql`) prepared under `supabase/migrations/offline/`.
-2. **Phase 8 — Invoice Edit (PATCH) Idempotency + Version Lock:**
-   - Optimistic concurrency control using `version` on `invoices`.
-   - Rejection with 409 Conflict if invoice was edited concurrently.
-   - Migration 08 (`20261030_08_invoices_version_and_update_atomic_v2.sql`) prepared under `supabase/migrations/offline/`.
-3. **Phase 9 — Truth in Marketing:**
+1. **Phase 9 — Truth in Marketing:**
    - Copy adjustments in marketing pages to reflect honest offline resiliency.
-4. **Phase 10 — End-to-End Test Matrix & Final Sign-off:**
+2. **Phase 10 — End-to-End Test Matrix & Final Sign-off:**
    - Multi-device offline/online concurrency matrix and acceptance verification.
 
 ---

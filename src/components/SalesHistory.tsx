@@ -145,6 +145,15 @@ export default function SalesHistory({
   const [editReasonInvoice, setEditReasonInvoice] = useState<Invoice | null>(null);
   const [editReasonText, setEditReasonText] = useState('');
   const requestEditReason = (inv: Invoice) => {
+    // Phase 8.3 & Global Conflict Policy (MED-05): Edits are strictly online-only
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      alert('Invoices cannot be edited while offline. Please connect to internet to verify the latest invoice version and prevent conflicts.');
+      return;
+    }
+    if ((inv as any).is_offline && !(inv as any).synced_at) {
+      alert('This invoice was created offline and has not yet synced to the server. Please wait for it to sync before editing.');
+      return;
+    }
     setEditReasonText('');
     setEditReasonInvoice(inv);
   };

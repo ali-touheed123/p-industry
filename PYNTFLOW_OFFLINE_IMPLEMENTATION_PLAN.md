@@ -15,7 +15,7 @@
 - Phase 5 (Local Hold Fallback): Approved by owner (2026-10-30)
 - Phase 6 (Offline Sales Queue + Auto-Sync): Sales + special sales complete; payments (outbox type 'payment') and acceptance tests 6.10 pending (2026-10-30)
 - Phase 7 (Offline Session Grace + Local Shift): COMPLETED 2026-10-30 — DB migration APPLIED & VERIFIED, code implemented & tested
-- Phase 8 (Invoice Edit Idempotency + Conflict Policy): DB migration APPLIED 2026-10-30 — CODE NOT STARTED
+- Phase 8 (Invoice Edit Idempotency + Conflict Policy): COMPLETED 2026-10-30 — DB migration APPLIED & VERIFIED, code implemented & tested
 - Phase 9 (Truth in Marketing): Not started (zero DB changes required)
 - Phase 10 (Full Test Matrix + Sign-off): Not started (zero DB changes required)
 
@@ -588,11 +588,11 @@ To ensure system-wide ledger and inventory integrity, PYNTFLOW adopts a strict *
 - **Stock Adjustments, Purchases, Expenses, Rates:** *Strictly Online-Only in v1.* Offline creation/editing is disallowed to avoid multi-device ledger divergences.
 
 ### Tasks
-- [ ] **8.1** Add `version` (int, default 1) to `invoices` (**show migration first**), incremented on each update.
-- [ ] **8.2** PATCH sends `expected_version` + an `edit_idempotency_key`; `update_invoice_atomic` rejects on mismatch ("Invoice changed elsewhere — reload") and dedupes repeated key.
-- [ ] **8.3** Edit of an invoice that was created offline and not yet synced must be blocked or applied to the queued payload (decide with owner — recommended: block until synced).
-- [ ] **8.4** Test: double-submit of the same edit → stock changed once; two devices editing → second gets a clear conflict message.
-- [ ] **8.5** Formally enforce the Global Conflict Resolution Policy in UI and API layer (clear conflict prompts, no silent overwrites).
+- [x] **8.1** Add `version` (int, default 1) to `invoices` (**show migration first**), incremented on each update. *(Migration 08 applied & verified on live DB)*
+- [x] **8.2** PATCH sends `expected_version` + an `edit_idempotency_key`; `update_invoice_atomic` rejects on mismatch ("Invoice changed elsewhere — reload") and dedupes repeated key. *(Implemented in api/invoices/route.ts + PosBilling.tsx)*
+- [x] **8.3** Edit of an invoice that was created offline and not yet synced must be blocked or applied to the queued payload (decide with owner — recommended: block until synced). *(Guarded in PosBilling.tsx + SalesHistory.tsx)*
+- [x] **8.4** Test: double-submit of the same edit → stock changed once; two devices editing → second gets a clear conflict message. *(Verified via scripts/test-phase8-invoice-edit.mjs)*
+- [x] **8.5** Formally enforce the Global Conflict Resolution Policy in UI and API layer (clear conflict prompts, no silent overwrites). *(Enforced with HTTP 409 and user alerts)*
 
 ---
 

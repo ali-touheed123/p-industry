@@ -1536,6 +1536,14 @@ export default function PosBilling({
 
     try {
       const isEditingExisting = Boolean(editingInvoice?.id);
+
+      // Phase 8.3 & Global Conflict Policy (MED-05): Edits are strictly online-only
+      if (isEditingExisting && !isOnline) {
+        showFeedback('⚠️ Offline Edit Disabled: Invoices cannot be edited while offline to prevent multi-device ledger divergences. Please reconnect to internet first.');
+        alert('Cannot edit invoice while offline. Please connect to internet to verify the latest invoice version and prevent overwriting changes.');
+        return;
+      }
+
       const apiEndpoint = '/api/invoices';
       const apiMethod = isEditingExisting ? 'PATCH' : 'POST';
 
@@ -1544,8 +1552,15 @@ export default function PosBilling({
         activeCheckoutKeyRef.current = keyToUse;
       }
 
+      // Phase 8: Pass expected_version and edit_idempotency_key for optimistic locking & dedup
       const payloadToSend = isEditingExisting
-        ? { id: editingInvoice.id, edit_reason: editingInvoice.edit_reason || '', ...invoicePayload }
+        ? {
+            id: editingInvoice.id,
+            edit_reason: editingInvoice.edit_reason || '',
+            expected_version: editingInvoice.version ?? 1,
+            edit_idempotency_key: keyToUse,
+            ...invoicePayload,
+          }
         : { ...invoicePayload, invoice_no: undefined, idempotency_key: keyToUse };
 
       // Phase 6: Direct offline checkout fallback helper
@@ -1700,7 +1715,12 @@ export default function PosBilling({
       const data = await res.json();
 
       if (res.status === 409) {
-        showFeedback(`⚠️ Cart Conflict: ${data.error || 'Cart contents changed during checkout attempt.'}`);
+        if (data.code === 'INVOICE_VERSION_CONFLICT') {
+          showFeedback(`⚠️ Version Conflict: ${data.error || 'Invoice modified elsewhere. Please reload.'}`);
+          alert(`Conflict: This invoice was modified elsewhere (Version conflict). Please reload the invoice from Sales History to view the latest changes.`);
+        } else {
+          showFeedback(`⚠️ Cart Conflict: ${data.error || 'Cart contents changed during checkout attempt.'}`);
+        }
         activeCheckoutKeyRef.current = null;
         return;
       }
@@ -1709,7 +1729,7 @@ export default function PosBilling({
         const finalServerInvoiceNo = data.invoice?.invoice_no || invoiceNo;
 
         if (data.is_duplicate) {
-          showFeedback('Sale successfully recorded! (Sale pehle hi record ho chuki hai)');
+          showFeedback(isEditingExisting ? 'Invoice edit already recorded! (Duplicate submission deduped)' : 'Sale successfully recorded! (Sale pehle hi record ho chuki hai)');
         }
 
         const receiptItems = lineItems.map((ci) => {

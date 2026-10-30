@@ -664,6 +664,9 @@ export async function PATCH(req: NextRequest) {
       others_paid = 0,
       status = 'completed',
       items = [],
+      // Phase 8: Optimistic Locking version & Edit Idempotency Key
+      expected_version = null,
+      edit_idempotency_key = null,
     } = body;
 
     if (!id || !tenant_id) {
@@ -848,14 +851,34 @@ export async function PATCH(req: NextRequest) {
       total_price: Number(it.total_price || (it.qty * (it.unit_price || it.rate || 0))) || 0,
     }));
 
+    // Phase 8: Call update_invoice_atomic v2 with expected_version and edit_idempotency_key
+    const parsedExpectedVersion = expected_version !== null && expected_version !== undefined ? Number(expected_version) : null;
+    const cleanEditIdempotencyKey = edit_idempotency_key ? String(edit_idempotency_key).trim() : null;
+
     const { data: rpcResult, error: rpcErr } = await supabaseAdmin.rpc('update_invoice_atomic', {
-      p_invoice_id:   id,
-      p_tenant_id:    tenant_id,
-      p_invoice_data: invoiceData,
-      p_items:        invoiceItemsToInsert,
+      p_invoice_id:           id,
+      p_tenant_id:            tenant_id,
+      p_invoice_data:         invoiceData,
+      p_items:                invoiceItemsToInsert,
+      p_expected_version:     parsedExpectedVersion,
+      p_edit_idempotency_key: cleanEditIdempotencyKey,
     });
 
-    if (rpcErr) throw rpcErr;
+    if (rpcErr) {
+      // Phase 8.2: Concurrency conflict (optimistic lock mismatch)
+      if (rpcErr.message && rpcErr.message.includes('INVOICE_VERSION_CONFLICT')) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'This invoice has been modified by another terminal or user. Please reload the invoice to view the latest state before editing.',
+            code: 'INVOICE_VERSION_CONFLICT',
+            details: rpcErr.message,
+          },
+          { status: 409 }
+        );
+      }
+      throw rpcErr;
+    }
 
     // Audit: who edited the sale and why (the RPC's own log has no reason)
     try {
@@ -872,8 +895,11 @@ export async function PATCH(req: NextRequest) {
       console.warn('[Invoices PATCH] edit-reason audit log failed', auditErr);
     }
 
+    const isDuplicate = Boolean((rpcResult as any)?.is_duplicate);
+
     return NextResponse.json({
       success: true,
+      is_duplicate: isDuplicate,
       invoice: {
         ...((rpcResult as any)?.invoice || {}),
         items: invoiceItemsToInsert,

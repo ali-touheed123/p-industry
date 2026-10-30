@@ -169,6 +169,8 @@ export interface Invoice {
   offline_schema_version?: number;
   is_late_sync?: boolean;
   original_shift_id?: string;
+  version?: number;
+  edit_idempotency_key?: string | null;
 }
 
 export interface InvoiceItem {

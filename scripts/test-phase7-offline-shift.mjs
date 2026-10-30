@@ -207,3 +207,4 @@ test('Overlapping shift 409 adoption logic: flags sales as is_late_sync', () => 
   assert.equal(patched[1].payload.shift_id, serverShiftId);
   assert.equal(patched[1].payload.is_late_sync, true);
 });
+
