@@ -27,7 +27,7 @@ export const Pricing: React.FC<PricingProps> = ({ onSelectPlan }) => {
             Straightforward Investment Plans
           </h2>
           <p className="text-base sm:text-lg text-slate-600">
-            Choose the tier tailored to your paint operations — from a single high-speed counter to multi-branch networks with CEO audit and debt recovery.
+            Choose the tier tailored to your paint operations — from a single high-speed counter to multi-branch networks with CEO audit, offline auto-sync, and bespoke market workflows.
           </p>
         </div>
 
@@ -98,23 +98,19 @@ export const Pricing: React.FC<PricingProps> = ({ onSelectPlan }) => {
                     {isFullPlan && (
                       <div className="mt-4 p-3 rounded-xl bg-slate-950 border border-slate-800">
                         <div className="flex items-center justify-between text-xs text-slate-300">
-                          <span className="font-semibold">Branches / Outlets:</span>
+                          <span className="font-semibold">Number of Shop Outlets:</span>
                           <div className="flex items-center gap-2">
                             <button
                               type="button"
                               onClick={() => setExtraBranches(Math.max(1, extraBranches - 1))}
+                              className="w-7 h-7 rounded-lg bg-slate-800 text-white flex items-center justify-center transition-colors hover:bg-slate-700 hover:text-white cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
                               disabled={extraBranches <= 1}
-                              className={`w-7 h-7 rounded-lg bg-slate-800 text-white flex items-center justify-center transition-colors ${
-                                extraBranches <= 1
-                                  ? 'opacity-40 cursor-not-allowed'
-                                  : 'hover:bg-slate-700 hover:text-white cursor-pointer active:scale-95'
-                              }`}
                               aria-label="Decrease branch count"
                             >
                               <Minus className="w-3.5 h-3.5" />
                             </button>
 
-                            <span className="font-mono font-bold text-sm text-blue-400 min-w-[28px] text-center">
+                            <span className="w-6 text-center font-mono font-bold text-white text-sm">
                               {extraBranches}
                             </span>
 
@@ -205,7 +201,7 @@ export const Pricing: React.FC<PricingProps> = ({ onSelectPlan }) => {
           </div>
 
           <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-slate-200">
-            <table className="w-full min-w-[580px] text-left text-xs border-collapse">
+            <table className="w-full min-w-[620px] text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-slate-200 text-slate-700 font-semibold bg-slate-50/60">
                   <th className="py-3 px-4">Feature / Capability</th>
@@ -216,7 +212,25 @@ export const Pricing: React.FC<PricingProps> = ({ onSelectPlan }) => {
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
                 <tr>
-                  <td className="py-3.5 px-4 font-semibold text-slate-900">POS Sales & Fast Billing Counter</td>
+                  <td className="py-3.5 px-4 font-semibold text-slate-900">100% Offline Counter Billing & Auto-Sync (Phase 10)</td>
+                  <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
+                  <td className="py-3.5 px-4 text-center bg-blue-50/30"><Check className="w-4 h-4 text-emerald-600 mx-auto font-bold" /></td>
+                  <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
+                </tr>
+                <tr>
+                  <td className="py-3.5 px-4 font-semibold text-slate-900">Regular Thermal (80mm/58mm) & A4 Receipt Template Designer</td>
+                  <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
+                  <td className="py-3.5 px-4 text-center bg-blue-50/30"><Check className="w-4 h-4 text-emerald-600 mx-auto font-bold" /></td>
+                  <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
+                </tr>
+                <tr>
+                  <td className="py-3.5 px-4 font-semibold text-slate-900">POS Sales Counter & Hotkeys (F2-F9)</td>
+                  <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
+                  <td className="py-3.5 px-4 text-center bg-blue-50/30"><Check className="w-4 h-4 text-emerald-600 mx-auto font-bold" /></td>
+                  <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
+                </tr>
+                <tr>
+                  <td className="py-3.5 px-4 font-semibold text-slate-900">Parked Invoices (F7 Hold & F8 Restore)</td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                   <td className="py-3.5 px-4 text-center bg-blue-50/30"><Check className="w-4 h-4 text-emerald-600 mx-auto font-bold" /></td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
@@ -228,7 +242,13 @@ export const Pricing: React.FC<PricingProps> = ({ onSelectPlan }) => {
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                 </tr>
                 <tr>
-                  <td className="py-3.5 px-4 font-semibold text-slate-900">Basic Paint Inventory (Gallons, Drums, Liters)</td>
+                  <td className="py-3.5 px-4 font-semibold text-slate-900">Paint Inventory & Multipliers (Gallons, Drums, Quarters)</td>
+                  <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
+                  <td className="py-3.5 px-4 text-center bg-blue-50/30"><Check className="w-4 h-4 text-emerald-600 mx-auto font-bold" /></td>
+                  <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
+                </tr>
+                <tr>
+                  <td className="py-3.5 px-4 font-semibold text-slate-900">Damage, Leakage & Evaporation Stock Adjustments</td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                   <td className="py-3.5 px-4 text-center bg-blue-50/30"><Check className="w-4 h-4 text-emerald-600 mx-auto font-bold" /></td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
@@ -240,38 +260,38 @@ export const Pricing: React.FC<PricingProps> = ({ onSelectPlan }) => {
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                 </tr>
                 <tr>
-                  <td className="py-3.5 px-4 font-semibold text-slate-900">Day Close Register & Cash Drawer Balancing</td>
+                  <td className="py-3.5 px-4 font-semibold text-slate-900">AI Purchase Invoice Scanning (Gemini Vision)</td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                   <td className="py-3.5 px-4 text-center bg-blue-50/30"><Check className="w-4 h-4 text-emerald-600 mx-auto font-bold" /></td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                 </tr>
                 <tr>
-                  <td className="py-3.5 px-4 font-semibold text-slate-900">Branch Orders & Inter-Branch Stock Transfers</td>
+                  <td className="py-3.5 px-4 font-semibold text-slate-900">Paint Bucket Token Ledger & Safe Custody</td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                   <td className="py-3.5 px-4 text-center bg-blue-50/30"><Check className="w-4 h-4 text-emerald-600 mx-auto font-bold" /></td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                 </tr>
                 <tr>
-                  <td className="py-3.5 px-4 font-semibold text-slate-900">Sales Team Management & Staff Quotas</td>
+                  <td className="py-3.5 px-4 font-semibold text-slate-900">Company Order Sheets for Manufacturer Sales Reps</td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                   <td className="py-3.5 px-4 text-center bg-blue-50/30"><Check className="w-4 h-4 text-emerald-600 mx-auto font-bold" /></td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                 </tr>
                 <tr>
-                  <td className="py-3.5 px-4 font-semibold text-slate-900">Credit Customers & Painter Khata Ledgers</td>
+                  <td className="py-3.5 px-4 font-semibold text-slate-900">Branch Orders & Inter-Branch Stock Transfers (IBT)</td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                   <td className="py-3.5 px-4 text-center bg-blue-50/30"><Check className="w-4 h-4 text-emerald-600 mx-auto font-bold" /></td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                 </tr>
                 <tr>
-                  <td className="py-3.5 px-4 font-semibold text-slate-900">Recovery Management & Overdue Debt Tracking</td>
+                  <td className="py-3.5 px-4 font-semibold text-slate-900">Credit Customers, Khata & WhatsApp Canvas Statements</td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                   <td className="py-3.5 px-4 text-center bg-blue-50/30"><Check className="w-4 h-4 text-emerald-600 mx-auto font-bold" /></td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                 </tr>
                 <tr>
-                  <td className="py-3.5 px-4 font-semibold text-slate-900">Percentage Pool Commission for Managers</td>
-                  <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
+                  <td className="py-3.5 px-4 font-semibold text-slate-900">Pakistani Rupee Denomination Day Close Counter (5000 to 10)</td>
+                  <td className="py-3.5 px-4 text-center"><X className="w-4 h-4 text-slate-300 mx-auto" /></td>
                   <td className="py-3.5 px-4 text-center bg-blue-50/30"><Check className="w-4 h-4 text-emerald-600 mx-auto font-bold" /></td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
                 </tr>
@@ -280,6 +300,12 @@ export const Pricing: React.FC<PricingProps> = ({ onSelectPlan }) => {
                   <td className="py-3.5 px-4 text-center"><X className="w-4 h-4 text-slate-300 mx-auto" /></td>
                   <td className="py-3.5 px-4 text-center bg-blue-50/30"><Check className="w-4 h-4 text-emerald-600 mx-auto font-bold" /></td>
                   <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto" /></td>
+                </tr>
+                <tr>
+                  <td className="py-3.5 px-4 font-semibold text-slate-900">Specialized Market Receipts / Dual-Receipt Mode (Gated CEO Audit)</td>
+                  <td className="py-3.5 px-4 text-center"><X className="w-4 h-4 text-slate-300 mx-auto" /></td>
+                  <td className="py-3.5 px-4 text-center bg-blue-50/30"><X className="w-4 h-4 text-slate-300 mx-auto" /></td>
+                  <td className="py-3.5 px-4 text-center"><Check className="w-4 h-4 text-emerald-600 mx-auto font-bold" /></td>
                 </tr>
                 <tr>
                   <td className="py-3.5 px-4 font-semibold text-slate-900">One-off Bespoke Features & Unique Custom Workflows</td>
@@ -295,12 +321,10 @@ export const Pricing: React.FC<PricingProps> = ({ onSelectPlan }) => {
         {/* Pricing Guarantee note */}
         <div className="mt-12 text-center text-xs text-slate-600 max-w-xl mx-auto flex items-center justify-center gap-2">
           <HelpCircle className="w-4 h-4 text-blue-600 shrink-0" />
-          <span>Have custom tinting machines, barcode printers, or multi-city depots? Contact our team for a tailored quote.</span>
+          <span>Have specialized paint trade workflows, custom hardware, or multi-city wholesale networks? Contact our team for a tailored quote.</span>
         </div>
 
       </div>
     </section>
   );
 };
-
-

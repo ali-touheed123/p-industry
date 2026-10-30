@@ -2,21 +2,31 @@ import React from 'react';
 import { Breadcrumb } from '../seo/Breadcrumb';
 import { MetaHead } from '../seo/MetaHead';
 import { 
-  CheckCircle2, 
   ArrowRight, 
   Layers, 
-  Sparkles, 
   CreditCard, 
   Boxes, 
   RotateCcw, 
   ShoppingCart, 
   FileSpreadsheet, 
   ShieldCheck, 
-  Users, 
   Building2,
   ScanLine,
-  Ticket
+  Ticket,
+  WifiOff,
+  Printer,
+  GitBranch,
+  Coins,
+  type LucideIcon
 } from 'lucide-react';
+
+interface FeatureCardItem {
+  title: string;
+  url: string;
+  description: string;
+  icon: LucideIcon;
+  badge: string;
+}
 
 interface FeaturesHubViewProps {
   onNavigate: (path: string) => void;
@@ -24,69 +34,104 @@ interface FeaturesHubViewProps {
 }
 
 export const FeaturesHubView: React.FC<FeaturesHubViewProps> = ({ onNavigate, onOpenDemo }) => {
-  const featureCards = [
+  const featureCards: FeatureCardItem[] = [
     {
       title: 'POS Billing Register',
       url: '/features/pos',
-      description: 'High-speed keyboard billing (F2-F9), shade search, parked orders (F7 Hold), split payments, and thermal receipt printing.',
+      description: 'High-speed keyboard billing (F2-F9), shade search, parked orders (F7 Hold), split payments, and silent thermal receipt printing.',
       icon: ShoppingCart,
       badge: 'F2-F9 Hotkeys'
     },
     {
-      title: 'Multi-Vault Inventory',
+      title: 'Bulletproof Offline Engine',
+      url: '/features/offline-mode',
+      description: 'Zero downtime counter billing during broadband cuts or load-shedding. Native IndexedDB queue, device codes, and automatic cloud sync.',
+      icon: WifiOff,
+      badge: '100% Offline'
+    },
+    {
+      title: 'Regular Receipt Customization',
+      url: '/features/receipt-customization',
+      description: 'Visual template designer for 80mm roll, 58mm & A4 layouts with shop logo, custom Urdu return terms, NTN/STRN, and silent F5 printing.',
+      icon: Printer,
+      badge: 'Thermal & A4'
+    },
+    {
+      title: 'Multi-Vault Paint Inventory',
       url: '/features/inventory',
       description: 'Track stock across showroom shelves and central godowns with pack size multipliers (quarter, gallon, drum) and low-stock alerts.',
       icon: Boxes,
       badge: 'Pack Multipliers'
     },
     {
-      title: 'Sales & Invoice Management',
-      url: '/features/sales',
-      description: 'Complete sales history, contractor credit accounts, payment receipts, and automated customer ledger tracking.',
-      icon: CreditCard,
-      badge: 'Contractor Khata'
-    },
-    {
-      title: 'Sales Return & Credit Notes',
-      url: '/features/sales-returns',
-      description: 'Process customer returns against original invoices, issue digital credit notes, and restore stock automatically.',
-      icon: RotateCcw,
-      badge: 'Credit Notes'
-    },
-    {
-      title: 'Purchases & Supplier Procurement',
-      url: '/features/purchases',
-      description: 'Log supplier shipments, calculate landed costs with freight, and manage vendor payable ledgers.',
-      icon: Building2,
-      badge: 'Vendor Payables'
-    },
-    {
-      title: 'Purchase Returns & Debit Notes',
-      url: '/features/purchase-returns',
-      description: 'Return damaged or defective paint stock to manufacturers and generate itemized debit notes.',
-      icon: ShieldCheck,
-      badge: 'Supplier Debits'
-    },
-    {
-      title: 'Reports & Business Analytics',
-      url: '/features/reports',
-      description: 'Real-time sales registers, gross margin analytics, inventory valuations, and shift reconciliation logs.',
-      icon: FileSpreadsheet,
-      badge: 'Live Analytics'
-    },
-    {
-      title: 'AI Invoice Scanning',
+      title: 'AI Purchase Bill Scanner',
       url: '/features/ai-invoice-scan',
       description: 'Upload a supplier invoice photo and Google Gemini Vision AI extracts every line item in ~10 seconds — handwritten, Urdu, or dot-matrix printed.',
       icon: ScanLine,
       badge: 'Gemini AI'
     },
     {
-      title: 'Paint Token Management',
+      title: 'Paint Token Safe Custody',
       url: '/features/token-management',
-      description: 'Track tokens issued, redeemed, and retained per shift by brand and quality category, with a complete company reimbursement summary.',
+      description: 'Track paint bucket tokens issued, redeemed, and retained per shift by brand and category, with anti-theft Safe Custody and company claim reports.',
       icon: Ticket,
       badge: 'Token Ledger'
+    },
+    {
+      title: 'Inter-Branch Stock Transfers',
+      url: '/features/branch-transfers',
+      description: '4-stage multi-store transfer lifecycle (Pending to Received), zero-stock branch requisitions, and automated mirrored cost accounting.',
+      icon: GitBranch,
+      badge: 'Multi-Store ERP'
+    },
+    {
+      title: 'CEO Suite & Rupee Cash Drawer',
+      url: '/features/ceo-executive-suite',
+      description: 'Pakistani Rupee denomination counter (Rs. 5000 to Rs. 10 notes), remote sister branch switcher, true gross margins, and live shortage alerts.',
+      icon: Coins,
+      badge: 'Executive Close'
+    },
+    {
+      title: 'Company Order Sheets',
+      url: '/features/company-order-sheets',
+      description: 'Standardized purchase order sheets formatted for sales officers at Dulux, Berger, Nippon, and Diamond Paints with thermal and Excel export.',
+      icon: FileSpreadsheet,
+      badge: 'Procurement Sheet'
+    },
+    {
+      title: 'Sales & Contractor Khata',
+      url: '/features/sales',
+      description: 'Complete sales history, contractor credit accounts with credit limits, payment receipts, and 1-click WhatsApp Canvas statements.',
+      icon: CreditCard,
+      badge: 'Contractor Khata'
+    },
+    {
+      title: 'Sales Return & Credit Notes',
+      url: '/features/sales-returns',
+      description: 'Process customer returns against original invoices, issue digital credit notes, and restore stock automatically with zero math mistakes.',
+      icon: RotateCcw,
+      badge: 'Credit Notes'
+    },
+    {
+      title: 'Purchases & Landed Costs',
+      url: '/features/purchases',
+      description: 'Log supplier shipments, calculate true landed costs with carriage/freight, and manage vendor payable ledgers with due dates.',
+      icon: Building2,
+      badge: 'Vendor Payables'
+    },
+    {
+      title: 'Purchase Returns & Debit Notes',
+      url: '/features/purchase-returns',
+      description: 'Return damaged or defective paint stock to manufacturers and generate itemized debit notes that deduct supplier balances automatically.',
+      icon: ShieldCheck,
+      badge: 'Supplier Debits'
+    },
+    {
+      title: 'Reports & Business Analytics',
+      url: '/features/reports',
+      description: 'Real-time sales registers, brand profitability analytics (Dulux vs Berger vs Local), inventory valuations, and shift reconciliation logs.',
+      icon: FileSpreadsheet,
+      badge: 'Live Analytics'
     }
   ];
 
@@ -97,7 +142,7 @@ export const FeaturesHubView: React.FC<FeaturesHubViewProps> = ({ onNavigate, on
       'name': 'Pyntflow Paint Shop POS Features',
       'applicationCategory': 'BusinessApplication',
       'operatingSystem': 'Web, Windows, Android, macOS',
-      'description': 'Comprehensive feature set of Pyntflow Paint Shop POS Software, including billing hotkeys, inventory vaults, contractor credit, and reports.',
+      'description': 'Comprehensive feature set of Pyntflow Paint Shop POS Software, including offline auto-sync, receipt customization, billing hotkeys, inventory vaults, contractor credit, and reports.',
       'provider': {
         '@type': 'Organization',
         'name': 'Pyntflow',
@@ -129,12 +174,14 @@ export const FeaturesHubView: React.FC<FeaturesHubViewProps> = ({ onNavigate, on
       <MetaHead
         metadata={{
           title: 'Features Overview | Pyntflow Paint Shop POS Software',
-          description: 'Explore the full suite of Pyntflow features: high-speed POS billing, multi-vault inventory, contractor khata, supplier procurement, and reports.',
+          description: 'Explore the full suite of Pyntflow features: offline auto-sync, receipt template customization, POS billing, multi-vault inventory, contractor khata, and CEO audit.',
           h1: 'Pyntflow Features: Purpose-Built for Paint Retailers',
           canonical: 'https://pyntflow.com/features',
           keywords: [
             'paint shop POS features',
             'paint store software features',
+            'offline paint POS',
+            'thermal receipt customization',
             'paint inventory modules',
             'paint shop billing capabilities'
           ],
@@ -158,21 +205,22 @@ export const FeaturesHubView: React.FC<FeaturesHubViewProps> = ({ onNavigate, on
           </h1>
 
           <p className="text-base text-slate-600 leading-relaxed font-normal mt-2">
-            Explore dedicated modules designed specifically for paint store counters, godown storage warehouses, contractor credit ledgers, and supplier procurement.
+            Explore dedicated modules designed specifically for paint store counters, 100% offline billing, custom thermal receipts, godown storage warehouses, contractor credit ledgers, and supplier procurement.
           </p>
         </div>
 
         {/* Feature Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-14">
-          {featureCards.map((feat, idx) => {
+          {featureCards.map((feat) => {
             const Icon = feat.icon;
             return (
-              <div
-                key={idx}
+              <button
+                type="button"
+                key={feat.url}
                 onClick={() => onNavigate(feat.url)}
-                className="bg-white p-6 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-md hover:border-orange-300 transition-all flex flex-col justify-between cursor-pointer group"
+                className="bg-white p-6 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-md hover:border-orange-300 transition-all flex flex-col justify-between text-left cursor-pointer group w-full"
               >
-                <div className="space-y-3">
+                <div className="space-y-3 w-full">
                   <div className="flex items-center justify-between">
                     <div className="w-10 h-10 rounded-xl bg-orange-50 border border-orange-100 flex items-center justify-center text-[#FF6B00] group-hover:scale-105 transition-transform">
                       <Icon className="w-5 h-5" />
@@ -191,11 +239,11 @@ export const FeaturesHubView: React.FC<FeaturesHubViewProps> = ({ onNavigate, on
                   </p>
                 </div>
 
-                <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-[#FF6B00] mt-4">
+                <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-[#FF6B00] mt-4 w-full">
                   <span>Explore Module Details</span>
                   <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
@@ -205,10 +253,11 @@ export const FeaturesHubView: React.FC<FeaturesHubViewProps> = ({ onNavigate, on
           <div className="space-y-2 text-center md:text-left">
             <h3 className="text-2xl font-black tracking-tight">Test These Features Live</h3>
             <p className="text-xs sm:text-sm text-slate-400 max-w-md">
-              Try the interactive simulator right in your browser to experience keyboard billing, inventory vaults, and shift closing firsthand.
+              Try the interactive simulator right in your browser to experience offline billing, receipt customization, inventory vaults, and shift closing firsthand.
             </p>
           </div>
           <button
+            type="button"
             onClick={onOpenDemo}
             className="px-6 py-3.5 bg-[#FF6B00] hover:bg-[#E55F00] text-white text-sm font-bold rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer shrink-0"
           >

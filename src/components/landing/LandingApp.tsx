@@ -32,6 +32,11 @@ import {
   ReportsFeaturePage,
   AiInvoiceScanFeaturePage,
   TokenManagementFeaturePage,
+  OfflineModeFeaturePage,
+  ReceiptCustomizationFeaturePage,
+  BranchTransfersFeaturePage,
+  CeoExecutiveFeaturePage,
+  CompanyOrderSheetsFeaturePage,
 } from './pages/FeaturePages';
 import { FeaturesHubView } from './pages/FeaturesHubView';
 import { BlogHubView } from './pages/BlogHubView';
@@ -93,6 +98,10 @@ export default function LandingApp() {
       return <PakistanLandingPage onNavigate={navigateTo} onOpenDemo={() => handleOpenDemo()} />;
     if (currentPath === '/features/pos')
       return <PosFeaturePage onNavigate={navigateTo} onOpenDemo={() => handleOpenDemo()} />;
+    if (currentPath === '/features/offline-mode')
+      return <OfflineModeFeaturePage onNavigate={navigateTo} onOpenDemo={() => handleOpenDemo()} />;
+    if (currentPath === '/features/receipt-customization')
+      return <ReceiptCustomizationFeaturePage onNavigate={navigateTo} onOpenDemo={() => handleOpenDemo()} />;
     if (currentPath === '/features/inventory')
       return <InventoryFeaturePage onNavigate={navigateTo} onOpenDemo={() => handleOpenDemo()} />;
     if (currentPath === '/features/sales')
@@ -109,6 +118,12 @@ export default function LandingApp() {
       return <AiInvoiceScanFeaturePage onNavigate={navigateTo} onOpenDemo={() => handleOpenDemo()} />;
     if (currentPath === '/features/token-management')
       return <TokenManagementFeaturePage onNavigate={navigateTo} onOpenDemo={() => handleOpenDemo()} />;
+    if (currentPath === '/features/branch-transfers')
+      return <BranchTransfersFeaturePage onNavigate={navigateTo} onOpenDemo={() => handleOpenDemo()} />;
+    if (currentPath === '/features/ceo-executive-suite')
+      return <CeoExecutiveFeaturePage onNavigate={navigateTo} onOpenDemo={() => handleOpenDemo()} />;
+    if (currentPath === '/features/company-order-sheets')
+      return <CompanyOrderSheetsFeaturePage onNavigate={navigateTo} onOpenDemo={() => handleOpenDemo()} />;
     if (currentPath === '/features')
       return <FeaturesHubView onNavigate={navigateTo} onOpenDemo={() => handleOpenDemo()} />;
     if (currentPath === '/pricing')

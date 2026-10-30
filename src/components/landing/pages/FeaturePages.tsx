@@ -384,3 +384,237 @@ export const TokenManagementFeaturePage: React.FC<FeaturePageWrapperProps> = ({ 
     ]}
   />
 );
+
+// 10. Offline Mode Feature Page
+export const OfflineModeFeaturePage: React.FC<FeaturePageWrapperProps> = ({ onNavigate, onOpenDemo }) => (
+  <ProductDetailView
+    onNavigate={onNavigate}
+    onOpenDemo={onOpenDemo}
+    title="Offline POS Software for Paint Shops"
+    seoTitle="Offline POS Software for Paint Shops | Zero-Downtime Billing | Pyntflow"
+    metaDescription="Never halt paint counter sales during broadband drops or load-shedding. Native IndexedDB queue, local stock protection, device-coded receipts, and automatic cloud sync."
+    canonical="https://pyntflow.com/features/offline-mode"
+    keywords={['offline POS software', 'paint shop offline billing', 'zero downtime POS', 'offline point of sale pakistan', 'IndexedDB POS auto sync']}
+    heroBadge="Module: Bulletproof Offline Engine"
+    h1="100% Offline POS Billing & Automatic Cloud Sync"
+    subtitle="Broadband cuts and power outages will never halt your counter. Bill customers, print official receipts, and let transactions sync automatically in the background when connectivity returns."
+    overviewHeading="Built for Real-World Infrastructure in Emerging Markets"
+    overviewParagraphs={[
+      'In high-volume paint shops across Pakistan, unstable internet and sudden power outages are daily operational hazards. Generic cloud POS software locks up or shows network errors, creating long frustrated queues.',
+      'Pyntflow features a Phase 10 certified offline-first architecture. When internet drops, the counter seamlessly switches to local IndexedDB storage. Cashiers can continue barcode scanning, pack unit switching, discount application, and receipt printing with zero downtime.',
+      'Once connectivity is restored, the multi-tab Web Locks sync engine flushes all offline sales in strict FIFO order, locking original Karachi transaction times and updating cloud balances automatically.'
+    ]}
+    keyFeatures={[
+      { title: 'Zero-Downtime Counter Billing', description: 'Complete sales, calculate taxes, and print receipts without an active internet connection.' },
+      { title: 'Local Stock Overlay Protection', description: 'Inventory decrements immediately in the cashier view to prevent overselling while offline.' },
+      { title: 'Device-Coded Official Receipts', description: 'Prints official customer slips with hardware sequence codes (e.g. K7F2-0042) without temporary watermarks.' },
+      { title: 'Multi-Tab Web Locks Sync Engine', description: 'Automatic background synchronization with mutual exclusion locking to prevent duplicate invoice commits.' }
+    ]}
+    whyItMatters={[
+      { title: 'Zero Lost Sales During Outages', description: 'Keep lines moving fast even during major ISP fiber breaks or routine load-shedding.' },
+      { title: 'Complete Ledger Accuracy', description: 'Preserves the exact local offline transaction timestamp (Karachi time) in financial ledgers.' },
+      { title: '24-Hour Auth Grace Window', description: 'Cached secure credentials allow continuous offline counter operation for up to 24 hours.' }
+    ]}
+    faqItems={[
+      {
+        question: 'What happens if two counters are billing offline at the same time?',
+        directAnswer: 'Each counter registers sales under its unique device shortcode and syncs without collisions.',
+        answer: 'Pyntflow assigns each terminal a distinct shortcode (e.g. K7F2, M3P1) and sequence number, ensuring receipts and ledger entries never conflict upon cloud synchronization.'
+      },
+      {
+        question: 'Can cashiers process contractor khata (credit) sales while offline?',
+        directAnswer: 'Yes! Contractor credit sales are queued locally and automatically post to customer ledgers upon reconnection.',
+        answer: 'Customer balances are reconciled and updated in the central ledger the moment the terminal regains internet access.'
+      }
+    ]}
+    relatedPages={[
+      { title: 'POS System for Paint Shops', url: '/features/pos', category: 'Feature' },
+      { title: 'Receipt Customization', url: '/features/receipt-customization', category: 'Feature' },
+      { title: 'Paint Token Management', url: '/features/token-management', category: 'Feature' }
+    ]}
+  />
+);
+
+// 11. Receipt Customization Feature Page
+export const ReceiptCustomizationFeaturePage: React.FC<FeaturePageWrapperProps> = ({ onNavigate, onOpenDemo }) => (
+  <ProductDetailView
+    onNavigate={onNavigate}
+    onOpenDemo={onOpenDemo}
+    title="Regular Receipt Template Customization & Silent Print"
+    seoTitle="Receipt Template Customization & Silent Thermal Print | Pyntflow"
+    metaDescription="Visual receipt designer for 80mm roll, 58mm & A4 layouts. Customize store logo, Urdu terms, NTN/STRN tax ID, and enjoy silent F5 isolated iframe printing."
+    canonical="https://pyntflow.com/features/receipt-customization"
+    keywords={['thermal receipt template designer', 'paint shop receipt customization', '80mm thermal receipt software', 'A4 paint invoice format', 'silent thermal print POS']}
+    heroBadge="Module: Receipt Customization & Silent Print"
+    h1="Visual Receipt Designer & Silent Thermal Printing"
+    subtitle="Design professional 80mm thermal, 58mm roll, and A4 receipts with your shop logo, Urdu warranty policy, tax NTN, customizable columns, and instant F5 silent printing."
+    overviewHeading="Tailor Every Receipt to Your Shop Identity & Policies"
+    overviewParagraphs={[
+      'Every paint retailer has unique branding and customer policy requirements. Pyntflow provides an interactive visual Receipt Template Designer that lets you control every pixel of your customer invoices.',
+      'Upload your high-contrast paint shop logo, configure phone numbers, address, and official NTN/STRN tax registration headers. Craft custom Urdu or English policy terms—such as "Tinted paints are non-returnable" or "Returns accepted within 7 days with original seal".',
+      'For maximum counter speed, Pyntflow uses isolated hidden iframe printing (printViaIframe). Cashiers can press F5 (Save & Print) and get an immediate printout in under 1 second without popup window freezes or browser print dialog delays.'
+    ]}
+    keyFeatures={[
+      { title: 'Multi-Format Support (80mm, 58mm & A4)', description: 'Switch easily between standard thermal roll paper and full A4/A5 laser invoices.' },
+      { title: 'Custom Store Branding & Urdu Terms', description: 'Upload store logos, tax NTN/STRN details, and write bilingual return policies.' },
+      { title: 'Customizable Table Columns', description: 'Toggle SKU code, pack size, unit rate, item discount, and total amount columns.' },
+      { title: 'Silent Isolated Iframe Print (F5)', description: 'Fast 1-second thermal printing with zero blank browser tabs or UI stalls.' }
+    ]}
+    whyItMatters={[
+      { title: 'Zero Customer Disputes', description: 'Clear return terms and broken-seal disclaimers printed on every slip protect your shop from unfair claims.' },
+      { title: 'Professional Brand Image', description: 'Replace generic, blurry POS slips with crisp, custom-branded receipts featuring your logo.' },
+      { title: 'Faster Counter Checkouts', description: 'Silent iframe printing saves 3 to 5 seconds on every single customer transaction.' }
+    ]}
+    faqItems={[
+      {
+        question: 'Which thermal receipt printer brands are supported?',
+        directAnswer: 'All standard ESC/POS 80mm and 58mm thermal printers (Xprinter, Rongta, Epson, Bixolon, Black Copper, POS-58/80).',
+        answer: 'Pyntflow connects seamlessly to any printer installed as the Windows default or USB receipt device.'
+      },
+      {
+        question: 'Can I print Urdu warranty terms at the bottom of the receipt?',
+        directAnswer: 'Yes! The receipt designer fully supports Urdu typography and custom disclaimer notes.',
+        answer: 'You can input standard paint trade clauses such as "Machine se banwaya gaya color wapis nahi hoga" directly in the template designer.'
+      }
+    ]}
+    relatedPages={[
+      { title: 'Offline Mode & Auto-Sync', url: '/features/offline-mode', category: 'Feature' },
+      { title: 'POS System for Paint Shops', url: '/features/pos', category: 'Feature' },
+      { title: 'CEO Executive Suite', url: '/features/ceo-executive-suite', category: 'Feature' }
+    ]}
+  />
+);
+
+// 12. Branch Transfers Feature Page
+export const BranchTransfersFeaturePage: React.FC<FeaturePageWrapperProps> = ({ onNavigate, onOpenDemo }) => (
+  <ProductDetailView
+    onNavigate={onNavigate}
+    onOpenDemo={onOpenDemo}
+    title="Inter-Branch Stock Transfers & Multi-Godown ERP"
+    seoTitle="Inter-Branch Stock Transfers & Multi-Godown ERP | Pyntflow"
+    metaDescription="Seamlessly manage multi-branch paint inventory with 4-stage transfer workflows (Pending to Received), zero-stock requisitions, and mirrored accounting vouchers."
+    canonical="https://pyntflow.com/features/branch-transfers"
+    keywords={['inter branch stock transfer POS', 'paint multi godown inventory', 'store to store transfer ERP', 'central godown requisition']}
+    heroBadge="Module: Multi-Store ERP & Transfers"
+    h1="Inter-Branch Stock Transfers & Multi-Godown ERP"
+    subtitle="Request, dispatch, and receive paint stock across multiple showrooms and central warehouses with automated 4-stage transfer tracking and mirrored cost accounting."
+    overviewHeading="End Stock Discrepancies Between Godowns and Retail Outlets"
+    overviewParagraphs={[
+      'Operating multiple paint shops or a central storage godown usually involves hectic phone calls, lost transfer slips, and mismatched inventory registers.',
+      'Pyntflow Inter-Branch Orders provides a formal 4-stage transfer lifecycle: Pending ➔ Accepted ➔ Dispatched ➔ Received. Out-of-stock retail branches can requisition zero-stock paint shades directly from the main godown.',
+      'Stock deduction is atomic: units leave the supplying warehouse at dispatch and safely inject into the destination store upon receipt confirmation, generating mirrored cost vouchers in the background.'
+    ]}
+    keyFeatures={[
+      { title: '4-Stage Transfer Lifecycle', description: 'Full accountability: Pending ➔ Accepted ➔ Dispatched ➔ Received with driver/dispatch notes.' },
+      { title: 'Zero-Stock Requisitions', description: 'Counter staff can request shades they currently have 0 stock of directly from other branches.' },
+      { title: 'Atomic Inventory Posting', description: 'Stock decrements from source and increments at destination upon verified physical arrival.' },
+      { title: 'Mirrored Inter-Branch Vouchers', description: 'Automates internal cost-price journal entries between separate store tax entities.' }
+    ]}
+    whyItMatters={[
+      { title: 'Zero Lost Stock in Transit', description: 'Every container leaving the godown is tracked until the destination counter clicks receive.' },
+      { title: 'Never Lose a Customer to Out-of-Stock', description: 'Instantly check sister branch stock and requisition gallons or drums before the customer leaves.' },
+      { title: 'Consolidated Multi-Store Audit', description: 'The CEO can see inventory moving across all branch locations on a single live dashboard.' }
+    ]}
+    faqItems={[
+      {
+        question: 'Can a branch receive partial quantities if some cans were damaged in transit?',
+        directAnswer: 'Yes. The receiving branch can adjust received quantities and flag variances before confirming receipt.',
+        answer: 'Any discrepancy generates an audit log and adjusts the inter-branch transfer balance accordingly.'
+      }
+    ]}
+    relatedPages={[
+      { title: 'Paint Inventory Software', url: '/features/inventory', category: 'Feature' },
+      { title: 'CEO Executive Suite', url: '/features/ceo-executive-suite', category: 'Feature' }
+    ]}
+  />
+);
+
+// 13. CEO Executive Suite Feature Page
+export const CeoExecutiveFeaturePage: React.FC<FeaturePageWrapperProps> = ({ onNavigate, onOpenDemo }) => (
+  <ProductDetailView
+    onNavigate={onNavigate}
+    onOpenDemo={onOpenDemo}
+    title="CEO Executive Suite & Rupee Cash Register"
+    seoTitle="CEO Executive Suite & Rupee Cash Drawer Balancing | Pyntflow"
+    metaDescription="Balance cash registers with Pakistani Rupee denomination counters (Rs. 5000 to Rs. 10), monitor multi-store profits, and catch cash shortages remotely."
+    canonical="https://pyntflow.com/features/ceo-executive-suite"
+    keywords={['paint shop CEO dashboard', 'cash drawer denomination counter', 'multi branch POS audit', 'pakistani rupee register close']}
+    heroBadge="Module: CEO Executive Suite"
+    h1="CEO Executive Suite & Pakistani Rupee Cash Register"
+    subtitle="Reconcile daily cash drawers with Pakistani Rupee denomination counters (Rs. 5000 to Rs. 10), audit multi-branch profits remotely, and detect cash shortages live."
+    overviewHeading="Complete Operational Command for Paint Store Owners"
+    overviewParagraphs={[
+      'Paint shop owners cannot spend every hour behind the counter. The Pyntflow CEO Executive Suite gives owners instant remote visibility into store sales, true gross margins, petty expenses, and daily shift closes.',
+      'Our Day Close module includes a specialized Pakistani Rupee denomination counter (Rs. 5000, 1000, 500, 100, 50, 20, 10). Cashiers count physical notes, and Pyntflow automatically calculates expected cash—factoring in cash sales, returns, petty expenses, and tokens redeemed cash—highlighting exact overages or shortages.',
+      'CEOs can toggle between sister branches in one click, monitor negative stock alerts, and verify cashier day-close handovers from their mobile phones.'
+    ]}
+    keyFeatures={[
+      { title: 'Pakistani Rupee Denomination Grid', description: 'Interactive note counter (5000, 1000, 500, etc.) auto-calculates counted cash vs expected cash.' },
+      { title: 'Instant Sister Store Switcher', description: 'Switch between authorized branches seamlessly without logging in and out.' },
+      { title: 'True Margin & Profit Engine', description: 'Computes real gross and net margins by deducting supplier costs, discounts, and petty expenses.' },
+      { title: 'Negative Stock Surveillance', description: 'Instant audit alerts for products being sold below zero stock to catch unrecorded purchases.' }
+    ]}
+    whyItMatters={[
+      { title: 'End Cashier Drawer Discrepancies', description: 'Automated reconciliation eliminates end-of-shift confusion and cashier shortage disputes.' },
+      { title: 'Remote Freedom for Owners', description: 'Verify daily closing numbers, gross profits, and branch stock from anywhere in the world.' },
+      { title: 'Anti-Theft Audit Trail', description: 'Every discount override, token payout, and stock adjustment is permanently timestamped.' }
+    ]}
+    faqItems={[
+      {
+        question: 'How does Pyntflow handle physical token payouts in the cash drawer reconciliation?',
+        directAnswer: 'Cash paid out to painters for tokens is automatically deducted from the expected cash calculation.',
+        answer: 'This ensures the cashier drawer does not show a false shortage when legitimate cash was disbursed for bucket tokens.'
+      }
+    ]}
+    relatedPages={[
+      { title: 'Offline Mode & Auto-Sync', url: '/features/offline-mode', category: 'Feature' },
+      { title: 'Paint Token Management', url: '/features/token-management', category: 'Feature' },
+      { title: 'Reports & Analytics', url: '/features/reports', category: 'Feature' }
+    ]}
+  />
+);
+
+// 14. Company Order Sheets Feature Page
+export const CompanyOrderSheetsFeaturePage: React.FC<FeaturePageWrapperProps> = ({ onNavigate, onOpenDemo }) => (
+  <ProductDetailView
+    onNavigate={onNavigate}
+    onOpenDemo={onOpenDemo}
+    title="Company Order Sheets & Distributor Procurement"
+    seoTitle="Company Order Sheets & Distributor Procurement | Pyntflow"
+    metaDescription="Generate standardized purchase order sheets formatted for paint company sales officers (Dulux, Berger, Nippon, Diamond) with thermal, A4, and Excel export."
+    canonical="https://pyntflow.com/features/company-order-sheets"
+    keywords={['paint company order sheet', 'dulux berger order generator', 'paint procurement software', 'paint dealer purchase order']}
+    heroBadge="Module: Procurement Sheets"
+    h1="Company Order Sheets & Distributor Procurement"
+    subtitle="Generate formal, standardized purchase order sheets formatted for paint company sales officers (Dulux, Berger, Nippon, Diamond) with thermal, A4, and Excel export."
+    overviewHeading="Standardize Your Orders for Paint Manufacturer Sales Officers"
+    overviewParagraphs={[
+      'Ordering paint shipments from major manufacturers (Dulux, Berger, Nippon, Diamond, Brighto) traditionally requires cashiers to jot down shade codes and drum quantities on loose sheets of paper for visiting sales reps.',
+      'Pyntflow Company Order Sheets automates this entire procurement workflow. Based on automated low-stock thresholds, Pyntflow generates clean, brand-segregated purchase sheets grouped by pack sizes (Quarters, Gallons, Drums).',
+      'Print order sheets directly on your 80mm thermal roll, generate formal A4 purchase documents, or export directly to Excel to send via WhatsApp to company distributors.'
+    ]}
+    keyFeatures={[
+      { title: 'Brand-Specific Order Templates', description: 'Pre-formatted layouts tailored for Dulux, Berger, Nippon, Diamond, and local paint brands.' },
+      { title: 'Pack Size Aggregation', description: 'Aggregates required shades into Quarters, Gallons, and 16L Drums for clear distributor processing.' },
+      { title: 'Multi-Format Export', description: 'Print on 80mm thermal slip, full A4 purchase order, or export to Excel and WhatsApp.' },
+      { title: 'Low-Stock Auto-Requisition', description: 'Automatically populate order sheets based on fast-moving shade minimum stock thresholds.' }
+    ]}
+    whyItMatters={[
+      { title: 'Zero Order Miscommunications', description: 'Clear shade codes, base types, and drum counts prevent distributors from shipping wrong bases.' },
+      { title: 'Faster Delivery Turnaround', description: 'Sales officers receive standardized, legible order sheets that can be processed into factory batches immediately.' },
+      { title: 'Never Run Out of Fast-Moving Shades', description: 'Automated reorder triggers ensure your best-selling whites, off-whites, and bases stay in stock.' }
+    ]}
+    faqItems={[
+      {
+        question: 'Can I export the company order sheet to send to my distributor rep via WhatsApp?',
+        directAnswer: 'Yes! You can export clean A4 PDF or Excel files, or copy the formatted text directly to WhatsApp.',
+        answer: 'Sales reps can review and commit your order directly into the manufacturer ordering system.'
+      }
+    ]}
+    relatedPages={[
+      { title: 'Purchase Management', url: '/features/purchases', category: 'Feature' },
+      { title: 'Paint Inventory Software', url: '/features/inventory', category: 'Feature' },
+      { title: 'AI Invoice Scanning', url: '/features/ai-invoice-scan', category: 'Feature' }
+    ]}
+  />
+);

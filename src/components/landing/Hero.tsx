@@ -4,7 +4,8 @@ import {
   ArrowRight, 
   Play, 
   Check,
-  ArrowLeftRight
+  ArrowLeftRight,
+  WifiOff
 } from 'lucide-react';
 import { PosScreenshotView, PosTabId } from './PosScreenshotView';
 
@@ -42,8 +43,8 @@ export const Hero: React.FC<HeroProps> = ({ onOpenDemo, onExploreFeatures }) => 
             transition={{ duration: 0.4 }}
             className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-slate-100 border border-slate-200/80 rounded-full text-xs font-semibold text-slate-700 shadow-2xs"
           >
-            <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
-            <span>Built Specifically for Paint Retailers & Wholesale Dealers</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>100% Offline-First Engine • Built for Paint Retailers & Wholesale Networks</span>
           </motion.div>
 
           {/* Main Headline */}
@@ -63,7 +64,7 @@ export const Hero: React.FC<HeroProps> = ({ onOpenDemo, onExploreFeatures }) => 
             transition={{ duration: 0.5, delay: 0.16 }}
             className="text-slate-600 text-base sm:text-lg lg:text-xl leading-relaxed max-w-2xl"
           >
-            Stop forcing grocery software onto paint inventory. Manage AI invoice scanning, paint tokens, gallons, 16L drums, tinting formulas, painter credit balances, and supplier bills from one purpose-built counter system.
+            Stop forcing grocery software onto paint inventory. Manage bulletproof offline billing, paint tokens, Gemini AI invoice scanning, custom thermal receipts, 16L drums, painter credit khata, and multi-branch transfers from one unified counter system.
           </motion.p>
 
           {/* CTA Buttons */}
@@ -101,19 +102,27 @@ export const Hero: React.FC<HeroProps> = ({ onOpenDemo, onExploreFeatures }) => 
           >
             <div className="flex items-center gap-1.5">
               <Check className="w-4 h-4 text-emerald-600 font-bold" />
-              <span className="font-medium text-slate-700">AI Invoice Scanner</span>
+              <span className="font-medium text-slate-700">100% Offline Counter Billing</span>
             </div>
             <div className="flex items-center gap-1.5">
               <Check className="w-4 h-4 text-emerald-600 font-bold" />
-              <span className="font-medium text-slate-700">Paint Token Ledger</span>
+              <span className="font-medium text-slate-700">AI Invoice Scanner (Gemini)</span>
             </div>
             <div className="flex items-center gap-1.5">
               <Check className="w-4 h-4 text-emerald-600 font-bold" />
-              <span className="font-medium text-slate-700">Gallon & Drum Units</span>
+              <span className="font-medium text-slate-700">Paint Token Safe Custody</span>
             </div>
             <div className="flex items-center gap-1.5">
               <Check className="w-4 h-4 text-emerald-600 font-bold" />
-              <span className="font-medium text-slate-700">Silent Thermal Printing</span>
+              <span className="font-medium text-slate-700">Custom Thermal Receipts (80mm/A4)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Check className="w-4 h-4 text-emerald-600 font-bold" />
+              <span className="font-medium text-slate-700">Gallon & Drum Multipliers</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Check className="w-4 h-4 text-emerald-600 font-bold" />
+              <span className="font-medium text-slate-700">1-Click WhatsApp Statements</span>
             </div>
           </motion.div>
         </div>
@@ -162,12 +171,16 @@ export const Hero: React.FC<HeroProps> = ({ onOpenDemo, onExploreFeatures }) => 
           {/* Bottom Trade Feature Highlights */}
           <div className="flex flex-col sm:flex-row flex-wrap items-start sm:items-center justify-between gap-2 sm:gap-3 mt-4 px-2 text-[11px] sm:text-xs text-slate-500 font-medium">
             <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+              <span>Bulletproof Offline Counter Queue (Zero Lost Sales)</span>
+            </span>
+            <span className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
               <span>Keyboard Hotkey Speed (F2 to F9 Navigation)</span>
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-              <span>Instant Walk-in & Painter Khata Ledger</span>
+              <span className="w-2 h-2 rounded-full bg-indigo-500 shrink-0" />
+              <span>Regular Receipt Designer (80mm Thermal & A4)</span>
             </span>
             <span className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-orange-500 shrink-0" />
@@ -180,4 +193,3 @@ export const Hero: React.FC<HeroProps> = ({ onOpenDemo, onExploreFeatures }) => 
     </section>
   );
 };
-

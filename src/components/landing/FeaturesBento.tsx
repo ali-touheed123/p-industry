@@ -5,13 +5,19 @@ import {
   RotateCcw, 
   Layers, 
   Truck, 
-  CornerUpLeft, 
   Users, 
   BarChart3, 
   Tag, 
   Check,
   ScanLine,
-  Ticket
+  Ticket,
+  WifiOff,
+  Printer,
+  GitBranch,
+  Coins,
+  FileSpreadsheet,
+  PauseCircle,
+  Sliders
 } from 'lucide-react';
 import { POS_FEATURES } from './data/posData';
 
@@ -24,14 +30,26 @@ export const FeaturesBento: React.FC<FeaturesBentoProps> = ({ onSelectFeature })
     switch (name) {
       case 'ReceiptText':
         return <ReceiptText className="w-5 h-5 text-blue-600" />;
+      case 'WifiOff':
+        return <WifiOff className="w-5 h-5 text-emerald-600" />;
+      case 'Printer':
+        return <Printer className="w-5 h-5 text-indigo-600" />;
       case 'Layers':
         return <Layers className="w-5 h-5 text-blue-600" />;
       case 'RotateCcw':
         return <RotateCcw className="w-5 h-5 text-indigo-600" />;
       case 'Truck':
         return <Truck className="w-5 h-5 text-slate-700" />;
-      case 'CornerUpLeft':
-        return <CornerUpLeft className="w-5 h-5 text-rose-600" />;
+      case 'GitBranch':
+        return <GitBranch className="w-5 h-5 text-teal-600" />;
+      case 'Coins':
+        return <Coins className="w-5 h-5 text-amber-600" />;
+      case 'FileSpreadsheet':
+        return <FileSpreadsheet className="w-5 h-5 text-emerald-600" />;
+      case 'PauseCircle':
+        return <PauseCircle className="w-5 h-5 text-orange-600" />;
+      case 'Sliders':
+        return <Sliders className="w-5 h-5 text-purple-600" />;
       case 'Users':
         return <Users className="w-5 h-5 text-emerald-600" />;
       case 'BarChart3':
@@ -53,13 +71,13 @@ export const FeaturesBento: React.FC<FeaturesBentoProps> = ({ onSelectFeature })
         <div className="text-center max-w-3xl mx-auto mb-16">
           <div className="inline-flex items-center gap-2 px-3 py-1 bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 mb-4">
             <span className="w-2 h-2 rounded-full bg-blue-600" />
-            <span>Core Features</span>
+            <span>Complete Feature Suite</span>
           </div>
           <h2 className="text-3xl sm:text-5xl font-extrabold text-slate-900 tracking-tight mb-5">
-            Engineered for Daily Paint Counter Workflows
+            Engineered for Daily Paint Counter Realities
           </h2>
           <p className="text-base sm:text-lg text-slate-600">
-            From rapid contractor checkout during morning rushes to multi-unit drum tracking and supplier debit notes, every module is built around paint retail and wholesale realities.
+            From 100% offline billing during internet cuts and paint bucket token custody to multi-branch godown transfers, AI bill scanning, and custom thermal receipts.
           </p>
         </div>
 
@@ -118,4 +136,3 @@ export const FeaturesBento: React.FC<FeaturesBentoProps> = ({ onSelectFeature })
     </section>
   );
 };
-

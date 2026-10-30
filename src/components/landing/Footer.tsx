@@ -110,8 +110,43 @@ export const Footer: React.FC<FooterProps> = ({ onOpenDemo, onNavigate }) => {
                 </button>
               </li>
               <li>
+                <button onClick={() => handleNav('/features/offline-mode')} className="hover:text-[#FF6B00] transition-colors text-left cursor-pointer font-medium text-emerald-700">
+                  Bulletproof Offline Engine (100%)
+                </button>
+              </li>
+              <li>
+                <button onClick={() => handleNav('/features/receipt-customization')} className="hover:text-[#FF6B00] transition-colors text-left cursor-pointer">
+                  Regular Receipt Designer (80mm/A4)
+                </button>
+              </li>
+              <li>
                 <button onClick={() => handleNav('/features/inventory')} className="hover:text-[#FF6B00] transition-colors text-left cursor-pointer">
                   Multi-Vault Godown Stock
+                </button>
+              </li>
+              <li>
+                <button onClick={() => handleNav('/features/ai-invoice-scan')} className="hover:text-[#FF6B00] transition-colors text-left cursor-pointer">
+                  AI Purchase Bill Scanner (Gemini)
+                </button>
+              </li>
+              <li>
+                <button onClick={() => handleNav('/features/token-management')} className="hover:text-[#FF6B00] transition-colors text-left cursor-pointer">
+                  Paint Token Safe Custody
+                </button>
+              </li>
+              <li>
+                <button onClick={() => handleNav('/features/branch-transfers')} className="hover:text-[#FF6B00] transition-colors text-left cursor-pointer">
+                  Inter-Branch Stock Transfers (IBT)
+                </button>
+              </li>
+              <li>
+                <button onClick={() => handleNav('/features/ceo-executive-suite')} className="hover:text-[#FF6B00] transition-colors text-left cursor-pointer">
+                  CEO Suite & Rupee Cash Drawer
+                </button>
+              </li>
+              <li>
+                <button onClick={() => handleNav('/features/company-order-sheets')} className="hover:text-[#FF6B00] transition-colors text-left cursor-pointer">
+                  Company Order Sheets
                 </button>
               </li>
               <li>
@@ -126,27 +161,12 @@ export const Footer: React.FC<FooterProps> = ({ onOpenDemo, onNavigate }) => {
               </li>
               <li>
                 <button onClick={() => handleNav('/features/purchases')} className="hover:text-[#FF6B00] transition-colors text-left cursor-pointer">
-                  Supplier Purchasing & Payables
-                </button>
-              </li>
-              <li>
-                <button onClick={() => handleNav('/features/purchase-returns')} className="hover:text-[#FF6B00] transition-colors text-left cursor-pointer">
-                  Purchase Returns (Debit Notes)
+                  Supplier Purchases & Landed Costs
                 </button>
               </li>
               <li>
                 <button onClick={() => handleNav('/features/reports')} className="hover:text-[#FF6B00] transition-colors text-left cursor-pointer">
                   Shift Close & Margin Reports
-                </button>
-              </li>
-              <li>
-                <button onClick={() => handleNav('/features/ai-invoice-scan')} className="hover:text-[#FF6B00] transition-colors text-left cursor-pointer">
-                  AI Purchase Invoice Scanner
-                </button>
-              </li>
-              <li>
-                <button onClick={() => handleNav('/features/token-management')} className="hover:text-[#FF6B00] transition-colors text-left cursor-pointer">
-                  Paint Token & Loyalty Ledger
                 </button>
               </li>
             </ul>

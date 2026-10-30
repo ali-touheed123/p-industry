@@ -68,12 +68,16 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenDemo, onNavigate, currentP
 
   const featureLinks = [
     { title: 'POS Billing Register', path: '/features/pos', desc: 'F2-F9 counter keys, tint lookup & hold cart' },
-    { title: 'Multi-Vault Inventory', path: '/features/inventory', desc: 'Godown stock, gallon & drum pack multipliers' },
-    { title: 'Sales & Contractor Khata', path: '/features/sales', desc: 'Customer ledgers, credit limits & invoices' },
-    { title: 'Sales Returns & Credits', path: '/features/sales-returns', desc: 'Return against bill & automated credit notes' },
-    { title: 'Purchases & Procurement', path: '/features/purchases', desc: 'Supplier bills, landed freight & khata' },
-    { title: 'Purchase Returns (Debit Notes)', path: '/features/purchase-returns', desc: 'Supplier returns & instant debit notes' },
-    { title: 'Shift & Margin Reports', path: '/features/reports', desc: 'Daily daraz hisab & itemized profit margins' },
+    { title: 'Bulletproof Offline Engine', path: '/features/offline-mode', desc: '100% offline billing with auto FIFO cloud sync' },
+    { title: 'Regular Receipt Designer', path: '/features/receipt-customization', desc: '80mm thermal & A4 designer with silent F5 print' },
+    { title: 'Multi-Vault Paint Inventory', path: '/features/inventory', desc: 'Godown stock, gallon & drum pack multipliers' },
+    { title: 'AI Purchase Bill Scanner', path: '/features/ai-invoice-scan', desc: 'Gemini vision OCR for Urdu & handwritten bills' },
+    { title: 'Paint Token Safe Custody', path: '/features/token-management', desc: 'Brand token ledger & manufacturer reimbursement' },
+    { title: 'Inter-Branch Stock Transfers', path: '/features/branch-transfers', desc: '4-stage multi-store requisition & dispatch ERP' },
+    { title: 'CEO Executive Suite & Drawer', path: '/features/ceo-executive-suite', desc: 'Rupee cash drawer counter & remote store audits' },
+    { title: 'Company Order Sheets', path: '/features/company-order-sheets', desc: 'Standardized procurement for paint reps' },
+    { title: 'Sales & Contractor Khata', path: '/features/sales', desc: 'Customer ledgers, credit limits & WhatsApp slips' },
+    { title: 'Reports & Margin Analytics', path: '/features/reports', desc: 'Daily daraz hisab & itemized profit margins' },
   ];
 
   return (
@@ -98,57 +102,60 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenDemo, onNavigate, currentP
             className="flex items-center group focus:outline-none py-0.5 cursor-pointer"
             aria-label="Pyntflow Home"
           >
-            <PyntflowLogo height={28} className="sm:h-[30px]" />
+            <PyntflowLogo height={28} />
           </button>
 
           {/* Desktop Navigation Links */}
-          <nav className="hidden lg:flex items-center gap-5 xl:gap-7 text-sm font-medium text-slate-600">
-            {/* Features Dropdown */}
-            <div 
-              className="relative"
-              onMouseEnter={() => setFeaturesDropdownOpen(true)}
-              onMouseLeave={() => setFeaturesDropdownOpen(false)}
-            >
+          <nav className="hidden lg:flex items-center gap-7 text-xs sm:text-sm font-semibold text-slate-600">
+            {/* Features Dropdown Menu */}
+            <div className="relative">
               <button
-                className="flex items-center gap-1 hover:text-slate-900 transition-colors py-1 cursor-pointer"
+                type="button"
                 onClick={() => setFeaturesDropdownOpen(!featuresDropdownOpen)}
+                onMouseEnter={() => setFeaturesDropdownOpen(true)}
+                className="flex items-center gap-1 hover:text-slate-900 transition-colors py-1 cursor-pointer"
               >
                 <span>Features</span>
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${featuresDropdownOpen ? 'rotate-180 text-[#FF6B00]' : ''}`} />
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${featuresDropdownOpen ? 'rotate-180 text-blue-600' : ''}`} />
               </button>
 
               <AnimatePresence>
                 {featuresDropdownOpen && (
                   <motion.div
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 8 }}
-                    transition={{ duration: 0.15 }}
-                    className="absolute top-full left-0 w-88 bg-white rounded-2xl border border-slate-200/90 shadow-xl p-3 grid gap-1 z-50 mt-1"
+                    initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.98 }}
+                    transition={{ duration: 0.18 }}
+                    onMouseLeave={() => setFeaturesDropdownOpen(false)}
+                    className="absolute top-full left-1/2 -translate-x-1/2 pt-2 z-50 w-[420px]"
                   >
-                    {featureLinks.map((item) => (
-                      <button
-                        key={item.path}
-                        onClick={() => handleLinkClick(item.path)}
-                        className="p-2.5 hover:bg-orange-50/70 rounded-xl text-left transition-colors cursor-pointer group"
-                      >
-                        <div className="text-xs font-bold text-slate-900 group-hover:text-[#FF6B00] transition-colors">
-                          {item.title}
-                        </div>
-                        <div className="text-[11px] text-slate-500 line-clamp-1">
-                          {item.desc}
-                        </div>
-                      </button>
-                    ))}
+                    <div className="bg-white rounded-2xl p-3 shadow-xl border border-slate-200/90 max-h-[480px] overflow-y-auto">
+                      <div className="grid grid-cols-1 gap-1">
+                        {featureLinks.map((item) => (
+                          <button
+                            key={item.path}
+                            onClick={() => handleLinkClick(item.path)}
+                            className="flex flex-col text-left p-2.5 rounded-xl hover:bg-slate-50 transition-colors group cursor-pointer"
+                          >
+                            <span className="text-xs font-bold text-slate-800 group-hover:text-blue-600">
+                              {item.title}
+                            </span>
+                            <span className="text-[11px] text-slate-500 line-clamp-1">
+                              {item.desc}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
 
-                    <div className="pt-2 mt-1 border-t border-slate-100">
-                      <button
-                        onClick={() => handleLinkClick('/features')}
-                        className="w-full p-2 text-center text-xs font-bold text-[#FF6B00] hover:bg-orange-50/80 rounded-lg transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                      >
-                        <span>Explore All 7 Modules</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="pt-2 mt-2 border-t border-slate-100 flex items-center justify-between px-2">
+                        <button
+                          onClick={() => handleLinkClick('/features')}
+                          className="text-[11px] font-bold text-blue-600 hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>Explore All Modules Hub</span>
+                          <ArrowRight className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
                   </motion.div>
                 )}
