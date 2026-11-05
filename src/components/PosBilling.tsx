@@ -136,6 +136,7 @@ interface HeldOrder {
 
 
 const SHORTCUTS = [
+  { key: 'F1', label: 'Directory' },
   { key: 'F2', label: 'Save' },
   { key: 'F3', label: 'Search' },
   { key: 'F4', label: 'Add Item' },
@@ -183,15 +184,39 @@ export default function PosBilling({
   const customerInputRef = useRef<HTMLInputElement>(null);
   const skipCustomerModalOnFocus = useRef(false);
   const [customerSearch, setCustomerSearch] = useState<string>('');
-  // Walk-in rule: until a registered customer is picked, a real walk-in name must be typed
-  const needsCustomerName = !selectedClient && (isPlaceholderWalkInName(customerSearch) || customerSearch.trim().length < 2);
+  // Walk-in customer name is now completely optional
+  const needsCustomerName = false;
   const [showCustomerModal, setShowCustomerModal] = useState<boolean>(false);
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState<boolean>(false);
+  const [activeCustomerIndex, setActiveCustomerIndex] = useState<number>(0);
   const [clientSearchQuery, setClientSearchQuery] = useState<string>('');
   const [newClientName, setNewClientName] = useState<string>('');
   const [newClientPhone, setNewClientPhone] = useState<string>('');
   const [newClientReference, setNewClientReference] = useState<string>('');
   const [newClientPreviousBalance, setNewClientPreviousBalance] = useState<string>('');
   const [remarks, setRemarks] = useState<string>('');
+
+  // Resolved display name for walk-in or selected registered client
+  const getCustomerDisplayName = (): string => {
+    if (selectedClient?.name) return selectedClient.name;
+    const trimmed = customerSearch.trim();
+    if (!trimmed || isPlaceholderWalkInName(trimmed)) return 'Walk-in Customer';
+    return formatWalkInName(trimmed);
+  };
+
+  // Inline matching accounts for fast keyboard selection without opening modal
+  const filteredInlineClients = useMemo(() => {
+    if (!customerSearch || selectedClient) return [];
+    const q = customerSearch.trim().toLowerCase();
+    if (!q) return [];
+    return clients
+      .filter((c) =>
+        (c.name && c.name.toLowerCase().includes(q)) ||
+        (c.phone && c.phone.includes(q)) ||
+        (c.code && c.code.toLowerCase().includes(q))
+      )
+      .slice(0, 8);
+  }, [clients, customerSearch, selectedClient]);
 
   // Customer History Real Data State
   const [clientHistory, setClientHistory] = useState<{ lastPurchase: string; totalSales: string }>({
@@ -216,7 +241,7 @@ export default function PosBilling({
 
   // Product search & Add row state
   const [productQuery, setProductQuery] = useState<string>('');
-  const [inputQty, setInputQty] = useState<number>(1);
+  const [inputQty, setInputQty] = useState<number | string>(1);
   const [inputRate, setInputRate] = useState<number>(0);
   const [inputDiscount, setInputDiscount] = useState<number>(0);
   const [inputSpecialRate, setInputSpecialRate] = useState<number>(0);
@@ -317,12 +342,12 @@ export default function PosBilling({
                 prev.map((o) =>
                   o.localHoldId === hold.localHoldId
                     ? {
-                        ...o,
-                        id: data.held_order.id,
-                        dbId: data.held_order.id,
-                        isLocalOnly: false,
-                        localHoldId: undefined,
-                      }
+                      ...o,
+                      id: data.held_order.id,
+                      dbId: data.held_order.id,
+                      isLocalOnly: false,
+                      localHoldId: undefined,
+                    }
                     : o,
                 ),
               );
@@ -473,6 +498,15 @@ export default function PosBilling({
       window.removeEventListener('focus', handleFocus);
     };
   }, [tenantId, canUseSpecialReceipt]);
+
+  // Focus Customer Account input on initial page load / mount
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      customerInputRef.current?.focus();
+      customerInputRef.current?.select();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Assigned receipt template for this branch (DEV-07)
   const [assignedTemplate, setAssignedTemplate] = useState<ReceiptTemplate | null>(null);
@@ -810,8 +844,8 @@ export default function PosBilling({
       const rawItems = Array.isArray(restoringHeldOrder.items_json)
         ? restoringHeldOrder.items_json
         : Array.isArray(restoringHeldOrder.items)
-        ? restoringHeldOrder.items
-        : [];
+          ? restoringHeldOrder.items
+          : [];
 
       const restoredItems: InvoiceLineItem[] = rawItems.map((it: any, idx: number) => {
         const live = liveItems.find(
@@ -997,12 +1031,9 @@ export default function PosBilling({
   };
 
   // Add Item to table with stock validation and immutable state updates
-  // Walk-in rule: nothing proceeds until a customer is picked or a walk-in name is typed
+  // Walk-in rule: Walk-in customer name is now optional
   const blockForCustomerName = (): boolean => {
-    if (!needsCustomerName) return false;
-    showFeedback('Pehle customer select karein ya walk-in customer ka naam likhein.');
-    customerInputRef.current?.focus();
-    return true;
+    return false;
   };
 
   // Special-brand rule: for users with special receipt access, every special-brand item on a sale needs a Special Rate
@@ -1036,7 +1067,7 @@ export default function PosBilling({
       }
     }
 
-    const requestedQty = Math.max(1, inputQty);
+    const requestedQty = Math.max(1, Number(inputQty) || 1);
     const existingIndex = lineItems.findIndex((li) => li.item?.id === prod.id || li.code === prod.code);
     const currentQtyInCart = existingIndex >= 0 ? lineItems[existingIndex].qty : 0;
     const totalQtyRequested = currentQtyInCart + requestedQty;
@@ -1169,7 +1200,7 @@ export default function PosBilling({
     if (blockForCustomerName()) return;
 
     const holdNo = `HOLD-${Date.now().toString().slice(-4)}`;
-    const customerDisplayName = selectedClient?.name || formatWalkInName(customerSearch);
+    const customerDisplayName = getCustomerDisplayName();
 
     try {
       const res = await fetchWithTimeout('/api/held-invoices', {
@@ -1455,7 +1486,7 @@ export default function PosBilling({
       }
     }
 
-    const customerDisplayName = selectedClient ? selectedClient.name : formatWalkInName(customerSearch);
+    const customerDisplayName = getCustomerDisplayName();
 
     // Determine clean payment_type
     let determinedPaymentType = 'cash';
@@ -1555,12 +1586,12 @@ export default function PosBilling({
       // Phase 8: Pass expected_version and edit_idempotency_key for optimistic locking & dedup
       const payloadToSend = isEditingExisting
         ? {
-            id: editingInvoice.id,
-            edit_reason: editingInvoice.edit_reason || '',
-            expected_version: editingInvoice.version ?? 1,
-            edit_idempotency_key: keyToUse,
-            ...invoicePayload,
-          }
+          id: editingInvoice.id,
+          edit_reason: editingInvoice.edit_reason || '',
+          expected_version: editingInvoice.version ?? 1,
+          edit_idempotency_key: keyToUse,
+          ...invoicePayload,
+        }
         : { ...invoicePayload, invoice_no: undefined, idempotency_key: keyToUse };
 
       // Phase 6: Direct offline checkout fallback helper
@@ -1937,7 +1968,7 @@ export default function PosBilling({
       }
     }
 
-    const customerDisplayName = selectedClient ? selectedClient.name : formatWalkInName(customerSearch);
+    const customerDisplayName = getCustomerDisplayName();
     const modesUsed =
       (actualCashRetained > 0 ? 1 : 0) + (cardPayment > 0 ? 1 : 0) + (bankPayment > 0 ? 1 : 0) + (othersPayment > 0 ? 1 : 0);
     let resolvedPaymentType = 'cash';
@@ -2222,7 +2253,10 @@ export default function PosBilling({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const state = hotkeysStateRef.current;
-      if (e.key === 'F5') {
+      if (e.key === 'F1') {
+        e.preventDefault();
+        setShowCustomerModal(true);
+      } else if (e.key === 'F5') {
         e.preventDefault();
         state.handleCheckout(true);
       } else if (e.key === 'F6') {
@@ -2256,6 +2290,7 @@ export default function PosBilling({
         setShowCustomerModal(false);
         setShowHeldModal(false);
         setShowProductDropdown(false);
+        setShowCustomerDropdown(false);
         setPrintReceiptData(null);
       }
     };
@@ -2740,12 +2775,32 @@ export default function PosBilling({
           {/* Three-Column Row: Customer Info, Customer History, Remarks (Matching painterp) */}
           <div className="pos-grid-3col">
             {/* 1. Customer Search Field */}
-            <div className="pos-card-box" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', color: '#64748B', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-                <User style={{ width: 14, height: 14, color: '#F97316' }} />
-                Customer Account
-              </label>
-              <div className="pos-input-wrapper">
+            <div className="pos-card-box" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', position: 'relative' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                <label style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', color: '#64748B', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <User style={{ width: 14, height: 14, color: '#F97316' }} />
+                  Customer Account
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowCustomerModal(true)}
+                  style={{
+                    background: '#FFF7ED',
+                    border: '1px solid #FFEDD5',
+                    borderRadius: '4px',
+                    padding: '1px 6px',
+                    fontSize: '10px',
+                    fontFamily: 'JetBrains Mono, monospace',
+                    color: '#C2410C',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                  }}
+                  title="Open Customer Directory & Khatas (F1)"
+                >
+                  F1: Directory
+                </button>
+              </div>
+              <div className="pos-input-wrapper" style={{ position: 'relative' }}>
                 <input
                   ref={customerInputRef}
                   type="text"
@@ -2753,22 +2808,210 @@ export default function PosBilling({
                   onChange={(e) => {
                     setSelectedClient(null);
                     setCustomerSearch(e.target.value);
+                    setShowCustomerDropdown(true);
+                    setActiveCustomerIndex(0);
                   }}
-                  onFocus={() => {
-                    if (skipCustomerModalOnFocus.current) {
-                      skipCustomerModalOnFocus.current = false;
-                      return;
+                  onFocus={(e) => {
+                    e.currentTarget.select();
+                    if (customerSearch.trim() && !selectedClient) {
+                      setShowCustomerDropdown(true);
                     }
-                    setShowCustomerModal(true);
                   }}
-                  placeholder="Walk-in customer ka naam likhein, ya account search karein..."
+                  onBlur={() => {
+                    setTimeout(() => setShowCustomerDropdown(false), 200);
+                  }}
+                  onKeyDown={(e) => {
+                    if (showCustomerDropdown && filteredInlineClients.length > 0) {
+                      const totalCustomerOptions = 1 + filteredInlineClients.length;
+                      if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        setActiveCustomerIndex((prev) => (prev + 1) % totalCustomerOptions);
+                        return;
+                      } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        setActiveCustomerIndex((prev) => (prev - 1 + totalCustomerOptions) % totalCustomerOptions);
+                        return;
+                      } else if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (activeCustomerIndex === 0) {
+                          // Explicit Walk-in selected
+                          setSelectedClient(null);
+                        } else {
+                          const picked = filteredInlineClients[activeCustomerIndex - 1];
+                          if (picked) {
+                            setSelectedClient(picked);
+                            setCustomerSearch(picked.name);
+                          }
+                        }
+                        setShowCustomerDropdown(false);
+                        searchInputRef.current?.focus();
+                        searchInputRef.current?.select();
+                        return;
+                      } else if (e.key === 'Escape') {
+                        setShowCustomerDropdown(false);
+                        return;
+                      }
+                    }
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      setShowCustomerDropdown(false);
+                      searchInputRef.current?.focus();
+                      searchInputRef.current?.select();
+                    } else if (e.key === 'F1') {
+                      e.preventDefault();
+                      setShowCustomerModal(true);
+                    } else if (e.key === 'ArrowDown') {
+                      if (filteredInlineClients.length > 0) {
+                        e.preventDefault();
+                        setShowCustomerDropdown(true);
+                      }
+                    }
+                  }}
+                  placeholder="Walk-in (optional) ya account search... [Enter = Item Search]"
                   className="pos-text-input"
-                  style={{ paddingRight: '32px', fontWeight: 500, ...(needsCustomerName ? { borderColor: '#F87171', background: '#FEF2F2' } : {}) }}
+                  style={{ paddingRight: '32px', fontWeight: 500 }}
                 />
-                <Search
+                <button
+                  type="button"
+                  title="Open Customer Directory & Khatas (F1)"
                   onClick={() => setShowCustomerModal(true)}
-                  style={{ width: 16, height: 16, color: '#94A3B8', position: 'absolute', right: '10px', cursor: 'pointer' }}
-                />
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    position: 'absolute',
+                    right: '10px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Search style={{ width: 16, height: 16, color: '#94A3B8' }} />
+                </button>
+
+                {/* Inline Fast Customer Autocomplete Dropdown with Explicit Option 1 Walk-in Row */}
+                {showCustomerDropdown && filteredInlineClients.length > 0 && (
+                  <div
+                    className="pos-dropdown-panel"
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 4px)',
+                      left: 0,
+                      right: 0,
+                      zIndex: 60,
+                      background: '#FFFFFF',
+                      border: '1px solid #CBD5E1',
+                      borderRadius: '8px',
+                      boxShadow: '0 10px 25px -5px rgba(0,0,0,0.15)',
+                      maxHeight: '260px',
+                      overflowY: 'auto',
+                    }}
+                  >
+                    <div style={{ padding: '4px 8px', fontSize: '9px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B', background: '#F8FAFC', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Select Walk-in or Registered Account</span>
+                      <span>↑↓ Navigate · Enter Select</span>
+                    </div>
+
+                    {/* Row 0: Explicit Walk-in Option */}
+                    {(() => {
+                      const isWalkInHighlighted = activeCustomerIndex === 0;
+                      const rawName = customerSearch.trim();
+                      const currentWalkInName = rawName
+                        ? `${stripWalkInSuffix(rawName)} (WI)`
+                        : 'Walk-in Customer (General Counter)';
+                      return (
+                        <div
+                          onMouseEnter={() => setActiveCustomerIndex(0)}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setSelectedClient(null);
+                            setShowCustomerDropdown(false);
+                            searchInputRef.current?.focus();
+                            searchInputRef.current?.select();
+                          }}
+                          style={{
+                            padding: '8px 10px',
+                            borderBottom: '1px solid #E2E8F0',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            fontSize: '11px',
+                            background: isWalkInHighlighted ? '#FFF7ED' : '#F8FAFC',
+                            borderLeft: isWalkInHighlighted ? '3px solid #F97316' : '3px solid transparent',
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 700, color: isWalkInHighlighted ? '#C2410C' : '#0F172A', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>👤 Continue as Walk-in: &quot;{currentWalkInName}&quot;</span>
+                            </div>
+                            <div style={{ fontSize: '10px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', marginTop: '1px' }}>
+                              Cash sale · No ledger link · [Direct Enter]
+                            </div>
+                          </div>
+                          <span style={{ fontSize: '9px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, padding: '2px 6px', background: isWalkInHighlighted ? '#FED7AA' : '#E2E8F0', borderRadius: '4px', color: '#C2410C' }}>
+                            Enter: Walk-in
+                          </span>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Row 1..N: Matching Registered Customer Accounts */}
+                    {filteredInlineClients.map((client, idx) => {
+                      const itemIndex = idx + 1;
+                      const isHighlighted = itemIndex === activeCustomerIndex;
+                      return (
+                        <div
+                          key={client.id}
+                          onMouseEnter={() => setActiveCustomerIndex(itemIndex)}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setSelectedClient(client);
+                            setCustomerSearch(client.name);
+                            setShowCustomerDropdown(false);
+                            searchInputRef.current?.focus();
+                            searchInputRef.current?.select();
+                          }}
+                          style={{
+                            padding: '8px 10px',
+                            borderBottom: '1px solid #F1F5F9',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            fontSize: '11px',
+                            background: isHighlighted ? '#EFF6FF' : '#FFFFFF',
+                            borderLeft: isHighlighted ? '3px solid #3B82F6' : '3px solid transparent',
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 600, color: isHighlighted ? '#1D4ED8' : '#0F172A', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                              <span>🏢 {client.name}</span>
+                              <span style={{ fontSize: '9px', fontWeight: 700, padding: '1px 5px', background: '#DBEAFE', color: '#1E40AF', borderRadius: '3px' }}>
+                                Khata Account
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '10px', color: '#64748B', fontFamily: 'JetBrains Mono, monospace', marginTop: '1px' }}>
+                              {client.code ? `${client.code} · ` : ''}{client.phone || 'No phone'}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: client.current_balance > 0 ? '#DC2626' : '#16A34A', fontWeight: 700 }}>
+                              Bal: Rs. {(client.current_balance || 0).toLocaleString()}
+                            </div>
+                            {client.credit_limit > 0 && (
+                              <div style={{ fontSize: '9px', fontFamily: 'JetBrains Mono, monospace', color: '#94A3B8' }}>
+                                Limit: Rs. {(client.credit_limit || 0).toLocaleString()}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -2830,12 +3073,8 @@ export default function PosBilling({
                   ref={searchInputRef}
                   type="text"
                   value={productQuery}
-                  readOnly={needsCustomerName}
-                  onFocus={() => {
-                    if (needsCustomerName) {
-                      blockForCustomerName();
-                      return;
-                    }
+                  onFocus={(e) => {
+                    e.currentTarget.select();
                     setShowProductDropdown(true);
                     setActiveProductIndex(0);
                   }}
@@ -2854,12 +3093,11 @@ export default function PosBilling({
                       setShowProductDropdown(true);
                       setActiveProductIndex((prev) => (filteredCatalog.length ? (prev - 1 + filteredCatalog.length) % filteredCatalog.length : 0));
                     } else if (e.key === 'Enter' && e.shiftKey) {
-                      // Shift+Enter = add directly to cart (bypass keyboard chain)
+                      // Shift+Enter = navigate BACKWARD to Customer Search
                       e.preventDefault();
-                      const prod = (showProductDropdown && filteredCatalog.length > 0)
-                        ? filteredCatalog[activeProductIndex]
-                        : (selectedProduct || (filteredCatalog.length === 1 ? filteredCatalog[0] : null));
-                      if (prod) handleAddItem(prod, undefined, false);
+                      setShowProductDropdown(false);
+                      customerInputRef.current?.focus();
+                      customerInputRef.current?.select();
                     } else if (e.key === 'Enter') {
                       // Plain Enter = SELECT product, move focus to Qty
                       e.preventDefault();
@@ -2871,7 +3109,10 @@ export default function PosBilling({
                         setInputRate(prod.retail_price || 0);
                         setProductQuery(`${prod.name}${prod.shade_code ? ` (${prod.shade_code})` : ''}`);
                         setShowProductDropdown(false);
-                        qtyInputRef.current?.focus();
+                        setTimeout(() => {
+                          qtyInputRef.current?.focus();
+                          qtyInputRef.current?.select();
+                        }, 20);
                       }
                     } else if (e.key === 'Escape') {
                       setShowProductDropdown(false);
@@ -2902,8 +3143,8 @@ export default function PosBilling({
                       const prodNameKey = (prod.name || '').trim().toLowerCase();
                       const lastPurch = selectedClient
                         ? (clientProductHistory[prod.id] ||
-                           clientProductHistory[prodCodeKey] ||
-                           clientProductHistory[prodNameKey])
+                          clientProductHistory[prodCodeKey] ||
+                          clientProductHistory[prodNameKey])
                         : undefined;
                       const isHighlighted = idx === activeProductIndex;
 
@@ -2913,9 +3154,13 @@ export default function PosBilling({
                           onMouseEnter={() => setActiveProductIndex(idx)}
                           onClick={() => {
                             setSelectedProduct(prod);
-                            setProductQuery(`${prod.name} (${shadeCode})`);
+                            setInputRate(prod.retail_price || 0);
+                            setProductQuery(`${prod.name}${prod.shade_code ? ` (${prod.shade_code})` : ''}`);
                             setShowProductDropdown(false);
-                            handleAddItem(prod);
+                            setTimeout(() => {
+                              qtyInputRef.current?.focus();
+                              qtyInputRef.current?.select();
+                            }, 20);
                           }}
                           className="pos-dropdown-item"
                           style={{
@@ -2963,12 +3208,55 @@ export default function PosBilling({
                 type="number"
                 min={1}
                 value={inputQty}
-                onChange={(e) => setInputQty(Number(e.target.value) || 1)}
+                onFocus={(e) => {
+                  e.currentTarget.select();
+                }}
+                onClick={(e) => {
+                  e.currentTarget.select();
+                }}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === '') {
+                    setInputQty('' as unknown as number);
+                  } else {
+                    const num = Number(val);
+                    if (!isNaN(num)) setInputQty(num);
+                  }
+                }}
+                onBlur={() => {
+                  if (!inputQty || Number(inputQty) < 1) {
+                    setInputQty(1);
+                  }
+                }}
                 onKeyDown={(e) => {
-                  if (e.key === 'ArrowUp') { e.preventDefault(); setInputQty((prev) => prev + 1); }
-                  else if (e.key === 'ArrowDown') { e.preventDefault(); setInputQty((prev) => Math.max(1, prev - 1)); }
-                  else if (e.key === 'Enter') { e.preventDefault(); rateInputRef.current?.focus(); }
-                  else if (e.key === 'Escape') { setSelectedProduct(null); setProductQuery(''); searchInputRef.current?.focus(); }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setInputQty((prev) => (Number(prev) || 1) + 1);
+                  } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setInputQty((prev) => Math.max(1, (Number(prev) || 1) - 1));
+                  } else if (e.key === 'Enter' && e.shiftKey) {
+                    // Shift+Enter = go BACKWARD to item search
+                    e.preventDefault();
+                    searchInputRef.current?.focus();
+                    searchInputRef.current?.select();
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (invoiceType === 'return') {
+                      rateInputRef.current?.focus();
+                      rateInputRef.current?.select();
+                    } else if (specialFieldEnabled) {
+                      specialRateInputRef.current?.focus();
+                      specialRateInputRef.current?.select();
+                    } else {
+                      discInputRef.current?.focus();
+                      discInputRef.current?.select();
+                    }
+                  } else if (e.key === 'Escape') {
+                    setSelectedProduct(null);
+                    setProductQuery('');
+                    searchInputRef.current?.focus();
+                  }
                 }}
                 style={{ width: '100%', fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A', background: 'transparent', border: 'none', textAlign: 'center', outline: 'none' }}
               />
@@ -2988,10 +3276,22 @@ export default function PosBilling({
                 placeholder="0"
                 readOnly={invoiceType !== 'return'}
                 title={invoiceType !== 'return' ? 'Rate locked — sirf CEO Edit Product / Bulk Edit Prices se badal sakta hai' : undefined}
+                onFocus={(e) => e.currentTarget.select()}
                 onChange={(e) => { if (invoiceType === 'return') setInputRate(Number(e.target.value) || 0); }}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') { e.preventDefault(); (specialFieldEnabled ? specialRateInputRef : discInputRef).current?.focus(); }
-                  else if (e.key === 'Escape') { searchInputRef.current?.focus(); }
+                  if (e.key === 'Enter' && e.shiftKey) {
+                    // Shift+Enter = go BACKWARD to qty
+                    e.preventDefault();
+                    qtyInputRef.current?.focus();
+                    qtyInputRef.current?.select();
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const target = specialFieldEnabled ? specialRateInputRef : discInputRef;
+                    target.current?.focus();
+                    target.current?.select();
+                  } else if (e.key === 'Escape') {
+                    searchInputRef.current?.focus();
+                  }
                 }}
                 style={{ width: '100%', fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A', background: 'transparent', border: 'none', textAlign: 'center', outline: 'none' }}
               />
@@ -3011,9 +3311,16 @@ export default function PosBilling({
                   value={inputSpecialRate || ''}
                   placeholder="0"
                   title="Special Rate (final rate per unit customer se liya jayega)"
+                  onFocus={(e) => e.currentTarget.select()}
                   onChange={(e) => setInputSpecialRate(Math.max(0, Number(e.target.value) || 0))}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
+                    if (e.key === 'Enter' && e.shiftKey) {
+                      // Shift+Enter = go BACKWARD to rate / qty
+                      e.preventDefault();
+                      const target = invoiceType === 'return' ? rateInputRef : qtyInputRef;
+                      target.current?.focus();
+                      target.current?.select();
+                    } else if (e.key === 'Enter') {
                       e.preventDefault();
                       if (!(inputSpecialRate > 0)) {
                         showFeedback('Special Rate likhna zaroori hai — iske baghair aage nahi barh sakte.');
@@ -3024,8 +3331,10 @@ export default function PosBilling({
                         return;
                       }
                       discInputRef.current?.focus();
+                      discInputRef.current?.select();
+                    } else if (e.key === 'Escape') {
+                      searchInputRef.current?.focus();
                     }
-                    else if (e.key === 'Escape') { searchInputRef.current?.focus(); }
                   }}
                   style={{ width: '100%', fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#9A3412', background: 'transparent', border: 'none', textAlign: 'center', outline: 'none' }}
                 />
@@ -3045,10 +3354,21 @@ export default function PosBilling({
                 step="any"
                 value={inputDiscount || ''}
                 placeholder="0"
+                onFocus={(e) => e.currentTarget.select()}
                 onChange={(e) => setInputDiscount(Math.min(100, Math.max(0, Number(e.target.value) || 0)))}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') { e.preventDefault(); addItemBtnRef.current?.click(); }
-                  else if (e.key === 'Escape') { searchInputRef.current?.focus(); }
+                  if (e.key === 'Enter' && e.shiftKey) {
+                    // Shift+Enter = go BACKWARD
+                    e.preventDefault();
+                    const target = specialFieldEnabled ? specialRateInputRef : (invoiceType === 'return' ? rateInputRef : qtyInputRef);
+                    target.current?.focus();
+                    target.current?.select();
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addItemBtnRef.current?.click();
+                  } else if (e.key === 'Escape') {
+                    searchInputRef.current?.focus();
+                  }
                 }}
                 style={{ width: '100%', fontSize: '12px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, color: '#0F172A', background: 'transparent', border: 'none', textAlign: 'center', outline: 'none' }}
               />
@@ -3058,6 +3378,13 @@ export default function PosBilling({
             <button
               ref={addItemBtnRef}
               type="button"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && e.shiftKey) {
+                  e.preventDefault();
+                  discInputRef.current?.focus();
+                  discInputRef.current?.select();
+                }
+              }}
               onClick={() => {
                 const prod = selectedProduct || (filteredCatalog.length === 1 ? filteredCatalog[0] : null);
                 if (prod) {
