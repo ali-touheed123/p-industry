@@ -430,11 +430,19 @@ const toShopLocalDate = (val: string | Date | null | undefined): string => {
 
   const filteredShifts = useMemo(() => {
     return shifts.filter((s) => {
+      // If it's a currently open shift, it is active from its start date through today
+      if (s.isOpen) {
+        const start = startDate || '0000-00-00';
+        const end = endDate || '9999-99-99';
+        const shiftStart = s.date || todayLocal;
+        const overlaps = shiftStart <= end && todayLocal >= start;
+        return overlaps;
+      }
       if (startDate && s.date && s.date < startDate) return false;
       if (endDate && s.date && s.date > endDate) return false;
       return true;
     });
-  }, [shifts, startDate, endDate]);
+  }, [shifts, startDate, endDate, todayLocal]);
 
   // FIX CEO-09: do NOT fall back to shifts[0] when the date filter has no matching shifts.
   // The old fallback silently showed a stale record from a different date range.
@@ -445,7 +453,7 @@ const toShopLocalDate = (val: string | Date | null | undefined): string => {
   if (!activeRecord) {
     return (
       <div id="executive-day-close-view" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #E2E8F0', paddingBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <h2 className="ceo-font-heading" style={{ fontSize: '20px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
@@ -456,13 +464,47 @@ const toShopLocalDate = (val: string | Date | null | undefined): string => {
               {branch.name} • End-of-shift drawer balancing, cash counting &amp; variance audits
             </p>
           </div>
+
+          {/* Historical Date Period Filter ALWAYS visible in header */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <DatePeriodFilter
+              startDate={startDate}
+              endDate={endDate}
+              onChangeStartDate={setStartDate}
+              onChangeEndDate={setEndDate}
+            />
+          </div>
         </div>
+
         <div style={{ padding: '48px', textAlign: 'center', border: '1px solid #E2E8F0', borderRadius: '8px', color: '#64748B', backgroundColor: '#FFFFFF' }}>
           <CalendarCheck style={{ width: '32px', height: '32px', color: '#D97706', margin: '0 auto 12px' }} />
           <div style={{ fontSize: '14px', fontWeight: 600, color: '#0F172A', marginBottom: '4px' }}>No Shift Reconciliation Records</div>
-          <div style={{ fontSize: '12px', color: '#64748B' }}>
-            {loading ? 'Loading shift records...' : 'When counter staff close shifts in the POS Day Close module, reconciliation summaries will appear here.'}
+          <div style={{ fontSize: '12px', color: '#64748B', maxWidth: '460px', margin: '0 auto' }}>
+            {loading ? 'Loading shift records...' : 'No shifts found for the selected date period. Please adjust the FROM and TO dates above to view previous records.'}
           </div>
+          {!loading && (startDate || endDate) && (
+            <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'center', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setStartDate('');
+                  setEndDate('');
+                }}
+                style={{
+                  padding: '6px 14px',
+                  backgroundColor: '#0F172A',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Show All Shifts (All Time)
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
