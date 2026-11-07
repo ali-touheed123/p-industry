@@ -181,6 +181,26 @@ export async function requireTenantAuth(
     return { authorized: false, error: 'Forbidden: No tenant assigned to this session', status: 403, session };
   }
 
+  // Verify primary tenant is not suspended
+  try {
+    const { data: primaryTenant } = await supabaseAdmin
+      .from('tenants')
+      .select('is_active')
+      .eq('id', session.tenantId)
+      .maybeSingle();
+
+    if (primaryTenant && primaryTenant.is_active === false) {
+      return {
+        authorized: false,
+        error: 'Forbidden: This branch has been suspended by administration',
+        status: 403,
+        session,
+      };
+    }
+  } catch (err) {
+    console.error('Failed to verify tenant active status:', err);
+  }
+
   if (targetTenantId) {
     // 1. Direct match with primary tenant ID or slug
     if (session.tenantId === targetTenantId || session.tenantSlug === targetTenantId) {

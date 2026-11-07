@@ -42,6 +42,9 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
   // Stock Policy Switch: Allow selling when stock is 0 or below (negative stock)
   const [allowNegativeStock, setAllowNegativeStock] = useState<boolean>(true);
 
+  // Operational Status Switch: Active vs Suspended (Paused)
+  const [isActive, setIsActive] = useState<boolean>(true);
+
   // Initial Login Accounts fields
   const [ceoUsername, setCeoUsername] = useState('');
   const [ceoPassword, setCeoPassword] = useState('');
@@ -67,6 +70,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
       setSelectedOwnerId(editingBranch.owner_id || '');
       setRequireCeoPass(editingBranch.require_ceo_pass !== undefined ? Boolean(editingBranch.require_ceo_pass) : true);
       setAllowNegativeStock(editingBranch.allow_negative_stock !== undefined ? Boolean(editingBranch.allow_negative_stock) : true);
+      setIsActive(editingBranch.is_active !== undefined ? Boolean(editingBranch.is_active) : true);
       setCeoUsername('');
       setCeoPassword('');
       setCounters([{ username: 'counter1', password: '123', name: 'Counter 01 (Main POS)' }]);
@@ -95,6 +99,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
 
       setRequireCeoPass(true);
       setAllowNegativeStock(true);
+      setIsActive(true);
       setCeoUsername('');
       setCeoPassword('');
       setCounters([
@@ -177,6 +182,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
           owner_id: isExistingOwner ? selectedOwnerId : editingBranch?.owner_id,
           require_ceo_pass: requireCeoPass,
           allow_negative_stock: allowNegativeStock,
+          is_active: isActive,
         },
         !editingBranch
           ? {
@@ -609,6 +615,76 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
               )}
             </div>
           </div>
+
+          {/* ── Operational Status Toggle (Active vs Suspended) ─────────── */}
+          {editingBranch && (
+            <div style={{
+              padding: '20px',
+              borderRadius: '16px',
+              backgroundColor: isActive ? 'rgba(16, 185, 129, 0.05)' : 'rgba(239, 68, 68, 0.05)',
+              border: `1px solid ${isActive ? 'rgba(16, 185, 129, 0.25)' : 'rgba(239, 68, 68, 0.25)'}`,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{
+                    width: '36px', height: '36px', borderRadius: '10px', flexShrink: 0,
+                    backgroundColor: isActive ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <span style={{ fontSize: '18px' }}>{isActive ? '✅' : '⏸️'}</span>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#f1f5f9', letterSpacing: '0.02em' }}>
+                      Branch Operational Status
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px' }}>
+                      <span style={{
+                        fontSize: '10px', fontFamily: "'JetBrains Mono', monospace", fontWeight: 700,
+                        padding: '2px 8px', borderRadius: '9999px',
+                        backgroundColor: isActive ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                        color: isActive ? '#34d399' : '#f87171',
+                        border: `1px solid ${isActive ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+                      }}>
+                        {isActive ? 'STATUS: ACTIVE (OPEN)' : 'STATUS: SUSPENDED (PAUSED)'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                {/* Toggle Switch */}
+                <div
+                  onClick={() => setIsActive(!isActive)}
+                  style={{
+                    width: '48px', height: '26px', borderRadius: '13px', cursor: 'pointer',
+                    position: 'relative', flexShrink: 0, transition: 'background 0.2s',
+                    backgroundColor: isActive ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                    border: `1px solid ${isActive ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+                  }}
+                >
+                  <div style={{
+                    position: 'absolute', top: '3px',
+                    left: isActive ? '24px' : '3px',
+                    width: '18px', height: '18px', borderRadius: '50%', transition: 'left 0.2s',
+                    backgroundColor: isActive ? '#34d399' : '#f87171',
+                    boxShadow: isActive ? '0 0 8px #34d399' : '0 0 8px #f87171',
+                  }} />
+                </div>
+              </div>
+              <div style={{ fontSize: '12px', lineHeight: '1.6', color: isActive ? '#d1d5db' : '#fca5a5' }}>
+                {isActive ? (
+                  <div>
+                    ✅ <strong style={{ color: '#34d399' }}>Active:</strong> Counter staff can log in, take orders, and generate invoices normally.
+                  </div>
+                ) : (
+                  <div>
+                    ⏸️ <strong style={{ color: '#f87171' }}>Suspended:</strong> Point of Sale is locked, staff logins are disabled, and visits to the branch URL show a suspended notice.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* New Shop Provisioning: CEO & Multi-Branch Counters Box */}
           {!editingBranch && (

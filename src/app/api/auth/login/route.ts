@@ -96,6 +96,13 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: false, error: 'Shop or Godown not found' }, { status: 404 });
       }
 
+      if (targetTenant.is_active === false && user.role !== 'developer') {
+        return NextResponse.json(
+          { success: false, error: 'This branch has been temporarily paused by administration. Login is disabled.' },
+          { status: 403 }
+        );
+      }
+
       if (user.role === 'ceo') {
         // Priority 1: Check owner_id foreign key
         const isOwnerIdMatch = (user.owner_id && targetTenant.owner_id && user.owner_id === targetTenant.owner_id) ||
@@ -122,6 +129,12 @@ export async function POST(req: NextRequest) {
       sessionTenantSlug = targetTenant.slug;
     } else {
       sanitizedUser.tenant = user.tenants;
+      if (user.tenants && user.tenants.is_active === false && user.role !== 'developer') {
+        return NextResponse.json(
+          { success: false, error: 'Your assigned branch has been temporarily paused by administration. Login is disabled.' },
+          { status: 403 }
+        );
+      }
     }
 
     sanitizedUser.tenant_id = sessionTenantId;

@@ -170,6 +170,11 @@ export default function TenantAppPage({ params }: PageProps) {
           setError(data.error || 'Branch not found');
         } else {
           setTenant(data.tenant);
+          if (data.tenant.is_active === false) {
+            // Suspended branch: stop background loading of operational data
+            setLoading(false);
+            return;
+          }
           try {
             const itemsRes = await fetch(`/api/items?tenant_id=${data.tenant.id}`);
             const itemsData = await itemsRes.json();
@@ -775,6 +780,37 @@ export default function TenantAppPage({ params }: PageProps) {
     </div>
   );
 
+  // Branch Suspended / Paused Screen
+  if (tenant && tenant.is_active === false && currentUser?.role !== 'developer') {
+    return (
+      <div className="login-wrapper">
+        <div className="login-card" style={{ textAlign: 'center', maxWidth: '440px', padding: '2.5rem 2rem' }}>
+          <div style={{ width: 64, height: 64, borderRadius: '16px', background: '#FEF2F2', border: '1px solid #FCA5A5', color: '#DC2626', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.25rem' }}>
+            <PauseCircle style={{ width: 34, height: 34 }} />
+          </div>
+          <span style={{ fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', color: '#DC2626', fontWeight: 800, letterSpacing: '0.05em', backgroundColor: '#FEE2E2', padding: '3px 10px', borderRadius: '9999px' }}>
+            Branch Suspended
+          </span>
+          <h2 className="headline-sm" style={{ marginTop: '0.75rem', marginBottom: '0.5rem', color: '#0F172A' }}>
+            {tenant.name} is Temporarily Paused
+          </h2>
+          <p className="text-muted body-md" style={{ marginBottom: '1.5rem', lineHeight: 1.5 }}>
+            Operations, counter billing, and user access for this outlet have been paused by system administrators.
+          </p>
+          <div style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '12px 16px', fontSize: '12px', color: '#64748B', marginBottom: '1.5rem', textAlign: 'left' }}>
+            <div style={{ fontWeight: 600, color: '#0F172A', marginBottom: '4px' }}>Status Information:</div>
+            • Point of Sale (POS) and inventory operations are paused.<br />
+            • Existing financial records &amp; inventory remain safely preserved.<br />
+            • To resume operations, please contact the developer or system administrator.
+          </div>
+          <a href="/" className="btn btn-secondary btn-full" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+            ← Return to PyntFlow Home
+          </a>
+        </div>
+      </div>
+    );
+  }
+
   // Login Screen
   if (!currentUser) {
     const isShop = tenant.type === 'shop';
@@ -908,6 +944,12 @@ export default function TenantAppPage({ params }: PageProps) {
   return (
     <div className="app-shell">
       {ceoApprovalModal}
+      {tenant?.is_active === false && (
+        <div style={{ position: 'sticky', top: 0, zIndex: 9999, backgroundColor: '#DC2626', color: '#FFFFFF', padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '13px', fontWeight: 700, letterSpacing: '0.02em', boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }}>
+          <PauseCircle style={{ width: 18, height: 18 }} />
+          <span>BRANCH SUSPENDED: This branch has been paused in Dev Panel. Normal staff logins and sales are blocked. You are viewing in Developer Mode.</span>
+        </div>
+      )}
       {/* ── Collapsible Dark Navy Sidebar ── */}
       <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
         {/* Brand Header */}
