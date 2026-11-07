@@ -727,6 +727,8 @@ export default function TenantAppPage({ params }: PageProps) {
   const needsCeoApproval = !isCEO && branchRequiresCeoPass;
   // Check if this branch allows selling when stock is 0 or below (defaults to true = allowed)
   const branchAllowsNegativeStock = tenant?.allow_negative_stock !== false;
+  // Check if this branch locks retail prices on POS billing (defaults to true = locked)
+  const branchLocksRetailPrices = tenant?.lock_retail_prices !== false;
   // Staff must enter the CEO password before protected features (receipt settings, price/stock edits), if branch enforces it
   const { ensure: ensureCeoApproval, modal: ceoApprovalModal } = useCeoApproval(tenant?.id, needsCeoApproval);
   const totalSales = invoices.reduce((s, i) => s + (i.grandTotal || 0), 0);
@@ -1433,6 +1435,7 @@ export default function TenantAppPage({ params }: PageProps) {
               pendingOrdersCount={pendingOrdersCount}
               onNavigateToOrders={() => setActiveTab('orders')}
               allowNegativeStock={branchAllowsNegativeStock}
+              lockRetailPrices={branchLocksRetailPrices}
             />
           )}
           {(activeTab === 'inventory' || activeTab === 'stock') && (

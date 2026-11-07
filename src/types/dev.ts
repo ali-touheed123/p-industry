@@ -14,6 +14,7 @@ export interface Tenant {
   is_active: boolean;
   require_ceo_pass?: boolean;
   allow_negative_stock?: boolean;
+  lock_retail_prices?: boolean;
   usersCount?: number;
   ceo?: { username: string; name: string } | null;
   staffCount?: number;

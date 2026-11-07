@@ -174,6 +174,7 @@ export async function POST(req: NextRequest) {
       address,
       require_ceo_pass,
       allow_negative_stock,
+      lock_retail_prices,
       ceo_username,
       ceo_password,
       staff_username,
@@ -317,6 +318,7 @@ export async function POST(req: NextRequest) {
         address: address?.trim() || null,
         require_ceo_pass: require_ceo_pass !== undefined ? Boolean(require_ceo_pass) : true,
         allow_negative_stock: allow_negative_stock !== undefined ? Boolean(allow_negative_stock) : true,
+        lock_retail_prices: lock_retail_prices !== undefined ? Boolean(lock_retail_prices) : true,
       })
       .select()
       .single();
@@ -714,6 +716,7 @@ export async function PATCH(req: NextRequest) {
       type,
       require_ceo_pass,
       allow_negative_stock,
+      lock_retail_prices,
       commission_enabled,
       commission_rate,
       commission_split_lead,
@@ -757,6 +760,7 @@ export async function PATCH(req: NextRequest) {
     if (type) updateData.type = type;
     if (require_ceo_pass !== undefined) updateData.require_ceo_pass = Boolean(require_ceo_pass);
     if (allow_negative_stock !== undefined) updateData.allow_negative_stock = Boolean(allow_negative_stock);
+    if (lock_retail_prices !== undefined) updateData.lock_retail_prices = Boolean(lock_retail_prices);
     if (commission_enabled !== undefined) updateData.commission_enabled = commission_enabled;
     if (commission_rate !== undefined) updateData.commission_rate = Number(commission_rate);
     if (commission_split_lead !== undefined) updateData.commission_split_lead = Number(commission_split_lead);

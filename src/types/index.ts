@@ -25,6 +25,7 @@ export interface Tenant {
   is_active: boolean;
   require_ceo_pass?: boolean;
   allow_negative_stock?: boolean;
+  lock_retail_prices?: boolean;
   commission_enabled?: boolean;
   commission_rate?: number;
   commission_split_lead?: number;

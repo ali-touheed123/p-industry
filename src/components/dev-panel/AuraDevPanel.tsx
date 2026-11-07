@@ -226,6 +226,25 @@ export default function AuraDevPanel() {
     }
   };
 
+  const handleToggleRetailPriceLock = async (id: string, currentLockStatus: boolean) => {
+    try {
+      const res = await fetch('/api/tenants', {
+        method: 'PATCH',
+        headers: getDevAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ id, lock_retail_prices: !currentLockStatus }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(!currentLockStatus ? 'Retail prices LOCKED for POS' : 'Retail prices UNLOCKED (Editable)');
+        fetchTenants();
+      } else {
+        showToast(data.error || 'Failed to update retail price lock', 'error');
+      }
+    } catch {
+      showToast('Failed to toggle retail price lock', 'error');
+    }
+  };
+
   // ----------------------------------------------------
   // USER OPERATIONS (Real Supabase API)
   // ----------------------------------------------------
@@ -407,6 +426,7 @@ export default function AuraDevPanel() {
               }}
               onDeleteBranch={handleDeleteBranch}
               onToggleStatus={handleToggleBranchStatus}
+              onToggleRetailPriceLock={handleToggleRetailPriceLock}
               onOpenBranchPortal={(branch) => setPreviewBranch(branch)}
               onAddCounterToBranch={(branch) => {
                 setEditingUser(null);

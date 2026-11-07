@@ -75,6 +75,7 @@ interface Props {
   pendingOrdersCount?: number;
   onNavigateToOrders?: () => void;
   allowNegativeStock?: boolean;
+  lockRetailPrices?: boolean;
 }
 
 export interface ProductLastPurchase {
@@ -165,12 +166,14 @@ export default function PosBilling({
   pendingOrdersCount = 0,
   onNavigateToOrders,
   allowNegativeStock = true,
+  lockRetailPrices = true,
 }: Props) {
   const effectiveUserId = userId || staffName || 'staff';
   const effectiveBranchId = branchId || tenantId;
 
   // Mode toggle: Sales Invoice vs Return
   const [invoiceType, setInvoiceType] = useState<'sales' | 'return'>('sales');
+  const ratesLocked = (lockRetailPrices !== false) && invoiceType !== 'return';
   const [invoiceNo, setInvoiceNo] = useState<string>(
     () => `INV-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`
   );
@@ -1091,7 +1094,7 @@ export default function PosBilling({
     const hasToken = Boolean(prod.has_token && (Number(prod.token_value) || 0) > 0);
     const tokenVal = hasToken ? Number(prod.token_value) || 0 : 0;
     // Use overrideRate if provided; fall back to inputRate (if set by keyboard chain) then retail_price
-    const ratesLocked = invoiceType !== 'return';
+    const ratesLocked = (lockRetailPrices !== false) && invoiceType !== 'return';
     const itemRate = ratesLocked
       ? (prod.retail_price || 0)
       : (overrideRate !== undefined ? overrideRate : (inputRate > 0 ? inputRate : (prod.retail_price || 0)));
@@ -3200,7 +3203,7 @@ export default function PosBilling({
 
             {/* Qty Field */}
             <div style={{ width: '96px', flexShrink: 0, display: 'flex', alignItems: 'center', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '4px 8px' }}>
-              <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B', textTransform: 'uppercase', fontWeight: 700, marginRight: '4px' }}>
+              <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: ratesLocked ? '#64748B' : '#B45309', textTransform: 'uppercase', fontWeight: 700, marginRight: '4px' }}>
                 Qty:
               </span>
               <input
@@ -3242,7 +3245,7 @@ export default function PosBilling({
                     searchInputRef.current?.select();
                   } else if (e.key === 'Enter') {
                     e.preventDefault();
-                    if (invoiceType === 'return') {
+                    if (invoiceType === 'return' || !ratesLocked) {
                       rateInputRef.current?.focus();
                       rateInputRef.current?.select();
                     } else if (specialFieldEnabled) {
@@ -3263,7 +3266,7 @@ export default function PosBilling({
             </div>
 
             {/* Rate Field */}
-            <div style={{ width: '110px', flexShrink: 0, display: 'flex', alignItems: 'center', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '4px 8px' }}>
+            <div style={{ width: '110px', flexShrink: 0, display: 'flex', alignItems: 'center', background: ratesLocked ? '#F8FAFC' : '#FEF3C7', border: `1px solid ${ratesLocked ? '#E2E8F0' : '#FCD34D'}`, borderRadius: '8px', padding: '4px 8px' }}>
               <span style={{ fontSize: '10px', fontFamily: 'JetBrains Mono, monospace', color: '#64748B', textTransform: 'uppercase', fontWeight: 700, marginRight: '4px' }}>
                 Rate:
               </span>
@@ -3274,10 +3277,10 @@ export default function PosBilling({
                 step="any"
                 value={inputRate || ''}
                 placeholder="0"
-                readOnly={invoiceType !== 'return'}
-                title={invoiceType !== 'return' ? 'Rate locked — sirf CEO Edit Product / Bulk Edit Prices se badal sakta hai' : undefined}
+                readOnly={ratesLocked}
+                title={ratesLocked ? 'Rate locked — set by catalog or CEO' : 'Rate unlocked — freely editable for this sale'}
                 onFocus={(e) => e.currentTarget.select()}
-                onChange={(e) => { if (invoiceType === 'return') setInputRate(Number(e.target.value) || 0); }}
+                onChange={(e) => { if (!ratesLocked) setInputRate(Math.max(0, Number(e.target.value) || 0)); }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && e.shiftKey) {
                     // Shift+Enter = go BACKWARD to qty
@@ -3317,7 +3320,7 @@ export default function PosBilling({
                     if (e.key === 'Enter' && e.shiftKey) {
                       // Shift+Enter = go BACKWARD to rate / qty
                       e.preventDefault();
-                      const target = invoiceType === 'return' ? rateInputRef : qtyInputRef;
+                      const target = (invoiceType === 'return' || !ratesLocked) ? rateInputRef : qtyInputRef;
                       target.current?.focus();
                       target.current?.select();
                     } else if (e.key === 'Enter') {
@@ -3360,7 +3363,7 @@ export default function PosBilling({
                   if (e.key === 'Enter' && e.shiftKey) {
                     // Shift+Enter = go BACKWARD
                     e.preventDefault();
-                    const target = specialFieldEnabled ? specialRateInputRef : (invoiceType === 'return' ? rateInputRef : qtyInputRef);
+                    const target = specialFieldEnabled ? specialRateInputRef : ((invoiceType === 'return' || !ratesLocked) ? rateInputRef : qtyInputRef);
                     target.current?.focus();
                     target.current?.select();
                   } else if (e.key === 'Enter') {
@@ -3638,10 +3641,10 @@ export default function PosBilling({
                               step="any"
                               value={item.rate === 0 ? '' : item.rate}
                               placeholder="0.00"
-                              readOnly={invoiceType !== 'return'}
-                              title={invoiceType !== 'return' ? 'Rate locked' : undefined}
+                              readOnly={ratesLocked}
+                              title={ratesLocked ? 'Rate locked' : 'Click to edit unit rate'}
                               onChange={(e) => {
-                                if (invoiceType !== 'return') return;
+                                if (ratesLocked) return;
                                 const val = Math.max(0, parseFloat(e.target.value) || 0);
                                 setLineItems((prev) =>
                                   prev.map((li) => li.id === item.id ? { ...li, rate: val, specialRate: li.specialRate && li.specialRate > val ? undefined : li.specialRate } : li)
@@ -3655,8 +3658,8 @@ export default function PosBilling({
                                 color: '#1E293B',
                                 fontSize: '11px',
                                 fontWeight: 600,
-                                background: '#F8FAFC',
-                                border: '1px solid #E2E8F0',
+                                background: ratesLocked ? '#F8FAFC' : '#FFFBEB',
+                                border: `1px solid ${ratesLocked ? '#E2E8F0' : '#FDE68A'}`,
                                 borderRadius: '4px',
                                 padding: '2px 4px',
                                 outline: 'none',

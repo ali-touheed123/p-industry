@@ -27,6 +27,7 @@ interface DevBranchesViewProps {
   onEditBranch: (branch: Tenant) => void;
   onDeleteBranch: (id: string) => void;
   onToggleStatus: (id: string, currentStatus: boolean) => void;
+  onToggleRetailPriceLock?: (id: string, currentStatus: boolean) => void;
   onOpenBranchPortal: (branch: Tenant) => void;
   onAddCounterToBranch: (branch: Tenant) => void;
 }
@@ -37,6 +38,7 @@ export const DevBranchesView: React.FC<DevBranchesViewProps> = ({
   onEditBranch,
   onDeleteBranch,
   onToggleStatus,
+  onToggleRetailPriceLock,
   onOpenBranchPortal,
   onAddCounterToBranch,
 }) => {
@@ -350,6 +352,51 @@ export const DevBranchesView: React.FC<DevBranchesViewProps> = ({
                         >
                           NEG STOCK: ON
                         </span>
+                      )}
+                      {branch.lock_retail_prices === false ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleRetailPriceLock?.(branch.id, false);
+                          }}
+                          style={{
+                            fontSize: '10px',
+                            fontFamily: "'JetBrains Mono', monospace",
+                            fontWeight: 700,
+                            padding: '2px 8px',
+                            borderRadius: '9999px',
+                            backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                            color: '#f59e0b',
+                            border: '1px solid rgba(245, 158, 11, 0.35)',
+                            cursor: 'pointer',
+                          }}
+                          title="Retail rates are UNLOCKED (cashiers can edit prices). Click to Lock."
+                        >
+                          RATE: UNLOCKED
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleRetailPriceLock?.(branch.id, true);
+                          }}
+                          style={{
+                            fontSize: '10px',
+                            fontFamily: "'JetBrains Mono', monospace",
+                            fontWeight: 700,
+                            padding: '2px 8px',
+                            borderRadius: '9999px',
+                            backgroundColor: 'rgba(212, 175, 55, 0.12)',
+                            color: '#D4AF37',
+                            border: '1px solid rgba(212, 175, 55, 0.28)',
+                            cursor: 'pointer',
+                          }}
+                          title="Retail rates are LOCKED on POS. Click to Unlock."
+                        >
+                          RATE: LOCKED
+                        </button>
                       )}
                       {!branch.is_active && (
                         <span

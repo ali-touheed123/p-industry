@@ -42,6 +42,9 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
   // Stock Policy Switch: Allow selling when stock is 0 or below (negative stock)
   const [allowNegativeStock, setAllowNegativeStock] = useState<boolean>(true);
 
+  // Retail Price Policy Switch: Lock retail rates on POS billing vs Allow Cashier to edit
+  const [lockRetailPrices, setLockRetailPrices] = useState<boolean>(true);
+
   // Operational Status Switch: Active vs Suspended (Paused)
   const [isActive, setIsActive] = useState<boolean>(true);
 
@@ -70,6 +73,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
       setSelectedOwnerId(editingBranch.owner_id || '');
       setRequireCeoPass(editingBranch.require_ceo_pass !== undefined ? Boolean(editingBranch.require_ceo_pass) : true);
       setAllowNegativeStock(editingBranch.allow_negative_stock !== undefined ? Boolean(editingBranch.allow_negative_stock) : true);
+      setLockRetailPrices(editingBranch.lock_retail_prices !== undefined ? Boolean(editingBranch.lock_retail_prices) : true);
       setIsActive(editingBranch.is_active !== undefined ? Boolean(editingBranch.is_active) : true);
       setCeoUsername('');
       setCeoPassword('');
@@ -99,6 +103,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
 
       setRequireCeoPass(true);
       setAllowNegativeStock(true);
+      setLockRetailPrices(true);
       setIsActive(true);
       setCeoUsername('');
       setCeoPassword('');
@@ -182,6 +187,7 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
           owner_id: isExistingOwner ? selectedOwnerId : editingBranch?.owner_id,
           require_ceo_pass: requireCeoPass,
           allow_negative_stock: allowNegativeStock,
+          lock_retail_prices: lockRetailPrices,
           is_active: isActive,
         },
         !editingBranch
@@ -611,6 +617,74 @@ export const DevBranchModal: React.FC<DevBranchModalProps> = ({
               ) : (
                 <div>
                   🔒 <strong style={{ color: '#fbbf24' }}>Strict (Off):</strong> Sale is <strong>blocked</strong> if product stock is insufficient. Counters must wait for a purchase inward before selling.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── Retail Price Lock Policy Toggle ───────────────────────── */}
+          <div style={{
+            padding: '20px',
+            borderRadius: '16px',
+            backgroundColor: lockRetailPrices ? 'rgba(212, 175, 55, 0.05)' : 'rgba(245, 158, 11, 0.08)',
+            border: `1px solid ${lockRetailPrices ? 'rgba(212, 175, 55, 0.25)' : 'rgba(245, 158, 11, 0.35)'}`,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '14px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '36px', height: '36px', borderRadius: '10px', flexShrink: 0,
+                  backgroundColor: lockRetailPrices ? 'rgba(212, 175, 55, 0.15)' : 'rgba(245, 158, 11, 0.2)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <span style={{ fontSize: '18px' }}>{lockRetailPrices ? '🔒' : '🏷️'}</span>
+                </div>
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#f1f5f9', letterSpacing: '0.02em' }}>
+                    POS Retail Price Lock
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px' }}>
+                    <span style={{
+                      fontSize: '10px', fontFamily: "'JetBrains Mono', monospace", fontWeight: 700,
+                      padding: '2px 8px', borderRadius: '9999px',
+                      backgroundColor: lockRetailPrices ? 'rgba(212, 175, 55, 0.2)' : 'rgba(245, 158, 11, 0.25)',
+                      color: lockRetailPrices ? '#D4AF37' : '#f59e0b',
+                      border: `1px solid ${lockRetailPrices ? 'rgba(212, 175, 55, 0.4)' : 'rgba(245, 158, 11, 0.5)'}`,
+                    }}>
+                      {lockRetailPrices ? 'RATE: LOCKED (PROTECTED)' : 'RATE: UNLOCKED (EDITABLE)'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              {/* Toggle Switch */}
+              <div
+                onClick={() => setLockRetailPrices(!lockRetailPrices)}
+                style={{
+                  width: '48px', height: '26px', borderRadius: '13px', cursor: 'pointer',
+                  position: 'relative', flexShrink: 0, transition: 'background 0.2s',
+                  backgroundColor: lockRetailPrices ? 'rgba(212, 175, 55, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                  border: `1px solid ${lockRetailPrices ? 'rgba(212, 175, 55, 0.5)' : 'rgba(245, 158, 11, 0.5)'}`,
+                }}
+              >
+                <div style={{
+                  position: 'absolute', top: '3px',
+                  left: lockRetailPrices ? '24px' : '3px',
+                  width: '18px', height: '18px', borderRadius: '50%', transition: 'left 0.2s',
+                  backgroundColor: lockRetailPrices ? '#D4AF37' : '#f59e0b',
+                  boxShadow: lockRetailPrices ? '0 0 8px #D4AF37' : '0 0 8px #f59e0b',
+                }} />
+              </div>
+            </div>
+            <div style={{ fontSize: '12px', lineHeight: '1.6', color: lockRetailPrices ? '#d1d5db' : '#9ca3af' }}>
+              {lockRetailPrices ? (
+                <div>
+                  🔒 <strong style={{ color: '#D4AF37' }}>Locked (Standard):</strong> Retail price is <strong>locked</strong> on POS billing. Cashiers cannot alter unit rates — rate defaults to catalog retail price.
+                </div>
+              ) : (
+                <div>
+                  🏷️ <strong style={{ color: '#f59e0b' }}>Unlocked (Editable):</strong> Cashiers can <strong>freely edit or type any retail rate</strong> directly on the POS screen and invoice table for custom bargaining.
                 </div>
               )}
             </div>
