@@ -46,6 +46,8 @@ export interface ValidateRateOptions {
   isSpecialSale?: boolean;
   hasCeoOverride?: boolean;
   collectedHistoricalMatches?: HistoricalPriceMatch[];
+  /** When false, rate-lock validation is skipped entirely (tenant has unlocked retail prices) */
+  rateLockEnabled?: boolean;
 }
 
 export function isRateLockedInvoiceType(invoiceType?: string | null): boolean {
@@ -60,6 +62,8 @@ export async function validateLockedRates(
   existingLines: ExistingInvoiceLine[] = [],
   options?: ValidateRateOptions
 ): Promise<string | null> {
+  // If tenant has unlocked retail prices, skip all rate-lock validation
+  if (options?.rateLockEnabled === false) return null;
   if (!isRateLockedInvoiceType(invoiceType)) return null;
   if (!Array.isArray(lines) || lines.length === 0) return null;
 

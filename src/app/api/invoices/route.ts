@@ -5,7 +5,6 @@ import { requireTenantAuth } from '@/lib/session';
 import { sanitizePostgRESTLike } from '@/lib/utils';
 import { validateLockedRates, HistoricalPriceMatch } from '@/lib/rate-lock';
 import { logAuditEvent } from '@/lib/audit-logs';
-import { isPlaceholderWalkInName } from '@/utils/customerName';
 
 // GET: Fetch invoices for a tenant / branch or shift with date filtering and search
 export async function GET(req: NextRequest) {
@@ -239,16 +238,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Walk-in rule: a sale without a customer account must carry a real walk-in name
-    if (invoice_type !== 'return' && !client_id && isPlaceholderWalkInName(client_name)) {
-      return NextResponse.json(
-        { success: false, error: 'Walk-in customer ka naam zaroori hai. Customer select karein ya naam likhein.', code: 'WALK_IN_NAME_REQUIRED' },
-        { status: 400 }
-      );
-    }
-
     // 0.05 Rate lock: sale rates must match the catalog retail price (returns exempt)
     if (auth.session.role !== 'developer') {
+      const { data: tenantRateSetting } = await supabaseAdmin
+        .from('tenants')
+        .select('lock_retail_prices')
+        .eq('id', tenant_id)
+        .maybeSingle();
+      const rateLockEnabled = tenantRateSetting?.lock_retail_prices !== false;
       const rateLockError = await validateLockedRates(
         tenant_id,
         items,
@@ -260,6 +257,7 @@ export async function POST(req: NextRequest) {
           isSpecialSale: false,
           hasCeoOverride: Boolean(body.ceo_override_token || body.has_ceo_override),
           collectedHistoricalMatches: historicalMatches,
+          rateLockEnabled,
         }
       );
       if (rateLockError) {
@@ -783,7 +781,16 @@ export async function PATCH(req: NextRequest) {
         .select('item_id, item_code, unit_price')
         .eq('invoice_id', id);
       const patchInvoiceType = (existingInv as any)?.invoice_type || body.invoice_type || 'sales';
-      const rateLockError = await validateLockedRates(tenant_id, items, patchInvoiceType, existingLineRows || []);
+      const { data: tenantRateSettingPatch } = await supabaseAdmin
+        .from('tenants')
+        .select('lock_retail_prices')
+        .eq('id', tenant_id)
+        .maybeSingle();
+      const rateLockEnabledPatch = tenantRateSettingPatch?.lock_retail_prices !== false;
+      const rateLockError = await validateLockedRates(
+        tenant_id, items, patchInvoiceType, existingLineRows || [],
+        { rateLockEnabled: rateLockEnabledPatch }
+      );
       if (rateLockError) {
         return NextResponse.json({ success: false, error: rateLockError, code: 'RATE_LOCKED' }, { status: 400 });
       }
