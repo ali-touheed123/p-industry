@@ -6,6 +6,7 @@ import { printViaIframe } from '@/utils/iframePrint';
 import { buildPosThermalHtml, buildSpecialReceiptHtml } from '@/utils/receiptAdapters';
 import { ReceiptTemplate } from '@/types/receipt';
 import { Item, Client } from '@/types';
+import { rankProducts } from '@/utils/productSearch';
 import {
   Search,
   Plus,
@@ -1883,17 +1884,10 @@ export default function PosBilling({
     }
   };
 
-  // Filter products for barcode / search autocomplete
-  const filteredCatalog = liveItems.filter((p) => {
-    if (!productQuery) return false;
-    const q = productQuery.toLowerCase();
-    return (
-      p.name.toLowerCase().includes(q) ||
-      p.code.toLowerCase().includes(q) ||
-      (p.shade_code && p.shade_code.toLowerCase().includes(q)) ||
-      (p.category && p.category.toLowerCase().includes(q))
-    );
-  });
+  // Filter products for barcode / search autocomplete (Relevance-ranked & performance-capped)
+  const filteredCatalog = useMemo(() => {
+    return rankProducts(liveItems, productQuery, { limit: 40 });
+  }, [liveItems, productQuery]);
 
   // Special Save & Print: saves via /api/invoices/special and opens the browser print preview directly (no modal).
   // Receipt prints the cart `rate` (original); customer is charged the Special Rate (per unit) minus Disc %.

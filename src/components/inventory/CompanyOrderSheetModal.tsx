@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useCallback } from 'react';
 import { Item } from '@/types';
+import { rankProducts } from '@/utils/productSearch';
 import {
   X,
   Search,
@@ -237,20 +238,14 @@ export default function CompanyOrderSheetModal({
     });
   }, []);
 
-  // Filtered items based on active brand and search query
+  // Filtered items based on active brand and search query (Relevance-ranked)
   const filteredItems = useMemo(() => {
     let list = items;
     if (selectedBrand !== 'ALL') {
       list = list.filter((it) => (it.brand?.trim() || '') === selectedBrand);
     }
     if (searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      list = list.filter((it) => {
-        const c = (it.code || '').toLowerCase();
-        const n = (it.name || '').toLowerCase();
-        const s = (it.shade_code || '').toLowerCase();
-        return c.includes(q) || n.includes(q) || s.includes(q);
-      });
+      return rankProducts(list, searchQuery, { limit: 100 });
     }
     return list;
   }, [items, selectedBrand, searchQuery]);

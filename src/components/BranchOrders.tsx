@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Item, Tenant, BranchOrder } from '@/types';
+import { rankProducts } from '@/utils/productSearch';
 import { fetchWithTimeout } from '@/lib/fetchWithTimeout';
 import {
   Search,
@@ -150,21 +151,11 @@ export default function BranchOrders({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Filter products by SKU, Name, Category, Shade
+  // Filter products by SKU, Name, Category, Shade (Relevance-ranked)
   const filteredProducts = useMemo(() => {
-    const q = productSearch.trim().toLowerCase();
+    const q = productSearch.trim();
     if (!q) return items.slice(0, 50); // Show first 50 items by default
-
-    return items
-      .filter(it => {
-        const codeMatch = (it.code || '').toLowerCase().includes(q);
-        const nameMatch = (it.name || '').toLowerCase().includes(q);
-        const catMatch = (it.category || '').toLowerCase().includes(q);
-        const shadeMatch = (it.shade_code || '').toLowerCase().includes(q);
-        const packMatch = (it.pack_size || '').toLowerCase().includes(q);
-        return codeMatch || nameMatch || catMatch || shadeMatch || packMatch;
-      })
-      .slice(0, 60);
+    return rankProducts(items, q, { limit: 60 });
   }, [items, productSearch]);
 
   // Add Item to Order Cart (unconstrained by local stock — allows requisitioning when local stock is 0)

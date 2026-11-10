@@ -1,8 +1,9 @@
 'use client';
 import { karachiToday } from '@/lib/karachiDate';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Item, Supplier } from '@/types';
+import { rankProducts } from '@/utils/productSearch';
 import { fetchWithTimeout, isNetworkOrTimeoutError } from '@/lib/fetchWithTimeout';
 import {
   Search,
@@ -666,16 +667,9 @@ export default function PurchasesView({
       (s.city && s.city.toLowerCase().includes(supplierQuery.toLowerCase()))
   );
 
-  const filteredProducts = liveCatalogItems.filter((p) => {
-    if (!productQuery) return false;
-    const q = productQuery.toLowerCase();
-    return (
-      p.name.toLowerCase().includes(q) ||
-      p.code.toLowerCase().includes(q) ||
-      (p.shade_code && p.shade_code.toLowerCase().includes(q)) ||
-      (p.category && p.category.toLowerCase().includes(q))
-    );
-  });
+  const filteredProducts = useMemo(() => {
+    return rankProducts(liveCatalogItems, productQuery, { limit: 40 });
+  }, [liveCatalogItems, productQuery]);
 
   return (
     <section style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', background: '#F1F5F9', color: '#0F172A', userSelect: 'none', position: 'relative', overflow: 'hidden' }}>
