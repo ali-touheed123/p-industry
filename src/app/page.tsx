@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Script from 'next/script';
 import LandingApp from '@/components/landing/LandingApp';
 
 export const metadata: Metadata = {
@@ -34,5 +35,24 @@ export const metadata: Metadata = {
 };
 
 export default function RootHomePage() {
-  return <LandingApp />;
+  return (
+    <>
+      <Script
+        src="https://www.googletagmanager.com/gtm.js?id=GTM-KGLX7DF3"
+        strategy="afterInteractive"
+      />
+      <Script
+        id="gtm-init"
+        strategy="afterInteractive"
+        dangerouslySetInnerHTML={{
+          __html: `
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+          `,
+        }}
+      />
+      <LandingApp />
+    </>
+  );
 }
